@@ -1275,6 +1275,13 @@ export class BoardController {
         if (typeof window.Sortable === 'undefined') return;
         const animation = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 160;
         const dragOptions = {
+            // Native Chromium drags can get stuck across the entire VS Code window.
+            // Keep webview drags in Sortable's pointer mode, outside lane clipping.
+            ...(window.__viberails_VSCODE__ ? {
+                forceFallback: true,
+                fallbackTolerance: 4,
+                fallbackOnBody: true
+            } : {}),
             filter: () => Boolean(this._boardDropPending),
             onChoose: () => this.beginBoardDrag(),
             onUnchoose: () => queueMicrotask(() => {

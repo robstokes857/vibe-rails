@@ -3669,6 +3669,7 @@
                 }
 
                 /* A tile run by the board manager names it in the foot, like a card's own manager. */
+                .sortable-fallback .board-card-foot .board-manager-chip.is-board-manager i,
                 .board-view .board-card-foot .board-manager-chip.is-board-manager i {
                     width: 18px;
                     text-align: center;
@@ -3864,6 +3865,9 @@
                     height: auto;
                 }
 
+                /* Pointer-drag clones live under body. Share the Board's existing
+                   lane/card styles with those clones and their contents. */
+                .board-lane.sortable-fallback,
                 .board-view .board-lane {
                     position: relative;
                     display: flex;
@@ -3879,6 +3883,7 @@
                     background: var(--color-bg-surface, #1e1e1e);
                 }
 
+                .board-lane.sortable-fallback::before,
                 .board-view .board-lane::before {
                     content: "";
                     position: absolute;
@@ -3890,21 +3895,26 @@
                     background: var(--lane-color, var(--color-primary, #3b82f6));
                 }
 
+                .board-lane.sortable-fallback.is-drop-target,
                 .board-view .board-lane.is-drop-target {
                     border-color: var(--color-primary, #3b82f6);
                     background: color-mix(in srgb, var(--color-primary, #3b82f6) 8%, var(--color-bg-surface, #1e1e1e));
                 }
 
+                .board-lane.sortable-fallback > [hidden],
                 .board-view .board-lane > [hidden],
+                .board-lane.sortable-fallback.is-collapsed > .board-lane-agents-button,
                 .board-view .board-lane.is-collapsed > .board-lane-agents-button {
                     display: none;
                 }
 
+                .board-lane.sortable-fallback.is-collapsed,
                 .board-view .board-lane.is-collapsed {
                     flex: 0 0 52px;
                     min-width: 52px;
                 }
 
+                .sortable-fallback .board-lane-restore,
                 .board-view .board-lane-restore {
                     display: flex;
                     flex: 1;
@@ -3921,17 +3931,21 @@
                     cursor: pointer;
                 }
 
+                .sortable-fallback .board-lane-restore:hover,
                 .board-view .board-lane-restore:hover {
                     color: var(--color-text, #f8fafc);
                     background: var(--color-bg-surface-hover, #2c2c2c);
                 }
 
+                .sortable-fallback .board-lane-restore:focus-visible,
                 .board-view .board-lane-restore:focus-visible,
+                .sortable-fallback .board-icon-btn:focus-visible,
                 .board-view .board-icon-btn:focus-visible {
                     outline: 2px solid var(--color-primary, #3b82f6);
                     outline-offset: -2px;
                 }
 
+                .sortable-fallback .board-lane-restore-name,
                 .board-view .board-lane-restore-name {
                     writing-mode: vertical-rl;
                     min-height: 0;
@@ -3944,6 +3958,7 @@
                 }
 
 
+                .sortable-fallback .board-lane-head,
                 .board-view .board-lane-head {
                     display: flex;
                     align-items: center;
@@ -3951,7 +3966,9 @@
                     padding: 0.7rem 0.5rem 0.45rem 0.55rem;
                 }
 
+                .sortable-fallback .board-lane-grip,
                 .board-view .board-lane-grip,
+                .sortable-fallback .board-icon-btn,
                 .board-view .board-icon-btn {
                     display: inline-flex;
                     align-items: center;
@@ -3968,16 +3985,20 @@
                     cursor: pointer;
                 }
 
+                .sortable-fallback .board-lane-grip,
                 .board-view .board-lane-grip {
                     cursor: grab;
                 }
 
+                .sortable-fallback .board-lane-grip:hover,
                 .board-view .board-lane-grip:hover,
+                .sortable-fallback .board-icon-btn:hover,
                 .board-view .board-icon-btn:hover {
                     color: var(--color-text, #f8fafc);
                     background: var(--color-bg-surface-hover, #2c2c2c);
                 }
 
+                .sortable-fallback .board-lane-title,
                 .board-view .board-lane-title {
                     flex: 1;
                     min-width: 0;
@@ -3991,6 +4012,7 @@
                     white-space: nowrap;
                 }
 
+                .sortable-fallback .board-card-count,
                 .board-view .board-card-count {
                     flex: none;
                     padding: 1px 7px;
@@ -4001,6 +4023,7 @@
                     font-size: 0.7rem;
                 }
 
+                .sortable-fallback .board-lane-list,
                 .board-view .board-lane-list {
                     display: flex;
                     flex-direction: column;
@@ -4011,10 +4034,12 @@
                     padding: 0.25rem 0.25rem 0.5rem;
                 }
 
+                .sortable-fallback .board-lane-list > *,
                 .board-view .board-lane-list > * {
                     flex-shrink: 0;
                 }
 
+                .sortable-fallback .board-lane-empty,
                 .board-view .board-lane-empty {
                     margin: 0;
                     padding: 1rem 0.7rem;
@@ -4057,6 +4082,8 @@
                 }
 
                 /* Cards --------------------------------------------------- */
+                .board-card.sortable-fallback,
+                .sortable-fallback .board-card,
                 .board-view .board-card {
                     display: grid;
                     grid-template-columns: 3px 1fr;
@@ -4069,25 +4096,39 @@
                     user-select: none;
                 }
 
+                .sortable-fallback .board-card-pin,
                 .board-view .board-card-pin { opacity: .55; flex-shrink: 0; margin-left: auto; }
+                .sortable-fallback .board-card-pin:hover,
                 .board-view .board-card-pin:hover,
+                .sortable-fallback .board-card-pin:focus-visible,
                 .board-view .board-card-pin:focus-visible,
+                .sortable-fallback .board-card-pin.is-pinned,
                 .board-view .board-card-pin.is-pinned { opacity: 1; color: var(--color-primary, #3b82f6); }
 
+                .board-card.sortable-fallback:hover,
+                .sortable-fallback .board-card:hover,
                 .board-view .board-card:hover,
+                .board-card.sortable-fallback:focus-visible,
+                .sortable-fallback .board-card:focus-visible,
                 .board-view .board-card:focus-visible {
                     border-color: color-mix(in srgb, var(--color-primary, #3b82f6) 45%, var(--color-border, #334155));
                     background: var(--color-bg-surface-hover, #2c2c2c);
                 }
 
+                .board-card.sortable-fallback.is-ghost,
+                .sortable-fallback .board-card.is-ghost,
                 .board-view .board-card.is-ghost {
                     opacity: 0.35;
                 }
 
+                .board-card.sortable-fallback.is-dragging,
+                .sortable-fallback .board-card.is-dragging,
                 .board-view .board-card.is-dragging {
                     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
                 }
 
+                .board-card.sortable-fallback.is-blocked,
+                .sortable-fallback .board-card.is-blocked,
                 .board-view .board-card.is-blocked {
                     background-image: repeating-linear-gradient(-55deg,
                             transparent,
@@ -4100,6 +4141,8 @@
                    background layers — the card's own surface on the padding box, a repeating
                    diagonal gradient on the border box showing through a transparent 2px border.
                    A 28px tile is one dash+gap (20px) along a -45° axis, so the loop is seamless. */
+                .board-card.sortable-fallback.is-live,
+                .sortable-fallback .board-card.is-live,
                 .board-view .board-card.is-live {
                     border: 2px solid transparent;
                     background:
@@ -4109,7 +4152,11 @@
                     animation: board-march 1s linear infinite;
                 }
 
+                .board-card.sortable-fallback.is-live:hover,
+                .sortable-fallback .board-card.is-live:hover,
                 .board-view .board-card.is-live:hover,
+                .board-card.sortable-fallback.is-live:focus-visible,
+                .sortable-fallback .board-card.is-live:focus-visible,
                 .board-view .board-card.is-live:focus-visible {
                     border-color: transparent;
                     background:
@@ -4118,6 +4165,8 @@
                     background-size: auto, 28px 28px;
                 }
 
+                .board-card.sortable-fallback.is-desktop-live,
+                .sortable-fallback .board-card.is-desktop-live,
                 .board-view .board-card.is-desktop-live {
                     --board-live-color: #a855f7;
                 }
@@ -4128,18 +4177,26 @@
                 }
 
                 @media (prefers-reduced-motion: reduce) {
+                    .board-card.sortable-fallback.is-live,
+                    .sortable-fallback .board-card.is-live,
                     .board-view .board-card.is-live { animation: none; }
                 }
 
+                .board-card.sortable-fallback.is-flagged,
+                .sortable-fallback .board-card.is-flagged,
                 .board-view .board-card.is-flagged {
                     background: color-mix(in srgb, #ef4444 20%, var(--color-bg-elevated, #1e293b));
                     border-color: #ef4444;
                 }
+                .board-card.sortable-fallback.is-flagged:hover,
+                .sortable-fallback .board-card.is-flagged:hover,
                 .board-view .board-card.is-flagged:hover {
                     background: color-mix(in srgb, #ef4444 28%, var(--color-bg-elevated, #1e293b));
                 }
+                .sortable-fallback .board-attention-flag,
                 .board-view .board-attention-flag { color: #ef4444; margin-right: 0.25rem; }
 
+                .sortable-fallback .board-agent-mark,
                 .board-view .board-agent-mark {
                     color: #38bdf8;
                     margin-right: 0.3rem;
@@ -4150,18 +4207,21 @@
                 /* Keep a permanent ghost beside a clipped animation stage. The stage has room
                    for the larger runner's bob and glow without bleeding into the card title,
                    permanent marker or pin. Every 14s it scoots across as the key fades out. */
+                .sortable-fallback .board-key.has-ghost,
                 .board-view .board-key.has-ghost {
                     display: inline-flex;
                     align-items: center;
                     gap: 0.4rem;
                 }
 
+                .sortable-fallback .board-ghost-mark,
                 .board-view .board-ghost-mark {
                     flex: none;
                     color: var(--color-text, #e2e8f0);
                     font-size: 1rem;
                 }
 
+                .sortable-fallback .board-ghost-stage,
                 .board-view .board-ghost-stage {
                     position: relative;
                     display: grid;
@@ -4173,6 +4233,7 @@
                     isolation: isolate;
                 }
 
+                .sortable-fallback .board-key.has-ghost .board-key-label,
                 .board-view .board-key.has-ghost .board-key-label {
                     min-width: 0;
                     max-width: 100%;
@@ -4181,6 +4242,7 @@
                     animation: board-ghost-key 14s ease-in-out infinite;
                 }
 
+                .sortable-fallback .board-ghost-runner,
                 .board-view .board-ghost-runner {
                     position: absolute;
                     top: 50%;
@@ -4194,6 +4256,7 @@
                     animation: board-ghost-run 14s linear infinite;
                 }
 
+                .sortable-fallback .board-ghost-runner i,
                 .board-view .board-ghost-runner i {
                     display: inline-block;
                     animation: board-ghost-bob 0.55s ease-in-out infinite alternate;
@@ -4220,23 +4283,32 @@
 
                 /* Without motion the key and permanent ghost stay put; no duplicate runner. */
                 @media (prefers-reduced-motion: reduce) {
+                    .sortable-fallback .board-key.has-ghost .board-key-label,
                     .board-view .board-key.has-ghost .board-key-label,
+                    .sortable-fallback .board-ghost-runner i,
                     .board-view .board-ghost-runner i { animation: none; }
+                    .sortable-fallback .board-ghost-runner,
                     .board-view .board-ghost-runner {
                         display: none;
                         animation: none;
                     }
                 }
 
+                .sortable-fallback .board-card-rail,
                 .board-view .board-card-rail {
                     background: var(--color-primary, #3b82f6);
                 }
 
+                .sortable-fallback .board-card-rail[data-priority="critical"],
                 .board-view .board-card-rail[data-priority="critical"] { background: var(--color-danger, #ef4444); }
+                .sortable-fallback .board-card-rail[data-priority="high"],
                 .board-view .board-card-rail[data-priority="high"] { background: var(--color-warning, #f59e0b); }
+                .sortable-fallback .board-card-rail[data-priority="medium"],
                 .board-view .board-card-rail[data-priority="medium"] { background: var(--color-primary, #3b82f6); }
+                .sortable-fallback .board-card-rail[data-priority="low"],
                 .board-view .board-card-rail[data-priority="low"] { background: var(--color-secondary, #64748b); }
 
+                .sortable-fallback .board-card-body,
                 .board-view .board-card-body {
                     display: flex;
                     flex-direction: column;
@@ -4244,6 +4316,7 @@
                     padding: 0.8rem 0.85rem 0.75rem;
                 }
 
+                .sortable-fallback .board-card-top,
                 .board-view .board-card-top {
                     display: flex;
                     align-items: center;
@@ -4252,6 +4325,7 @@
                     margin-bottom: 0.35rem;
                 }
 
+                .sortable-fallback .board-key,
                 .board-view .board-key {
                     color: var(--color-text-muted, #94a3b8);
                     font-family: 'JetBrains Mono', 'Fira Code', monospace;
@@ -4263,10 +4337,12 @@
                     text-overflow: ellipsis;
                 }
 
+                .sortable-fallback .board-card-origin,
                 .board-view .board-card-origin {
                     margin-bottom: 0.35rem;
                 }
 
+                .sortable-fallback .board-card-origin .badge,
                 .board-view .board-card-origin .badge {
                     max-width: 100%;
                     font-size: 0.68rem;
@@ -4277,6 +4353,7 @@
                     vertical-align: top;
                 }
 
+                .sortable-fallback .board-card-title,
                 .board-view .board-card-title {
                     margin: 0 0 0.35rem;
                     color: var(--color-text, #f8fafc);
@@ -4286,6 +4363,7 @@
                     letter-spacing: -0.01em;
                 }
 
+                .sortable-fallback .board-card-badges,
                 .board-view .board-card-badges {
                     display: inline-flex;
                     flex: 1;
@@ -4296,6 +4374,7 @@
                     max-width: 100%;
                 }
 
+                .sortable-fallback .board-type-chip,
                 .board-view .board-type-chip {
                     display: inline-block;
                     flex-shrink: 0;
@@ -4309,8 +4388,10 @@
                     white-space: nowrap;
                 }
 
+                .sortable-fallback .board-type-chip[data-type="bug"],
                 .board-view .board-type-chip[data-type="bug"] { color: var(--tone-danger-fg); background: var(--tone-danger-bg); border-color: var(--tone-danger-bg); }
 
+                .sortable-fallback .board-workflow-chip,
                 .board-view .board-workflow-chip {
                     display: inline-flex;
                     align-items: center;
@@ -4323,6 +4404,7 @@
                     white-space: nowrap;
                 }
 
+                .sortable-fallback .board-priority-chip,
                 .board-view .board-priority-chip {
                     flex-shrink: 0;
                     white-space: nowrap;
@@ -4336,11 +4418,15 @@
                     border: 1px solid var(--color-border, #334155);
                 }
 
+                .sortable-fallback .board-priority-chip[data-priority="critical"],
                 .board-view .board-priority-chip[data-priority="critical"] { color: #fb7185; border-color: color-mix(in srgb, #fb7185 45%, transparent); }
+                .sortable-fallback .board-priority-chip[data-priority="high"],
                 .board-view .board-priority-chip[data-priority="high"] { color: #f59e0b; border-color: color-mix(in srgb, #f59e0b 45%, transparent); }
+                .sortable-fallback .board-priority-chip[data-priority="low"],
                 .board-view .board-priority-chip[data-priority="low"] { color: #5bc98a; border-color: color-mix(in srgb, #5bc98a 45%, transparent); }
 
                 /* One-line description preview under the title. */
+                .sortable-fallback .board-card-excerpt,
                 .board-view .board-card-excerpt {
                     margin: 0 0 0.45rem;
                     color: var(--color-text-muted, #94a3b8);
@@ -4351,6 +4437,7 @@
                     white-space: nowrap;
                 }
 
+                .sortable-fallback .board-card-comments,
                 .board-view .board-card-comments {
                     display: inline-flex;
                     align-items: center;
@@ -4365,6 +4452,7 @@
                    narrow for both, the assignee NAME ellipsizes (its title holds the full name);
                    the action keeps its full label. Wrapping and stacking were both tried and both
                    put the two controls at different heights from card to card. */
+                .sortable-fallback .board-card-foot,
                 .board-view .board-card-foot {
                     display: flex;
                     flex-direction: column;
@@ -4375,6 +4463,7 @@
                     border-top: 1px solid color-mix(in srgb, var(--color-border, #334155) 60%, transparent);
                 }
 
+                .sortable-fallback .board-card-controls,
                 .board-view .board-card-controls {
                     display: flex;
                     flex-wrap: nowrap;
@@ -4384,6 +4473,7 @@
                     min-width: 0;
                 }
 
+                .sortable-fallback .board-card-start-work,
                 .board-view .board-card-start-work {
                     display: inline-flex;
                     flex: none;
@@ -4395,6 +4485,7 @@
                 }
 
                 /* The chip shrinks before the action does; only its name gives way. */
+                .sortable-fallback .board-card-controls .board-assignee-chip,
                 .board-view .board-card-controls .board-assignee-chip {
                     flex: 0 1 auto;
                     min-width: 0;
@@ -4441,6 +4532,7 @@
                     white-space: nowrap;
                 }
 
+                .sortable-fallback .board-card-meta,
                 .board-view .board-card-meta {
                     display: flex;
                     flex-wrap: wrap;
@@ -4449,6 +4541,7 @@
                     margin-top: auto;
                 }
 
+                .sortable-fallback .board-card-aside,
                 .board-view .board-card-aside {
                     display: flex;
                     align-items: center;
@@ -4457,6 +4550,7 @@
                     margin-left: auto;
                 }
 
+                .sortable-fallback .board-blocked,
                 .board-view .board-blocked {
                     color: var(--color-warning, #f59e0b);
                     font-size: 0.75rem;

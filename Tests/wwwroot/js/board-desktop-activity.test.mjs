@@ -90,5 +90,5 @@ test('desktop border uses the existing animation and reduced-motion rule with a 
     assert.match(source, /\.board-view \.board-card\.is-desktop-live\s*\{\s*--board-live-color: #a855f7;/);
     assert.match(source, /\.board-desktop-active\s*\{\s*color: #a855f7;/);
     assert.match(source, /repeating-linear-gradient\(-45deg, var\(--board-live-color, #06b6d4\)/);
-    assert.match(source, /prefers-reduced-motion: reduce\) \{\s*\.board-view \.board-card\.is-live \{ animation: none; \}/);
+    assert.match(source, /prefers-reduced-motion: reduce\) \{[^{}]*\.board-view \.board-card\.is-live \{ animation: none; \}/);
 });

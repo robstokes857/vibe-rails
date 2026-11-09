@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BoardController } from '../../../VibeRails/wwwroot/js/modules/board-controller.js';
 
-function harness(t) {
+function harness(t, vscode) {
     const originalWindow = globalThis.window;
     const options = [];
     globalThis.window = {
+        ...(vscode === undefined ? {} : { __viberails_VSCODE__: vscode }),
         matchMedia: () => ({ matches: false }),
         Sortable: { create: (_, value) => { options.push(value); return { destroy() {} }; } }
     };
@@ -16,6 +17,28 @@ function harness(t) {
     controller.queryAll = () => [{ hidden: false }];
     controller.bindDragAndDrop();
     return { controller, options };
+}
+
+test('VS Code cards and lanes use pointer fallback outside the scrolling lane', t => {
+    const { options } = harness(t, true);
+    assert.equal(options.length, 2);
+    for (const option of options) {
+        assert.equal(option.forceFallback, true);
+        assert.equal(option.fallbackOnBody, true);
+        assert.equal(option.fallbackTolerance, 4);
+    }
+});
+
+for (const vscode of [undefined, false]) {
+    test(`browser cards and lanes keep native drag (VS Code flag: ${vscode})`, t => {
+        const { options } = harness(t, vscode);
+        assert.equal(options.length, 2);
+        for (const option of options) {
+            assert.equal(option.forceFallback, undefined);
+            assert.equal(option.fallbackOnBody, undefined);
+            assert.equal(option.fallbackTolerance, undefined);
+        }
+    });
 }
 
 test('card and lane selection both suspend snapshots before drag start', async t => {

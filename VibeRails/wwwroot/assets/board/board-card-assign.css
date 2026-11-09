@@ -2,6 +2,7 @@
 
 /* The whole assignee chip is the menu button, assigned or not; keep the chip look, drop the
    button chrome. It never filters the board. */
+.sortable-fallback button.board-assignee-chip,
 .board-view button.board-assignee-chip {
     border: 1px solid transparent;
     font: inherit;
@@ -10,11 +11,14 @@
     line-height: inherit;
     cursor: pointer;
 }
+.sortable-fallback button.board-assignee-chip.is-empty,
 .board-view button.board-assignee-chip.is-empty {
     border: 1px dashed color-mix(in srgb, var(--color-text-muted, #94a3b8) 55%, transparent);
     font-weight: inherit;
 }
+.sortable-fallback button.board-assignee-chip:hover,
 .board-view button.board-assignee-chip:hover,
+.sortable-fallback button.board-assignee-chip[aria-expanded="true"],
 .board-view button.board-assignee-chip[aria-expanded="true"] {
     border-style: solid;
     border-color: var(--color-primary, #3b82f6);
@@ -22,6 +26,7 @@
 }
 .board-assign-caret-mark { flex: none; font-size: 0.6rem; opacity: 0.7; }
 
+.sortable-fallback button.board-assignee-chip:focus-visible,
 .board-view button.board-assignee-chip:focus-visible,
 .board-assign-panel button:focus-visible,
 .board-assign-panel input:focus-visible {

@@ -704,6 +704,14 @@ The view uses the app's shared surfaces rather than its own: `app.showModal` (up
 for every delete, and `app.showToast` for results. It owns no toast stack, no Bootstrap modal, and
 no theme toggle. Drag and drop is the globally loaded Sortable; `unload()` destroys those
 instances, because they attach document-level listeners that outlive the view's DOM.
+When `window.__viberails_VSCODE__` is set, both card and lane Sortables use
+`forceFallback: true`, `fallbackTolerance: 4` and `fallbackOnBody: true`. This keeps
+drags out of Chromium's native drag session (which can get stuck window-wide), tolerates
+small click movements and keeps the dragged clone outside scrolling-lane clipping.
+Ordinary browsers retain native dragging. Preserve lane autoscroll, Done pagination,
+card opening and multi-select behavior when changing these options.
+Card/lane CSS must also match body-mounted `.sortable-fallback` clones and their
+contents; keep their appearance shared with the originals, not a separate preview theme.
 From selection through drop completion, defer lane replacement, cancel pending
 pagination and suppress new scroll pages so refreshes cannot detach the active drag nodes.
 An unchosen click without a drag must also release the guard. Cover both lifecycle races

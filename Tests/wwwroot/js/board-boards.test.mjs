@@ -80,7 +80,7 @@ test('a card with a live session marches its border and shows a larger dot', () 
     assert.match(css, /@keyframes board-march \{[\s\S]*to \{ background-position: 0 0, 28px 0; \}/);
     assert.match(rule(css, '.board-live-dot'), /width:\s*12px/);
     // Reduced motion switches both animations off.
-    assert.match(css, /prefers-reduced-motion: reduce\) \{\s*\.board-view \.board-card\.is-live \{ animation: none; \}/);
+    assert.match(css, /prefers-reduced-motion: reduce\) \{[^{}]*\.board-view \.board-card\.is-live \{ animation: none; \}/);
 });
 
 test('image previews use tracked object URLs supported by the VS Code webview CSP', () => {

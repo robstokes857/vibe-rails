@@ -1,4 +1,5 @@
 /* Lane controls straddle the existing .6rem gutter; they consume no board width. */
+.sortable-fallback .board-lane-agents-button,
 .board-view .board-lane-agents-button {
     position: absolute;
     top: -11px;
@@ -18,12 +19,15 @@
     cursor: pointer;
 }
 
+.sortable-fallback .board-lane-agents-button:hover,
 .board-view .board-lane-agents-button:hover,
+.sortable-fallback .board-lane-agents-button[aria-expanded="true"],
 .board-view .board-lane-agents-button[aria-expanded="true"] {
     border-color: var(--color-primary, #3b82f6);
     background: var(--color-bg-surface-hover, #2c2c2c);
 }
 
+.sortable-fallback .board-lane-agents-button.is-running,
 .board-view .board-lane-agents-button.is-running {
     border-color: var(--color-primary, #3b82f6);
     color: var(--color-primary, #3b82f6);
@@ -91,9 +95,13 @@
     font: 10px/14px system-ui, sans-serif;
 }
 
+.board-lane.sortable-fallback:has(.board-lane-agents-button) .board-lane-head,
 .board-view .board-lane:has(.board-lane-agents-button) .board-lane-head { padding-left: 22px; }
+.board-lane.sortable-fallback:first-child .board-lane-agents-button,
 .board-view .board-lane:first-child .board-lane-agents-button { left: 20px; }
+.board-lane.sortable-fallback:first-child .board-lane-head,
 .board-view .board-lane:first-child .board-lane-head { padding-left: 48px; }
+.board-lane.sortable-fallback:not(:last-child) .board-lane-head,
 .board-view .board-lane:not(:last-child) .board-lane-head { padding-right: 22px; }
 
 .board-lane-agents-panel {

@@ -186,7 +186,8 @@ For an interactive loop, open `vscode-viberails/` in VS Code and press **F5** to
 `npm run test:board-drag` runs the production Board in an isolated VS Code Development Host
 with synthetic API data and no backend. Install `UITests` dependencies first; the harness uses
 its Playwright CDP connection but sends raw mouse events, without native-drag interception.
-It checks an ordinary drag, a lane repaint during dragging, and the next drag. The original
+It checks a pointer-mode drag, a lane repaint during dragging, the next drag, and that no
+native `dragstart` fires in the webview. The original
 bug destroyed Sortable's active element during repaint, then threw from `_onDrop` without
 saving the move. Artifacts go to `.vscode-test/board-drag-*.json` and `.png`.
 `VIBERAILS_VSCODE_CLI` may select a standalone VS Code executable when the installed editor is

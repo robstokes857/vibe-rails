@@ -73,7 +73,7 @@ async function drag(cdp: CDPSession, from: {x:number;y:number}, to: {x:number;y:
 }
 
 suite('Board dragging in a debugged VS Code webview', () => {
-    test('keeps native dragging intact during a lane repaint with real mouse input', async function () {
+    test('keeps pointer dragging intact during a lane repaint with real mouse input', async function () {
         const port = Number(process.env.VIBERAILS_DRAG_CDP_PORT);
         if (!port) { this.skip(); return; }
         this.timeout(180000);
@@ -174,7 +174,7 @@ suite('Board dragging in a debugged VS Code webview', () => {
                             window.__boardDragProbe.repaintPreserved=Boolean(item?.isConnected);
                         })()`);
                 } : undefined);
-                const result = await frame.evaluate<{ moves: unknown[]; lane: string; dragging: boolean; activeSortable: boolean; ghostCount: number; errors: string[]; repaintPreserved?: boolean }>(`JSON.parse(JSON.stringify({
+                const result = await frame.evaluate<{ moves: unknown[]; lane: string; dragging: boolean; activeSortable: boolean; ghostCount: number; errors: string[]; events: { name: string }[]; repaintPreserved?: boolean }>(`JSON.parse(JSON.stringify({
                     ...window.__boardDragProbe,
                     dragging:Boolean(window.app.boardController._boardDragging),
                     activeSortable:Boolean(window.Sortable.active),
@@ -192,6 +192,8 @@ suite('Board dragging in a debugged VS Code webview', () => {
                     assert.equal(result.activeSortable,false);
                     assert.equal(result.ghostCount,0);
                     assert.deepEqual(result.errors,[]);
+                    assert.equal(result.events.some(event => event.name === 'dragstart'),false,
+                        'The VS Code Board must not open a native drag session.');
                     if (repaint) assert.equal(result.repaintPreserved,true);
                 } else if (repaint) {
                     assert.deepEqual(result.moves,[]);
@@ -211,6 +213,8 @@ suite('Board dragging in a debugged VS Code webview', () => {
                 console.log(`VS Code raw mouse ${label} second drag: ${retryMoves} total moves`);
                 fs.writeFileSync(path.join(artifactRoot, `board-drag-${label}.json`),JSON.stringify({...result,retryMoves},null,2));
                 if (mode !== 'baseline' || !repaint) assert.equal(retryMoves,2);
+                if (mode !== 'baseline') assert.equal(
+                    await frame.evaluate('window.__boardDragProbe.events.some(event => event.name === "dragstart")'), false);
                 await cdp.detach();
                 panel.dispose();
                 await pause(100);
