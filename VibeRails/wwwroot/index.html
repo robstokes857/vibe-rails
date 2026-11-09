@@ -61,7 +61,7 @@
     <nav class="app-subnav sticky-top">
         <div class="app-subnav-brand d-flex align-items-center">
             <button type="button" class="navbar-brand-sm animate-fade-up d-flex align-items-center gap-2">
-                <img src="assets/img/logo.png" alt="Vibe Rails logo" class="brand-logo-sm" width="48" height="48">
+                <img src="assets/img/logo.png" alt="Vibe Rails logo" class="brand-logo-sm" width="36" height="36">
                 <span class="brand-text-sm">Vibe Rails</span>
             </button>
         </div>
@@ -80,7 +80,7 @@
             <button class="app-subnav-link" data-action="navigate" data-view="code-quality"
                 title="Code quality and repository map">
                 <i class="fa-solid fa-chart-line me-1"></i>
-                <span>QUALITY</span>
+                <span>Quality</span>
             </button>
             <button class="app-subnav-link" data-action="navigate-home"
                 title="Rules and Git Guard">
@@ -396,14 +396,14 @@
                             <p>Choose a rule file to manage the rules for its folder and subfolders.</p>
                         </div>
                         <div class="project-health-card-actions">
-                            <button class="btn btn-sm btn-outline-secondary" type="button"
+                            <button class="btn btn-sm btn-secondary" type="button"
                                 data-rule-manager-refresh title="Reload rule files">
                                 <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
                                 Refresh
                             </button>
                             <button class="btn btn-sm btn-primary" type="button" data-rule-manager-create>
                                 <i class="fa-solid fa-plus" aria-hidden="true"></i>
-                                New rule file
+                                Create rule file
                             </button>
                         </div>
                     </header>
@@ -595,7 +595,7 @@
                         <span class="rules-section-note">The vc.rules.md policies every check enforces</span>
                     </div>
                     <div class="rules-section-actions">
-                        <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
+                        <button class="btn btn-sm btn-secondary rules-icon-btn" type="button"
                             data-action="refresh-agent-files" title="Reload rule files"
                             aria-label="Reload rule files">
                             <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
@@ -603,7 +603,7 @@
                         <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
                             type="button" data-action="create-agent-file" title="Create a new vc.rules.md file">
                             <i class="fa-solid fa-plus" aria-hidden="true"></i>
-                            New vc.rules.md
+                            Create vc.rules.md
                         </button>
                     </div>
                 </header>
@@ -659,7 +659,7 @@
                             <i class="fa-solid fa-check" aria-hidden="true"></i> Validate rules
                         </button>
                         <button class="btn btn-sm btn-primary" type="button" data-agent-action="add-rule">
-                            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add rule
+                            <i class="fa-solid fa-plus" aria-hidden="true"></i> Create rule
                         </button>
                     </div>
                 </div>
@@ -706,7 +706,7 @@
 
             <div class="row">
                 <div class="col-12">
-                    <h2 class="mb-4">Create New Rule File</h2>
+                    <h2 class="mb-4">Create rule file</h2>
                 </div>
             </div>
 
@@ -2785,7 +2785,7 @@
                             <input data-vra-topk type="number" min="1" max="50" value="10" title="Top K per strategy">
                         </div>
                         <button class="insp-run" data-vra-search type="button">Search&nbsp;<span class="arrow">→</span></button>
-                        <button class="insp-refresh" data-vra-refresh type="button" title="Refresh corpus stats and recent captures">↻ Refresh</button>
+                        <button class="btn btn-sm btn-secondary" data-vra-refresh type="button" title="Refresh corpus stats and recent captures">↻ Refresh</button>
                     </div>
                     <div class="insp-query-stats" data-vra-query-stats>
                         <span class="stat">awaiting query · type to search</span>
@@ -3190,7 +3190,7 @@
                         </div>
                         <div class="pr-card-actions align-items-center">
                             <span class="pr-muted" data-pr-updated role="status" aria-live="polite"></span>
-                            <button type="button" class="btn btn-sm btn-outline-secondary" data-pr-refresh>
+                            <button type="button" class="btn btn-sm btn-secondary" data-pr-refresh>
                                 <i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh</button>
                         </div>
                     </div>
@@ -3649,7 +3649,7 @@
                     .board-view .board-ai-manager-dot { animation: none; }
                 }
 
-                /* Narrow boards: the chip takes its own header row (New card stays beside the
+                /* Narrow boards: the chip takes its own header row (Create card stays beside the
                    title), and below 640px the counts move to the tooltip. */
                 @media (max-width: 860px) {
                     .board-view .board-head-actions:has(> .board-ai-manager:not([hidden])) { display: contents; }
@@ -5776,7 +5776,7 @@
                     <div class="board-picker" data-board-picker>
                         <select class="form-select board-picker-select" data-board-select aria-label="Board" title="Switch board"></select>
                         <button type="button" class="btn btn-sm btn-outline-primary board-picker-add" data-board-action="new-board"
-                            title="New board" aria-label="New board">
+                            title="Create board" aria-label="Create board">
                             <i class="fa-solid fa-plus" aria-hidden="true"></i>
                         </button>
                         <button type="button" class="board-icon-btn" data-board-action="edit-board" title="Board settings" aria-label="Board settings">
@@ -5794,7 +5794,7 @@
                         <div class="board-ai-manager" data-board-ai-manager aria-live="polite" hidden></div>
                         <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" data-board-action="new-card">
                             <i class="fa-solid fa-plus" aria-hidden="true"></i>
-                            <span>New card</span>
+                            <span>Create card</span>
                         </button>
                     </div>
                 </header>
@@ -5869,7 +5869,7 @@
             </section>
             <div class="board-canvas" data-board-canvas>
                 <div class="board-lanes" data-board-lanes></div>
-                <button type="button" class="board-add-lane" data-board-action="add-lane" title="Add a lane">
+                <button type="button" class="board-add-lane" data-board-action="add-lane" title="Create lane">
                     <i class="fa-solid fa-plus" aria-hidden="true"></i>
                     <span>Lane</span>
                 </button>

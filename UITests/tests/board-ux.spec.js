@@ -735,7 +735,7 @@ for (const width of [1440, 390]) {
         await page.getByRole('tab', { name: 'Jira Cloud', exact: true }).click();
         await expect(panel.getByLabel('Jira board link')).toHaveValue(savedLink);
         await expect(panel.getByLabel('API token')).toHaveValue('');
-        // New board offers a local board or a tracker connection; the tracker forms wait behind their tabs.
+        // Create board offers a local board or a tracker connection; the tracker forms wait behind their tabs.
         await page.evaluate(() => window.app.boardController.openBoardEditor(null));
         await expect(page.getByRole('tab')).toHaveText(['Local', 'Jira Cloud', 'Azure DevOps']);
         await expect(panel).toBeHidden();
@@ -941,7 +941,7 @@ test('Connect on a board nothing else uses makes it the Azure DevOps board, keep
 });
 
 for (const width of [1440, 390]) {
-    test(`New board connects an Azure DevOps board, links the token page and pulls at ${width}px`, async ({ page }, testInfo) => {
+    test(`Create board connects an Azure DevOps board, links the token page and pulls at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         await openBoard(page);
         let connected = false;
@@ -969,8 +969,8 @@ for (const width of [1440, 390]) {
             if (path.endsWith('/columns')) return route.fulfill({ json: { columns: [] } });
             return route.fulfill({ json: { cards: [] } });
         });
-        await page.getByRole('button', { name: 'New board', exact: true }).click();
-        await expect(page.locator('.modal-title')).toHaveText('New board');
+        await page.getByRole('button', { name: 'Create board', exact: true }).click();
+        await expect(page.locator('.modal-title')).toHaveText('Create board');
         await expect(page.getByRole('tab')).toHaveText(['Local', 'Jira Cloud', 'Azure DevOps']);
         await expect(page.getByLabel('Board name', { exact: true })).toBeVisible();
         await page.getByRole('tab', { name: 'Azure DevOps', exact: true }).click();
@@ -1001,7 +1001,7 @@ for (const width of [1440, 390]) {
         await panel.getByLabel('Personal access token').fill('test-only');
         await panel.getByRole('button', { name: 'Connect', exact: true }).click();
         await expect(panel.locator('[data-ado-report]')).toHaveText('7 created, 0 already imported, 0 skipped, 0 failed.');
-        // New board always asks for a new board, even when Main is empty enough to become it.
+        // Create board always asks for a new board, even when Main is empty enough to become it.
         expect(saves).toEqual([{ boardLink: ADO_LINK, personalAccessToken: 'test-only', narrowWiql: '', pointsField: '', enabled: true, skipOldDone: true, newBoard: true }]);
         expect(calls).toContain('PUT /api/v1/board/boards/brd_main/ado');
         expect(calls).toContain('POST /api/v1/board/boards/brd_ado/ado/test');
@@ -1392,7 +1392,7 @@ test('reference search routes GUIDs directly, finds card sessions and attaches c
 
 test('draft image attachments survive creation', async ({ page }) => {
     await openBoard(page);
-    await page.getByRole('button', { name: 'New card', exact: true }).click();
+    await page.getByRole('button', { name: 'Create card', exact: true }).click();
     await page.locator('#board-card-title').fill('Draft image');
     const composer = page.locator('[data-board-composer="description"]');
     await composer.locator('[data-board-composer-file]').setInputFiles({ name: 'draft.png', mimeType: 'image/png', buffer: Buffer.from(IMAGE.split(',')[1], 'base64') });
@@ -1740,7 +1740,7 @@ test('human can delete an agent comment without discarding a draft', async ({ pa
 
 test('new-card links stay in the draft and are submitted with creation', async ({ page }) => {
     const requests = await openBoard(page, { relatedCards: true });
-    await page.getByRole('button', { name: 'New card', exact: true }).click();
+    await page.getByRole('button', { name: 'Create card', exact: true }).click();
     const editor = page.locator('[data-board-card-editor]');
     await editor.locator('#board-card-title').fill('Linked from the beginning');
     await editor.locator('[data-board-link-picker] > summary').click();
@@ -2141,7 +2141,7 @@ test('description source and attachments survive editing and save', async ({ pag
 });
 
 for (const width of [1440, 900, 390]) {
-    test(`compact board controls and New card work at ${width}px`, async ({ page }, testInfo) => {
+    test(`compact board controls and Create card work at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
         const columns = ['Ready', 'In Progress', 'Review', 'Done'].map((name, position) => ({
             id: position ? `col_${position}` : 'col_ready', name, position, boardId: 'brd_main',
@@ -2169,7 +2169,7 @@ for (const width of [1440, 900, 390]) {
         await page.getByRole('button', { name: 'Board settings', exact: true }).click();
         await expect(page.locator('[data-board-board-editor]')).toBeVisible();
         await page.locator('#modal-container [data-action="close-modal"]').first().click();
-        await page.getByRole('button', { name: 'New card', exact: true }).click();
+        await page.getByRole('button', { name: 'Create card', exact: true }).click();
         await page.locator('#board-card-title').fill('A card in Review');
         await page.locator('#board-card-lane').selectOption('col_2');
         await page.locator('[data-board-save-card]').click();
@@ -2732,7 +2732,7 @@ test('description attaches newly uploaded images and new cards start in edit mod
     await expect(page.locator('[data-board-attachments] .board-attachment-thumb')).toHaveCount(2);
     await expect(page.locator('[data-board-view-attachment="att_uploaded"]')).toBeVisible();
     await page.locator('[data-board-save-card]').click();
-    await page.getByRole('button', { name: 'New card', exact: true }).click();
+    await page.getByRole('button', { name: 'Create card', exact: true }).click();
     await expect(description.locator('textarea')).toBeVisible();
     await expect(description.locator('textarea')).toHaveValue('');
     await expect(description.locator('[data-board-composer-preview]')).toHaveCount(0);
@@ -2759,7 +2759,7 @@ test('card type renders, filters, edits and is sent on save', async ({ page }) =
 test('long new-card descriptions grow inside the composer instead of painting over attachments', async ({ page }) => {
     await page.setViewportSize({ width: 960, height: 640 });
     await openBoard(page);
-    await page.getByRole('button', { name: 'New card', exact: true }).click();
+    await page.getByRole('button', { name: 'Create card', exact: true }).click();
     const input = page.locator('[data-board-composer="description"] textarea');
     await input.fill(Array.from({ length: 24 }, (_, index) => `description line ${index + 1}`).join('\n'));
 
@@ -3358,7 +3358,7 @@ test('typing @ in a composer opens the file typeahead, the keyboard inserts a re
 
 test('new cards queue files until Save and do not launch', async ({ page }) => {
     const requests = await openBoard(page);
-    await page.getByRole('button', { name: 'New card', exact: true }).click();
+    await page.getByRole('button', { name: 'Create card', exact: true }).click();
     await expect(page.locator('[data-board-card-links]')).toContainText('Links will be saved when you create this card.');
     await page.locator('#board-card-title').fill('File first');
     await page.locator('[data-board-files]').setInputFiles({ name: 'notes.zip', mimeType: 'application/zip', buffer: Buffer.from('archive') });
@@ -3757,7 +3757,7 @@ test('card review failures recover and late reports cannot overwrite another rep
     await expect(panel.locator('[data-review-report]')).toBeHidden();
 });
 
-test('Code review definition uses the shared provider and purpose fields', async ({ page }) => {
+test('Agent definition uses the shared provider without a purpose field', async ({ page }) => {
     await openBoard(page);
     const writes = [];
     await page.route('**/api/v1/presets', async route => {
@@ -3771,10 +3771,10 @@ test('Code review definition uses the shared provider and purpose fields', async
     await editor.locator('[data-launch-provider]').selectOption('base:claude');
     await editor.locator('[data-board-composer-input]').fill('Review the scoped changes and save the report.');
     await editor.getByText('Additional settings', { exact: true }).click();
-    await editor.getByLabel('Purpose', { exact: true }).selectOption('code_review');
+    await expect(editor.getByLabel('Purpose', { exact: true })).toHaveCount(0);
     await editor.getByRole('button', { name: 'Create agent', exact: true }).click();
     await expect.poll(() => writes.length).toBe(1);
-    expect(writes[0]).toMatchObject({ name: 'My reviewer', cli: 'claude', purpose: 'code_review' });
+    expect(writes[0]).toMatchObject({ name: 'My reviewer', cli: 'claude', purpose: 'work' });
 });
 
 for (const width of [1440, 390]) {
@@ -4234,6 +4234,33 @@ test('unified lane conflicts preserve edits and retired selections remain explic
     await panel.getByRole('button',{name:'Reload latest',exact:true}).click();
     await page.getByRole('button',{name:'Discard',exact:true}).click();
     await expect(panel.locator('[data-lane-selection-list] strong')).toHaveText(['Review','Check','Unavailable / retired selection']);
+});
+
+test('lane Tom Select supports search, pointer selection, Escape and cleanup', async ({ page }, testInfo) => {
+    await openBoard(page);
+    await installLaunchFixture(page);
+    const trigger = page.getByRole('button', { name: 'Agents and Actions on entry to Ready', exact: true });
+    await trigger.click();
+    const panel = page.locator('.board-lane-agents-panel');
+    const picker = panel.locator('.ts-control');
+    await expect(picker).toBeVisible();
+    await picker.click();
+    const search = page.getByRole('textbox', { name: 'Search agents, scripts and checks…', exact: true });
+    await search.fill('quality');
+    await expect(page.locator('.launch-lane-dropdown .option:visible')).toHaveText(['Code quality check']);
+    await page.screenshot({ path: testInfo.outputPath('lane-picker-search.png') });
+    await search.press('Escape');
+    await expect(panel).toBeVisible();
+    await expect(page.locator('.ts-dropdown:visible')).toHaveCount(0);
+    await picker.click();
+    await search.fill('quality');
+    await page.locator('.launch-lane-dropdown').getByRole('option', { name: 'Code quality check', exact: true }).click();
+    await expect(panel).toBeVisible();
+    await expect(panel.locator('[data-lane-add]')).toBeEnabled();
+    await panel.getByRole('button', { name: 'Close lane panel', exact: true }).click();
+    await expect(panel).toHaveCount(0);
+    await expect(page.locator('.launch-lane-dropdown')).toHaveCount(0);
+    await expect(trigger).toBeFocused();
 });
 
 test('unified lane progress distinguishes process and review, retries and skips exact card entries',async({page})=>{

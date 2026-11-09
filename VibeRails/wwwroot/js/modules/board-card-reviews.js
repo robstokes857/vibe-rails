@@ -28,7 +28,7 @@ export function cardReviewsSection(card, { readOnly = false } = {}) {
             </details>
             <p class="board-editor-muted">Uses saved review inputs. New reviews capture current inputs; queued runs and retries keep their recorded routing and scope. Lane reviews use their Worker’s mappings.</p>`}
             <p class="board-editor-muted" data-review-message role="status" aria-live="polite">Loading reviews…</p>
-            <button type="button" class="btn btn-sm btn-link" data-review-refresh>Refresh reviews</button>
+            <button type="button" class="btn btn-sm btn-secondary" data-review-refresh>Refresh reviews</button>
             <div data-review-latest></div>
             <details><summary>Older runs</summary><div data-review-history></div>
                 <button type="button" class="btn btn-sm btn-link" data-review-more hidden>Load older runs</button></details>

@@ -1,4 +1,4 @@
-import { escapeHtml, confirmDialog } from './utils.js';
+import { escapeHtml, confirmDialog, enhanceSelectWithTomSelect } from './utils.js';
 import { LaunchApi } from './launch-api.js';
 
 /** Ordered definitions and explicit gates, shared by lane settings and the lane popup. */
@@ -11,6 +11,12 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
         busy = false;
     let dirty = false,
         confirming = false;
+    let picker = null;
+    const builtInChecks = [
+        { id: 'new:vca', name: 'VCA check', kind: 'vca' },
+        { id: 'new:code-quality', name: 'Code quality check', kind: 'code-quality' }
+    ];
+    const labelForKind = { agent: 'Agent', script: 'Script', vca: 'VCA check', 'code-quality': 'Code quality check' };
     const current = () => !abort.signal.aborted && host.isConnected;
     const beforeClose = (retry) => {
         if (busy) {
@@ -40,7 +46,12 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
         return false;
     };
     const render = () => {
-        host.innerHTML = `<p class="board-editor-muted">Runs in order on lane entry. Each run waits for the preceding process and its required result.</p><div data-lane-selection-list>${selections
+        picker?.destroy();
+        picker = null;
+        host.classList.add('launch-lane-editor');
+        const choices = items.filter(item => item.canRunAutomatically && !selections.some(selection => selection.definitionId === item.id));
+        const checks = builtInChecks.filter(check => !items.some(item => item.kind === check.kind && item.canRunAutomatically));
+        host.innerHTML = `<h3>Run order</h3><div class="launch-lane-list" data-lane-selection-list>${selections
             .map((selection, index) => {
                 const item = items.find(
                     (item) =>
@@ -53,25 +64,25 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                 ];
                 if (selection.definitionType === 'preset')
                     gates.push(['review', 'Saved review passes']);
-                return `<div class="launch-lane-row" data-lane-index="${index}"><strong>${escapeHtml(item?.name || 'Unavailable / retired selection')}</strong>${!item?.canRunAutomatically ? '<p class="text-warning">Unavailable for automatic runs. Remove or replace this selection.</p>' : ''}<label>Continue after<select class="form-select" data-lane-gate>${gates.map(([value, label]) => `<option value="${value}"${selection.gate === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label><div class="launch-run-actions"><button class="btn btn-sm btn-outline-secondary" data-lane-move="-1"${index === 0 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} up">Up</button><button class="btn btn-sm btn-outline-secondary" data-lane-move="1"${index === selections.length - 1 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} down">Down</button><button class="btn btn-sm btn-outline-danger" data-lane-remove>Remove</button></div></div>`;
+                return `<div class="launch-lane-row" data-lane-index="${index}"><div class="launch-lane-title"><span class="launch-lane-number" aria-hidden="true">${index + 1}</span><strong>${escapeHtml(item?.name || 'Unavailable / retired selection')}</strong></div>${!item?.canRunAutomatically ? '<p class="text-warning">Unavailable for automatic runs. Remove or replace this selection.</p>' : ''}<label>Continue after<select class="form-select" data-lane-gate>${gates.map(([value, label]) => `<option value="${value}"${selection.gate === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label><div class="launch-run-actions"><button class="btn btn-sm btn-secondary" data-lane-move="-1"${index === 0 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} up"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Up</button><button class="btn btn-sm btn-secondary" data-lane-move="1"${index === selections.length - 1 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} down"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Down</button><button class="btn btn-sm btn-outline-danger" data-lane-remove>Remove</button></div></div>`;
             })
             .join(
                 ''
-            )}</div><label>Add Agent or Action<select class="form-select" data-lane-add-choice><option value="">Choose…</option>${items
-            .filter(
-                (item) =>
-                    item.canRunAutomatically &&
-                    !selections.some(
-                        (selection) => selection.definitionId === item.id
-                    )
-            )
+            ) || '<p class="launch-lane-empty">No runs yet. Add an agent, script or check below.</p>'}</div><div class="launch-lane-add"><label>Add to this lane<select class="form-select" data-lane-add-choice><option value="">Choose an agent, script or check…</option>${[...choices, ...checks]
             .map(
                 (item) =>
-                    `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} (${escapeHtml(item.kind)})</option>`
+                    `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.name === labelForKind[item.kind] ? '' : ` · ${escapeHtml(labelForKind[item.kind] || item.kind)}`}</option>`
             )
             .join(
                 ''
-            )}</select></label><div class="launch-run-actions"><button class="btn btn-outline-secondary" data-lane-add>Add</button><button class="btn btn-primary" data-lane-save>Save lane settings</button></div><p data-lane-error role="alert"></p>`;
+            )}</select></label><button class="btn btn-secondary" data-lane-add disabled>Add</button></div><div class="launch-lane-footer"><button class="btn btn-primary" data-lane-save>Save lane settings</button></div><p data-lane-error role="alert"></p>`;
+        picker = enhanceSelectWithTomSelect(host.querySelector('[data-lane-add-choice]'), {
+            placeholder: 'Choose an agent, script or check…',
+            searchPlaceholder: 'Search agents, scripts and checks…',
+            emptyMessage: 'No matching agents, scripts or checks.'
+        });
+        picker?.control.setAttribute('aria-label', 'Add to this lane');
+        picker?.dropdown.classList.add('launch-lane-dropdown');
     };
     const error = (failure) => {
         if (!current()) return;
@@ -99,15 +110,23 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
             selections = lane.selections.map((item) => ({ ...item }));
             revision = lane.revision;
             items = catalog.items;
+            dirty = false;
             render();
         } catch (failure) {
-            if (current())
+            if (current()) {
+                picker?.destroy();
+                picker = null;
                 host.innerHTML = `<p role="alert">${escapeHtml(failure.message)}</p><button class="btn btn-outline-secondary" data-lane-reload>Reload</button>`;
+            }
         }
     };
     host.addEventListener(
         'change',
         (event) => {
+            if (event.target.hasAttribute('data-lane-add-choice')) {
+                host.querySelector('[data-lane-add]').disabled = busy || !event.target.value;
+                return;
+            }
             if (!busy && event.target.hasAttribute('data-lane-gate'))
                 selections[
                     Number(
@@ -128,11 +147,26 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                 return;
             }
             if (button.hasAttribute('data-lane-add')) {
-                const item = items.find(
-                    (item) =>
-                        item.id ===
-                        host.querySelector('[data-lane-add-choice]').value
-                );
+                const value = host.querySelector('[data-lane-add-choice]').value;
+                let item = items.find(item => item.id === value);
+                const check = builtInChecks.find(check => check.id === value);
+                if (check) {
+                    const unlock = lock();
+                    try {
+                        const saved = await api.save('action', null, {
+                            name: check.name, kind: check.kind, enabled: true, expectedRevision: 0,
+                            check: { scope: check.kind === 'vca' ? 'working-tree' : 'card' }, script: null
+                        });
+                        if (!current()) return;
+                        item = { ...saved, definitionType: 'action', canRunAutomatically: true };
+                        items.push(item);
+                    } catch (failure) {
+                        error(failure);
+                        return;
+                    } finally {
+                        unlock();
+                    }
+                }
                 if (item) {
                     selections.push({
                         definitionId: item.id,
@@ -142,6 +176,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                     dirty = true;
                 }
                 render();
+                picker?.focus();
                 return;
             }
             const row = button.closest('[data-lane-index]');
@@ -167,18 +202,12 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                         `button[data-lane-move="${button.dataset.laneMove}"]:not(:disabled)`
                     ) ||
                     target?.querySelector('button:not(:disabled)') ||
-                    host.querySelector('[data-lane-add-choice]')
+                    picker?.control || host.querySelector('[data-lane-add-choice]')
                 )?.focus();
                 return;
             }
             if (button.hasAttribute('data-lane-save')) {
-                busy = true;
-                const controls = [
-                    ...host.querySelectorAll('input,select,button')
-                ].map((node) => [node, node.disabled]);
-                controls.forEach(([node]) => {
-                    node.disabled = true;
-                });
+                const unlock = lock();
                 try {
                     const saved = await api.call(
                         `board/columns/${encodeURIComponent(columnId)}/launches`,
@@ -201,11 +230,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                 } catch (failure) {
                     error(failure);
                 } finally {
-                    busy = false;
-                    if (current())
-                        controls.forEach(([node, disabled]) => {
-                            node.disabled = disabled;
-                        });
+                    unlock();
                 }
             }
         },
@@ -213,8 +238,8 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
     );
     host.addEventListener(
         'change',
-        () => {
-            if (!busy) dirty = true;
+        (event) => {
+            if (!busy && event.target.hasAttribute('data-lane-gate')) dirty = true;
         },
         { signal: abort.signal }
     );
@@ -223,9 +248,23 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
     );
     const dispose = () => {
         abort.abort();
+        picker?.destroy();
         removeGuard?.();
     };
     dispose.beforeClose = beforeClose;
     void load();
     return dispose;
+
+    function lock() {
+        busy = true;
+        const controls = [...host.querySelectorAll('input,select,button')].map(node => [node, node.disabled]);
+        controls.forEach(([node]) => { node.disabled = true; });
+        picker?.disable();
+        return () => {
+            busy = false;
+            if (!current()) return;
+            controls.forEach(([node, disabled]) => { node.disabled = disabled; });
+            picker?.enable();
+        };
+    }
 }

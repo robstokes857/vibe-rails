@@ -37,7 +37,7 @@ export function mountLaneAgentBody({
                 { signal: abort.signal }
             );
             if (!current()) return;
-            const next =
+            const next = entries.length ?
                 '<h3 class="h6">Card runs</h3>' +
                 (entries
                     .map(
@@ -54,7 +54,7 @@ export function mountLaneAgentBody({
                 </article>`
                     )
                     .join('') ||
-                    '<p class="board-editor-muted">No card runs from this lane.</p>');
+                    '') : '';
             if (markup !== next) activity.innerHTML = markup = next;
         } catch (error) {
             if (current()) { activity.textContent = error.message; markup = ''; }

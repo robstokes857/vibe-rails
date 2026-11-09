@@ -90,9 +90,9 @@ export class BoardLaneAgents {
             <div class="board-lane-agents-heading-copy"><h2 id="board-lane-agents-title">Agents and Actions</h2><p>On entry to <strong>${escapeHtml(column.name)}</strong></p></div>
             <button type="button" class="board-lane-agents-action" data-agent-action="close" aria-label="Close lane panel">${icon('xmark')}</button>
         </header>
-        <p class="board-lane-agents-help">They run top to bottom after a card stays here for 60 seconds. Each run waits for the previous one to satisfy its gate or be skipped.</p>
-        <section data-lane-running aria-label="Running agents" aria-live="polite"></section>
-        <div data-lane-agents-content role="status">Loading agents…</div>`;
+        <p class="board-lane-agents-help">Runs top to bottom after a card stays here for 60 seconds. Each waits for the result you choose below.</p>
+        <div data-lane-agents-content>Loading agents…</div>
+        <section data-lane-running aria-label="Running agents" aria-live="polite"></section>`;
         this.anchor = button;
         this.panel = panel;
         button.setAttribute('aria-expanded', 'true');
@@ -115,10 +115,25 @@ export class BoardLaneAgents {
         this.beforeClosePanel = disposeBody.beforeClose;
 
         const outside = event => {
-            if (!panel.contains(event.target) && !this.anchor?.contains(event.target) && !isConfirmDialogOpen()) this.close(false);
+            const picker = panel.querySelector('[data-lane-add-choice]')?.tomselect;
+            if (!panel.contains(event.target) && !picker?.dropdown?.contains(event.target) && !this.anchor?.contains(event.target) && !isConfirmDialogOpen()) this.close(false);
         };
         const keydown = event => {
             if (event.key !== 'Escape' || isConfirmDialogOpen()) return;
+            const picker = panel.querySelector('[data-lane-add-choice]')?.tomselect;
+            if (picker?.isOpen) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                // dropdown_input moves its input into the menu. Focus the visible
+                // control without scheduling an open-on-focus pass (Tom Select 2.4.3).
+                picker.ignoreFocus = true;
+                picker.close();
+                (picker.focus_node || picker.control).focus({ preventScroll: true });
+                picker.ignoreFocus = false;
+                picker.isFocused = true;
+                picker.refreshState();
+                return;
+            }
             event.preventDefault();
             event.stopImmediatePropagation();
             this.close();

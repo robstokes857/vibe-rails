@@ -17,7 +17,7 @@ export function openRemoteBoards(app, onChanged = () => {}) {
                 <option value="all">All boards</option><option value="unlinked">No local copy</option>
                 <option value="owned">Owned by me</option><option value="shared">Shared with me</option>
             </select>
-            <button type="button" class="btn btn-outline-secondary" data-remote-refresh>Refresh</button>
+            <button type="button" class="btn btn-secondary" data-remote-refresh>Refresh</button>
         </div>
         <form data-remote-editor class="border rounded p-3 mb-3" hidden>
             <label class="form-label" for="remote-board-name">Rename remote board</label>

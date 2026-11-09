@@ -276,6 +276,10 @@ Use a link for navigation and a button for an action. Use sentence case and a le
 
 **When you change it:** use the target look and drop the gradient. Set `border-color` in every state: Bootstrap's own hover, focus and disabled borders (`#0a58ca`, `#0d6efd`) still show through today. Replace page-local button sets with the shared variants.
 
+Use **Create + item name** for creating an item, consistently in entry buttons, empty states and dialog titles/actions ("Create agent", "Create script", "Create board"). Do not alternate with "New" or "Add" for that operation. Reserve **Add** for attaching an existing item to a collection, and **Import** for bringing in an existing file.
+
+**Refresh** is a secondary action, including icon-only refresh controls: show the dark surface and a visible 1px `--control-border` border at rest, with the secondary hover, focus and disabled states. Do not use the borderless ghost variant for Refresh.
+
 ### Icon buttons and header pills
 
 **Standard (codified):** the header keeps its established shapes.
@@ -713,6 +717,12 @@ as those views are updated.
 The desktop Quality page places its **Code quality** heading, scan status and actions
 above the repository map and report. The scan guide opens directly below that header;
 the scan-options menu opens downward over the report.
+
+The desktop top bar is compact: 44px tall, a 36px mascot, 8px side gutters and gaps,
+and sentence-case navigation with 8px horizontal link padding. Desktop links are 36px
+tall; touch/narrow layouts retain 44px targets. Hide labels at the existing compact
+breakpoints and allow the center links to scroll when crowded. The terminal workspace
+uses the same bar height and mascot size.
 
 Desktop aliases for values specified above (these add no new visual choices):
 

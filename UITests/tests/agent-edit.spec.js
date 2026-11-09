@@ -229,7 +229,7 @@ test('Rules combines rule management, validation and Git Guard', async ({ page }
   await expect(page.locator('#vb-terminal-panel')).toHaveCount(0);
   await expect(page.locator('[data-rule-files]')).toHaveCount(0);
   const newRuleFile = page.locator('[data-rule-manager] .project-health-card-actions')
-    .getByRole('button', { name: 'New rule file', exact: true });
+    .getByRole('button', { name: 'Create rule file', exact: true });
   await expect(newRuleFile).toBeVisible();
 
   // The file browser and editor are visible directly on the Rules page.
@@ -262,7 +262,7 @@ test('Rules combines rule management, validation and Git Guard', async ({ page }
   // the full-page markdown editor.
   await openFirstRuleFileInManager(page);
   const editor = page.locator('[data-agent-rule-editor]');
-  await expect(editor.getByRole('button', { name: 'Add rule' })).toBeVisible();
+  await expect(editor.getByRole('button', { name: 'Create rule' })).toBeVisible();
   await expect(page.locator('[data-view="agent-edit"]')).toHaveCount(0);
 
   // Small edit dialogs return to the selected file on the page when cancelled.
@@ -284,16 +284,16 @@ test('Rules combines rule management, validation and Git Guard', async ({ page }
     await expect(controls.locator('[role="combobox"]')).toBeVisible();
   }
   await newRuleFile.click();
-  await expect(page.getByRole('heading', { name: 'Create New Rule File' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Create rule file' })).toBeVisible();
 });
 
 test('rule-file workflows use policy terminology', async ({ page }) => {
   await page.goto('/');
 
   await page.locator('.app-subnav-link[data-action="navigate-home"]:visible').click();
-  await page.locator('[data-rule-manager]').getByRole('button', { name: 'New rule file' }).click();
+  await page.locator('[data-rule-manager]').getByRole('button', { name: 'Create rule file' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Create New Rule File' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Create rule file' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Create New Agent' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Back to Rules' }).click();
@@ -327,7 +327,7 @@ test('wizard Back preserves parameter drafts and creates one vc.rules.md path', 
   const expectedPath = `${directory}/vc.rules.md`;
   const csvDraft = 'WIP,fix later, temporary';
   await page.goto('/?view=agents');
-  await page.locator('[data-rule-manager]').getByRole('button', { name: 'New rule file' }).click();
+  await page.locator('[data-rule-manager]').getByRole('button', { name: 'Create rule file' }).click();
   const wizard = page.locator('#wizard-content');
   await wizard.getByLabel('Directory for vc.rules.md').fill(directory);
   await wizard.locator('#wizard-next-btn').click();
@@ -351,7 +351,7 @@ test('wizard Back preserves parameter drafts and creates one vc.rules.md path', 
 
   const createRequest = page.waitForRequest(request =>
     new URL(request.url()).pathname === '/api/v1/agents' && request.method() === 'POST');
-  await wizard.getByRole('button', { name: 'Create Rule File' }).click();
+  await wizard.getByRole('button', { name: 'Create rule file' }).click();
   const payload = (await createRequest).postDataJSON();
   expect(payload.path.replace(/\\/g, '/')).toBe(expectedPath);
   expect(payload.path.match(/vc\.rules\.md/g)).toHaveLength(1);
@@ -387,7 +387,7 @@ test('full editor edits and removes the rule directly from its row', async ({ pa
   await page.locator('#inline-remove-rule-confirm').click();
   await expect(editor.getByText('No rules yet', { exact: true })).toBeVisible();
   await expect(editor.locator('[data-rule-edit], [data-rule-delete]')).toHaveCount(0);
-  await expect(editor.getByRole('button', { name: 'Add rule', exact: true })).toBeEnabled();
+  await expect(editor.getByRole('button', { name: 'Create rule', exact: true })).toBeEnabled();
 });
 
 test('full editor keeps individual file cards visible above Rules with compact actions', async ({ page }) => {
@@ -405,7 +405,7 @@ test('full editor keeps individual file cards visible above Rules with compact a
   const filesBox = await editor.locator('.rules-editor-files-section').boundingBox();
   const rulesBox = await editor.locator('.rules-editor-section').filter({ has: page.locator('[data-agent-rules]') }).boundingBox();
   expect(filesBox.y).toBeLessThan(rulesBox.y);
-  await expect(editor.getByRole('button', { name: 'Add rule', exact: true })).toBeInViewport();
+  await expect(editor.getByRole('button', { name: 'Create rule', exact: true })).toBeInViewport();
 });
 
 test('display-name actions sit beside the name and save only a friendly searchable label', async ({ page }) => {
@@ -445,12 +445,12 @@ test('empty full editor explains how to add a first rule without dead edit actio
   await page.locator('[data-agent-rule-editor]').getByRole('button', { name: 'Full editor' }).click();
   const editor = page.locator('[data-view="agent-edit"]');
   await expect(editor.getByText('No rules yet', { exact: true })).toBeVisible();
-  await expect(editor.getByText(/Use Add rule above to choose your first rule/)).toBeVisible();
+  await expect(editor.getByText(/Use Create rule above to choose your first rule/)).toBeVisible();
   await expect(editor.locator('[data-rule-edit], [data-rule-delete], [data-agent-action="edit-rule"], [data-agent-action="remove-rule"]')).toHaveCount(0);
-  await editor.getByRole('button', { name: 'Add rule', exact: true }).click();
+  await editor.getByRole('button', { name: 'Create rule', exact: true }).click();
   const form = page.locator('#inline-add-rule-form');
   await form.locator('input[name="inline-rule-pick"][value="Log all file changes"]').check();
-  await form.getByRole('button', { name: 'Add rule', exact: true }).click();
+  await form.getByRole('button', { name: 'Create rule', exact: true }).click();
   await expect(editor.getByRole('button', { name: 'Edit Log all file changes', exact: true })).toBeVisible();
   await expect(editor.getByText('No rules yet', { exact: true })).toHaveCount(0);
   await editor.getByRole('button', { name: 'Back to Rules' }).click();

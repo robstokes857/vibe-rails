@@ -149,7 +149,7 @@ export class EnvironmentController {
         const isEdit = mode === 'edit';
         const resolvedVariant = variant || (automationWorker || Boolean(env?.automationWorker) || hasStartingMessage(env) ? 'agent' : 'quick-launch');
         const noun = resolvedVariant === 'agent' ? 'agent' : 'quick launch';
-        const title = isEdit ? `Edit ${noun}: ${env.name}` : `New ${noun}`;
+        const title = isEdit ? `Edit ${noun}: ${env.name}` : `Create ${noun}`;
         this.app.showModal(title, `<form id="env-form"><div data-environment-editor></div>
             <button type="submit" class="btn btn-primary">${isEdit ? 'Save changes' : `Create ${noun}`}</button></form>`);
         const form = document.getElementById('env-form');

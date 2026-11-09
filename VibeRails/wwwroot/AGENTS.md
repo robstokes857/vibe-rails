@@ -9,6 +9,11 @@ all presets and retains Quick Launch management. The VS Code native launch tree 
 `launch-catalog` and `runs` with stable definition IDs and server eligibility. Preset
 launches pass through the dashboard prompt resolver; Action runs can queue in the host.
 
+The catalog presents Agents, Quick Launches and Scripts with the shared surface and
+empty-state styles. **Create script** opens the script-only Action editor; existing checks
+remain editable under Board checks. The Agent editor hides Purpose, defaults new records
+to `work`, and preserves an existing record's purpose when saving.
+
 Board cards and definitions call `card-editor.js` for the two-column shell, one scroller
 and persistent footer, `card-editor-composer.js` for the native composer, and
 `card-editor-attachments.js` for attachment presentation and mutation. Owner adapters
@@ -27,6 +32,10 @@ popup, including built-ins and existing custom variables; step syntax is rejecte
 Manual template values become a revision-checked run prompt override, never a preset edit.
 
 `launch-lane-editor.js` keeps ordered definition IDs and process/result/review gates.
+Its add picker uses the shared Tom Select helper, including search, viewport positioning,
+Escape and disposal. VCA and code-quality checks can be created from this picker; creating
+a definition does not save the lane order or run it. The lane save remains revision-checked.
+New VCA checks use working-tree scope; new code-quality checks use card-linked commits.
 `board-lane-agent-body.js` polls current per-card lane progress, with explicit verdicts,
 retry, skip and session links. `board-card-automations.js` queues definitions with the
 saved card context. Managers and ordinary Start work use their existing Board contracts.

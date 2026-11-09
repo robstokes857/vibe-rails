@@ -64,15 +64,11 @@ export class AiAgentsController {
     async loadView(data = {}) {
         this.unload();
         this.root = document.getElementById('app-content');
-        this.root.innerHTML = `<div class="ai-agents-view"><header class="vb-page-header"><div class="vb-page-heading"><h1 class="vb-page-title">AI Agents</h1><p class="vb-page-description">Shared Agents, Quick Launches and single Actions for every project.</p></div><div class="vb-page-actions"><button class="btn btn-primary" data-agent-new="preset">New agent</button><button class="btn btn-outline-secondary" data-agent-new="action">New action</button><button class="btn btn-outline-secondary" data-agent-refresh>Refresh</button></div></header><div data-agent-catalog></div><p data-agent-page-error role="alert"></p></div>`;
-        this.root
-            .querySelectorAll('[data-agent-new]')
-            .forEach((button) =>
-                button.addEventListener(
-                    'click',
-                    () => void this.openEditor(button.dataset.agentNew)
-                )
-            );
+        this.root.innerHTML = `<div class="ai-agents-view"><header class="vb-page-header"><span class="launch-section-icon" aria-hidden="true"><i class="fa-solid fa-robot"></i></span><div class="vb-page-heading"><h1 class="vb-page-title">AI Agents</h1><p class="vb-page-description">Save AI setups and scripts to run on demand or from Board lanes.</p></div><div class="vb-page-actions"><button class="btn btn-primary" data-agent-new="preset"><i class="fa-solid fa-plus" aria-hidden="true"></i> Create agent</button><button class="btn btn-secondary" data-agent-new="action"><i class="fa-solid fa-code" aria-hidden="true"></i> Create script</button><button class="btn btn-secondary" data-agent-refresh><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Refresh</button></div></header><div class="launch-catalog" data-agent-catalog></div><p class="launch-save-error" data-agent-page-error role="alert"></p></div>`;
+        this.root.querySelector('.ai-agents-view').addEventListener('click', (event) => {
+            const button = event.target.closest('[data-agent-new]');
+            if (button) void this.openEditor(button.dataset.agentNew);
+        });
         this.root
             .querySelector('[data-agent-refresh]')
             .addEventListener('click', () => void this.refresh());
@@ -113,25 +109,29 @@ export class AiAgentsController {
             await this.app.llmPickerController.loadPreferences({ force: true });
             if (!this.root || abort.signal.aborted) return;
             const groups = [
-                ['Agents', (item) => item.kind === 'agent'],
-                ['Quick Launches', (item) => item.kind === 'quick-launch'],
-                ['Actions', (item) => item.definitionType === 'action']
+                ['Agents', 'robot', 'Save a prompt and AI settings for a repeatable task.', 'Create agent', 'preset', (item) => item.kind === 'agent'],
+                ['Quick Launches', 'bolt', 'Save AI settings without a prompt for a ready-to-use terminal.', 'Create quick launch', 'preset', (item) => item.kind === 'quick-launch'],
+                ['Scripts', 'code', 'Run a script yourself or when a card enters a Board lane.', 'Create script', 'action', (item) => item.kind === 'script']
             ];
+            // Existing checks remain editable; new checks are added from a Board lane.
+            if (this.items.some((item) => item.definitionType === 'action' && item.kind !== 'script'))
+                groups.push(['Board checks', 'list-check', 'Checks available to add to Board lanes.', '', '', (item) => item.definitionType === 'action' && item.kind !== 'script']);
             this.root.querySelector('[data-agent-catalog]').innerHTML = groups
                 .map(
-                    ([title, filter]) =>
-                        `<section class="launch-catalog-section"><h2>${title}</h2>${
-                            this.items
-                                .filter(filter)
+                    ([title, icon, description, action, type, filter], index) => {
+                        const entries = this.items.filter(filter);
+                        return `<section class="launch-catalog-section" aria-labelledby="launch-section-${index}"><header class="launch-section-heading"><span class="launch-section-icon" aria-hidden="true"><i class="fa-solid fa-${icon}"></i></span><div><h2 id="launch-section-${index}">${title} <span class="launch-section-count">${entries.length}</span></h2><p>${description}</p></div></header>${
+                            entries
                                 .map((item) => {
                                     const brand = item.cli
                                         ? getCliBrand(item.cli)
                                         : null;
-                                    return `<article class="launch-catalog-row">${brand?.logo ? `<img class="launch-provider-logo" src="${escapeHtml(brand.logo)}" alt=""${brand.logoFilter ? ` style="filter:${escapeHtml(brand.logoFilter)}"` : ''}>` : ''}<div class="launch-catalog-copy"><button class="btn btn-link" data-agent-edit="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button><p>${escapeHtml(item.description || (item.definitionType === 'action' ? labels[item.kind] : item.cli))}</p>${item.ineligibleReason ? `<p class="text-muted">Unavailable: ${escapeHtml(item.ineligibleReason)}</p>` : ''}</div><button class="btn btn-outline-secondary" data-agent-run="${escapeHtml(item.id)}"${item.canLaunch ? '' : ' disabled'}>Run</button></article>`;
+                                    return `<article class="launch-catalog-row">${brand?.logo ? `<img class="launch-provider-logo" src="${escapeHtml(brand.logo)}" alt=""${brand.logoFilter ? ` style="filter:${escapeHtml(brand.logoFilter)}"` : ''}>` : `<span class="launch-provider-logo" aria-hidden="true"><i class="fa-solid fa-${icon}"></i></span>`}<div class="launch-catalog-copy"><button class="btn btn-link" data-agent-edit="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button><p>${escapeHtml(item.description || (item.definitionType === 'action' ? labels[item.kind] : brand?.label || item.cli))}</p>${item.ineligibleReason ? `<p class="text-warning">Unavailable: ${escapeHtml(item.ineligibleReason)}</p>` : ''}</div><button class="btn btn-secondary" data-agent-run="${escapeHtml(item.id)}" aria-label="Run ${escapeHtml(item.name)}"${item.canLaunch ? '' : ' disabled'}><i class="fa-solid fa-play" aria-hidden="true"></i> Run</button></article>`;
                                 })
                                 .join('') ||
-                            '<p class="board-editor-muted">None yet.</p>'
-                        }</section>`
+                            `<div class="launch-catalog-empty"><i class="fa-solid fa-${icon}" aria-hidden="true"></i><h3>No ${title.toLowerCase()} yet</h3><button class="btn btn-secondary" data-agent-new="${type}"><i class="fa-solid fa-plus" aria-hidden="true"></i> ${action}</button></div>`
+                        }</section>`;
+                    }
                 )
                 .join('');
             this.root.querySelector('[data-agent-page-error]').textContent = '';
@@ -280,7 +280,7 @@ export class AiAgentsController {
             return false;
         };
         const shown = this.app.showModal(
-            saved?.name || (isPreset ? 'New agent' : 'New action'),
+            saved?.name || (isPreset ? 'Create agent' : 'Create script'),
             `<div class="board-card-editor" data-launch-editor>${cardEditorLayout(
                 {
                     main: `${field('Name', 'name', saved?.name || '')}${isPreset ? `<section class="board-block"><h3 class="board-block-label">Initial prompt <span class="text-muted">(optional)</span></h3>${composerMarkup({ name: 'prompt', label: 'Initial prompt (optional)', value: saved?.initialPrompt || '', placeholder: 'Describe the task. Leave blank for a Quick Launch.', livePreview: true })}<p class="board-editor-muted" data-launch-kind></p></section>` : area('Description (optional)', 'description', saved?.description || '')}`,
@@ -290,23 +290,10 @@ export class AiAgentsController {
                     activity: runHistorySection(),
                     sidebar: `<div class="board-side-fields">${isPreset ? `<label>Provider<select class="form-select" data-launch-provider aria-label="Provider"></select></label><div data-definition-launch-options></div>` : this.actionFields(saved)}<label class="card-editor-switch-row"><span>Enabled</span><input class="card-editor-switch" type="checkbox" role="switch" data-launch-enabled${saved?.enabled !== false ? ' checked' : ''}></label>${
                         isPreset
-                            ? `<details><summary>Additional settings</summary>${area('Description (optional)', 'description', saved?.description || '')}${area('Additional arguments (one argument per line)', 'argv', (saved?.additionalArgv || []).join('\n'))}${field('Timeout (minutes, optional)', 'timeout', saved?.timeoutMinutes || '', 'number')}${select(
-                                  'Purpose',
-                                  'purpose',
-                                  [
-                                      ['work', 'Work'],
-                                      ['code_review', 'Code review'],
-                                      ['testing', 'Testing'],
-                                      ['building', 'Building'],
-                                      ['deploying', 'Deploying'],
-                                      ['documentation', 'Documentation'],
-                                      ['other', 'Other']
-                                  ],
-                                  saved?.purpose || 'work'
-                              )}<div data-provider-extra></div></details>`
+                            ? `<details><summary>Additional settings</summary>${area('Description (optional)', 'description', saved?.description || '')}${area('Additional arguments (one argument per line)', 'argv', (saved?.additionalArgv || []).join('\n'))}${field('Timeout (minutes, optional)', 'timeout', saved?.timeoutMinutes || '', 'number')}<div data-provider-extra></div></details>`
                             : ''
                     }</div>${bindingSection(project)}`,
-                    footer: `${id ? '<button class="btn btn-sm btn-outline-danger" data-launch-retire>Retire</button>' : '<span></span>'}<div class="board-editor-actions-main"><button class="btn btn-sm btn-outline-secondary" data-launch-cancel>Cancel</button><button class="btn btn-sm btn-primary" data-launch-save>${id ? 'Save' : isPreset ? 'Create agent' : 'Create action'}</button><button class="btn btn-sm btn-outline-secondary" data-launch-run${id ? '' : ' hidden'}>Save and run</button></div><p class="launch-save-error" data-launch-error role="alert"></p>`
+                    footer: `${id ? '<button class="btn btn-sm btn-outline-danger" data-launch-retire>Retire</button>' : '<span></span>'}<div class="board-editor-actions-main"><button class="btn btn-sm btn-outline-secondary" data-launch-cancel>Cancel</button><button class="btn btn-sm btn-primary" data-launch-save>${id ? 'Save' : isPreset ? 'Create agent' : 'Create script'}</button><button class="btn btn-sm btn-outline-secondary" data-launch-run${id ? '' : ' hidden'}>Save and run</button></div><p class="launch-save-error" data-launch-error role="alert"></p>`
                 }
             )}</div>`,
             {
@@ -674,7 +661,7 @@ export class AiAgentsController {
                         options: editor._readLaunchOptions(),
                         additionalArgv: lines(get('argv').value),
                         timeoutMinutes: Number(get('timeout').value) || null,
-                        purpose: get('purpose').value
+                        purpose: saved?.purpose || 'work'
                     });
                 else Object.assign(body, this.readAction(get));
                 // An owner ID is needed for staged uploads. Keep a new owner
@@ -797,16 +784,7 @@ export class AiAgentsController {
         get('name').focus();
     }
     actionFields(saved) {
-        return `${select(
-            'Action type',
-            'kind',
-            [
-                ['script', 'Script'],
-                ['vca', 'VCA check'],
-                ['code-quality', 'Code quality check']
-            ],
-            saved?.kind || 'script'
-        )}<div data-action-script>${field('Script path (relative to execution project)', 'path', saved?.script?.path)}${select(
+        return `<input type="hidden" data-launch-field="kind" value="${escapeHtml(saved?.kind || 'script')}"><div data-action-script>${field('Script path (relative to execution project)', 'path', saved?.script?.path)}${select(
             'Interpreter',
             'runtime',
             [

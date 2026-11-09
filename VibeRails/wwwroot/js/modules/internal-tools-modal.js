@@ -330,7 +330,7 @@ function renderAbout() {
         <h3>About this installation</h3>
         <p class="text-muted">Internal diagnostics and data tools for this app.</p>
         <dl class="vb-internal-version"><dt>Version</dt><dd id="app-version-value" class="font-monospace" data-version aria-live="polite">Loading…</dd></dl>
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-internal-action="refresh"><i class="fas fa-rotate-right" aria-hidden="true"></i> Refresh version</button>
+        <button type="button" class="btn btn-sm btn-secondary" data-internal-action="refresh"><i class="fas fa-rotate-right" aria-hidden="true"></i> Refresh version</button>
     </div>`;
 }
 
@@ -345,7 +345,7 @@ function renderDataScreen(id) {
                 <p class="text-muted small mb-0">${isUpload
                     ? 'Latest recorded outcome for each upload attempt. Only retained activity recorded from this update onward appears here; this is not a complete inventory of your sessions.'
                     : 'Existing application and VibeRails Demon logs, plus the new feature journal. Select a source and feature or category to follow its activity.'}</p></div>
-            <button type="button" class="btn btn-sm btn-outline-secondary" data-internal-action="refresh"><i class="fas fa-rotate-right" aria-hidden="true"></i> Refresh</button>
+            <button type="button" class="btn btn-sm btn-secondary" data-internal-action="refresh"><i class="fas fa-rotate-right" aria-hidden="true"></i> Refresh</button>
         </div>
         ${isUpload ? `<div class="vb-internal-crud">
             <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-outline-primary" disabled>Create</button><button type="button" class="btn btn-sm btn-outline-secondary" disabled>Edit</button><button type="button" class="btn btn-sm btn-outline-danger" disabled>Delete</button></div>

@@ -157,7 +157,7 @@ test('One controller renders the Agents page and the Automations page', () => {
     assert.match(agents, /data-view="ai-agents" data-mode="agents"/);
     assert.match(agents, /<h1 class="jobs-page-title">Agents<\/h1>/);
     assert.match(agents, /id="jobs-list-title">Your agents/);
-    assert.match(agents, /New agent\s*<\/button>/);
+    assert.match(agents, /Create agent\s*<\/button>/);
     assert.match(agents, /Run history/);
     // Scripts belong to the Automations page; an Agent is a CLI with a starting message.
     assert.doesNotMatch(agents, /data-python-scripts-root/);
@@ -214,7 +214,7 @@ test('A workflow script step picks one of your scripts in this repository, then 
     assert.doesNotMatch(others, /scripts\/lint\.ps1/, 'a library script is listed once');
     assert.match(others, /<option value="tools\/check\.py">tools\/check\.py<\/option>/);
     assert.match(others, /<option value="tools\/link\.sh" disabled>tools\/link\.sh — Links are not allowed<\/option>/);
-    assert.match(html, /data-workflow-action="new-script"[\s\S]*New script…[\s\S]*data-workflow-action="browse-script"[\s\S]*Browse repository…/);
+    assert.match(html, /data-workflow-action="new-script"[\s\S]*Create script…[\s\S]*data-workflow-action="browse-script"[\s\S]*Browse repository…/);
     assert.match(html, /Not every repository script is listed/);
 
     // A file chosen with Browse… (absolute, inside the repository) stays selected even when unlisted.
@@ -236,7 +236,7 @@ test('A workflow script step picks one of your scripts in this repository, then 
     assert.equal(action.scriptRuntime, 0);
 });
 
-test('New script… in a workflow step creates the script inside this repository and puts it in the step', async () => {
+test('Create script… in a workflow step creates the script inside this repository and puts it in the step', async () => {
     const app = createApp();
     app.data = { configs: { rootPath: 'C:\\src\\repo' } };
     const controller = new JobController(app);
@@ -297,7 +297,7 @@ test('The Automations list puts workflows and scripts in one list, with both col
     controller.pythonScripts.state.scripts = [];
     const empty = controller.renderJobsListHtml();
     assert.equal(empty.match(/class="jobs-empty/g).length, 1);
-    assert.match(empty, /data-python-scripts-action="new"[\s\S]*New script[\s\S]*data-job-action="new"[\s\S]*New workflow/);
+    assert.match(empty, /data-python-scripts-action="new"[\s\S]*Create script[\s\S]*data-job-action="new"[\s\S]*Create workflow/);
 
     // Scripts still loading never claim the page is empty, and a failed load says so.
     controller.pythonScripts.state = null;

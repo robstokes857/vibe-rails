@@ -383,7 +383,7 @@ export class AutomationNavLauncher {
                                     <div data-automation-nav-group></div>
                                 </div>
                                 <div class="llm-picker-modal-section automation-nav-add">
-                                    <h6>Add more</h6>
+                                    <h6>Create</h6>
                                     <p class="text-muted small mb-2">Anything you add on the Agents or Automations page shows up in this list.</p>
                                     <div class="automation-nav-add-actions">
                                         <button type="button" class="btn btn-sm btn-outline-secondary"
@@ -394,12 +394,12 @@ export class AutomationNavLauncher {
                                         <button type="button" class="btn btn-sm btn-outline-secondary"
                                                 data-automation-nav-action="new-agent"
                                                 title="Create a new agent for this repository">
-                                            <i class="fa-solid fa-robot me-1" aria-hidden="true"></i>New agent…
+                                            <i class="fa-solid fa-robot me-1" aria-hidden="true"></i>Create agent…
                                         </button>
                                         <button type="button" class="btn btn-sm btn-outline-secondary"
                                                 data-automation-nav-action="new-automation"
                                                 title="Create a new automation for this repository">
-                                            <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New automation…
+                                            <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Create automation…
                                         </button>
                                     </div>
                                 </div>

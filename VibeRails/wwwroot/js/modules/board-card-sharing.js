@@ -40,7 +40,7 @@ export function cardSharingSection(saved) {
         ${audienceFields('card-share-access', { attr: 'data-card-share-audience' })}
         <div class="d-flex flex-wrap gap-2 mt-2">
             <button type="button" class="btn btn-sm btn-outline-primary" data-share-action="create">Create link</button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" data-share-action="refresh">Refresh shared card</button>
+            <button type="button" class="btn btn-sm btn-secondary" data-share-action="refresh">Refresh shared card</button>
             <button type="button" class="btn btn-sm btn-outline-secondary" data-share-action="reload">Reload links</button>
         </div>
         <p class="board-side-empty mt-2" role="status" aria-live="polite" data-card-share-message></p>

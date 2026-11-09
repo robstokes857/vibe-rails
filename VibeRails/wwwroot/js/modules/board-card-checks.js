@@ -4,7 +4,7 @@ import { CodeReportViewer } from './code-report/viewer.js';
 export function cardChecksSection() {
     return `<section class="board-block board-checks" data-board-checks aria-label="Checks">
         <div class="board-checks-heading"><h3 class="board-block-label">Checks</h3>
-            <button type="button" class="btn btn-sm btn-outline-secondary" data-check-refresh>Refresh checks</button></div>
+            <button type="button" class="btn btn-sm btn-secondary" data-check-refresh>Refresh checks</button></div>
         <p data-check-message role="status" aria-live="polite">Loading checks…</p>
         <div class="board-checks-summary" data-check-summary></div>
         <section data-check-report hidden aria-label="Saved check report"></section>

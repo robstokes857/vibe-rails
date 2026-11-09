@@ -39,7 +39,7 @@ async function setup(page) {
 
 test('shared editor creates an Agent, keeps provider drafts and uses native typed variables',async({page})=>{
     const state=await setup(page);
-    await page.getByRole('button',{name:'New agent',exact:true}).click();
+    await page.locator('.vb-page-actions').getByRole('button',{name:'Create agent',exact:true}).click();
     const editor=page.locator('[data-launch-editor]');
     await editor.getByLabel('Name',{exact:true}).fill('Reviewer');
     const prompt=editor.getByLabel('Initial prompt (optional)',{exact:true});
@@ -79,7 +79,7 @@ test('conflict retains source and history refresh never changes the draft',async
 
 for(const width of [320,375,768,1024])test(`editor footer and single scroller at ${width}px`,async({page},testInfo)=>{
     await page.setViewportSize({width,height:800});await setup(page);
-    await page.getByRole('button',{name:'New agent',exact:true}).click();
+    await page.locator('.vb-page-actions').getByRole('button',{name:'Create agent',exact:true}).click();
     const editor=page.locator('[data-launch-editor]');
     const bounds=await editor.getByRole('button',{name:'Create agent',exact:true}).boundingBox();
     expect(bounds.y+bounds.height).toBeLessThanOrEqual(800);
@@ -91,9 +91,48 @@ for(const width of [320,375,768,1024])test(`editor footer and single scroller at
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
 const file=name=>({name,mimeType:'image/png',buffer:png});
 
+for (const width of [320, 375, 768, 1024, 1440]) test(`catalog follows the shared design at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const state = await setup(page);
+    const catalog = page.locator('[data-agent-catalog]');
+    await expect(page.locator('.app-subnav')).toHaveCSS('height', '44px');
+    await expect(page.locator('.brand-logo-sm')).toHaveCSS('height', '36px');
+    await expect(page.locator('[data-agent-refresh]')).toHaveCSS('border-top-width', '1px');
+    await expect(page.locator('[data-agent-refresh]')).toHaveCSS('border-top-color', 'rgb(100, 116, 139)');
+    expect(await page.locator('.app-subnav').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await expect(catalog.locator('.launch-catalog-empty')).toHaveCount(3);
+    await expect(page.locator('.vb-page-description')).toHaveText('Save AI setups and scripts to run on demand or from Board lanes.');
+    await expect(catalog.getByRole('button', { name: 'Create quick launch', exact: true })).toBeVisible();
+    expect(await page.locator('.ai-agents-view').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await expect(catalog.locator('.launch-catalog-section').first()).toHaveCSS('border-radius', '12px');
+    await expect(catalog.locator('.launch-catalog-empty').first()).toHaveCSS('border-top-style', 'dashed');
+    await page.screenshot({ path: testInfo.outputPath(`catalog-empty-${width}.png`), fullPage: true });
+    state.presets.push({ id: 'reviewer', name: 'Review changes', cli: 'codex', initialPrompt: 'Review', enabled: true, revision: 1 },
+        { id: 'quick', name: 'Everyday Claude', cli: 'claude', initialPrompt: '', enabled: true, revision: 1 });
+    state.actions.push({ id: 'test', name: 'Run project tests', kind: 'script', enabled: true, revision: 1 });
+    await page.locator('[data-agent-refresh]').click();
+    await expect(catalog.locator('.launch-catalog-row')).toHaveCount(3);
+    expect(await catalog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`catalog-populated-${width}.png`), fullPage: true });
+});
+
+test('saving an agent hides Purpose and preserves its existing purpose', async ({ page }) => {
+    const state = await setup(page);
+    state.presets.push({ id: 'reviewer', name: 'Reviewer', cli: 'codex', initialPrompt: 'Review', purpose: 'code_review', enabled: true, revision: 1 });
+    await page.locator('[data-agent-refresh]').click();
+    await page.getByRole('button', { name: 'Reviewer', exact: true }).click();
+    const editor = page.locator('[data-launch-editor]');
+    await editor.getByText('Additional settings', { exact: true }).click();
+    await expect(editor.getByLabel('Purpose', { exact: true })).toHaveCount(0);
+    await editor.getByLabel('Name', { exact: true }).fill('Reviewer updated');
+    await editor.locator('[data-launch-save]').click();
+    await expect.poll(() => state.presets[0].name).toBe('Reviewer updated');
+    expect(state.presets[0].purpose).toBe('code_review');
+});
+
 test('staged attachments retry without recreating the preset or reuploading successful files',async({page})=>{
     const state=await setup(page);
-    await page.getByRole('button',{name:'New agent',exact:true}).click();
+    await page.locator('.vb-page-actions').getByRole('button',{name:'Create agent',exact:true}).click();
     const editor=page.locator('[data-launch-editor]');
     await editor.getByLabel('Name',{exact:true}).fill('Files');
     await editor.locator('[data-board-composer-file]').setInputFiles([file('first.png'),file('second.png')]);
@@ -130,7 +169,7 @@ test('upload keeps its original insertion while the user types and moves the car
 });
 
 test('Escape dismisses suggestions first and navigation retains unsaved drafts',async({page})=>{
-    await setup(page);await page.getByRole('button',{name:'New agent',exact:true}).click();
+    await setup(page);await page.locator('.vb-page-actions').getByRole('button',{name:'Create agent',exact:true}).click();
     const editor=page.locator('[data-launch-editor]'),prompt=editor.locator('[data-board-composer-input]');
     await prompt.fill('Keep {{git_');await expect(page.getByRole('option',{name:/git_branch/})).toBeVisible();
     await prompt.press('Escape');await expect(page.getByRole('option',{name:/git_branch/})).toHaveCount(0);await expect(editor).toBeVisible();
@@ -141,18 +180,19 @@ test('Escape dismisses suggestions first and navigation retains unsaved drafts',
     expect(await page.evaluate(()=>window.app.currentView)).toBe('ai-agents');
 });
 
-test('Action fields and definition schedules save their typed contracts',async({page})=>{
-    const state=await setup(page);await page.getByRole('button',{name:'New action',exact:true}).click();
+test('Create script saves a script and schedule without an action type or purpose field',async({page})=>{
+    const state=await setup(page);await page.locator('.vb-page-actions').getByRole('button',{name:'Create script',exact:true}).click();
     const editor=page.locator('[data-launch-editor]');
-    await editor.getByLabel('Name',{exact:true}).fill('Quality gate');
-    await editor.getByLabel('Action type',{exact:true}).selectOption('code-quality');
-    await editor.getByLabel('Minimum grade (optional)',{exact:true}).fill('B');
-    await editor.getByRole('button',{name:'Add schedule or event',exact:true}).click();
+    await editor.getByLabel('Name',{exact:true}).fill('Run tests');
+    await editor.getByLabel('Script path (relative to execution project)',{exact:true}).fill('scripts/test.py');
+    await expect(editor.getByLabel('Action type',{exact:true})).toHaveCount(0);
+    await expect(editor.getByLabel('Purpose',{exact:true})).toHaveCount(0);
+    await editor.getByRole('button',{name:'Create schedule or event',exact:true}).click();
     await editor.getByLabel('Frequency',{exact:true}).selectOption('2');
     await editor.getByLabel('Local time',{exact:true}).fill('08:30');
     await editor.locator('[data-launch-save]').click();
     await expect.poll(()=>state.bindings.length).toBe(1);
-    expect(state.actions[0]).toMatchObject({kind:'code-quality',script:null,check:{scope:'working-tree',failGrade:'B'}});
+    expect(state.actions[0]).toMatchObject({kind:'script',check:null,script:{path:'scripts/test.py',runtime:0}});
     expect(state.bindings[0]).toMatchObject({definitionType:'action',trigger:{kind:0,scheduleKind:2,localTime:'08:30'}});
     expect(await editor.locator('[data-definition-launch-options]').count()).toBe(0);
 });
@@ -193,6 +233,46 @@ test('ordered lane selections preserve gates and lock editing during writes',asy
     await expect(page.locator('[data-lane-gate]').first()).toBeDisabled();
     expect(saved).toMatchObject({revision:4,selections:[{definitionId:'p2',gate:'result'},{definitionId:'p1',gate:'review'}]});release();
     await expect(page.locator('[data-lane-gate]').first()).toBeEnabled();
+});
+
+for (const [kind, name, scope] of [['vca', 'VCA check', 'working-tree'], ['code-quality', 'Code quality check', 'card']])
+test(`lane picker adds ${kind} without running or saving the lane early`, async ({ page }) => {
+    const state = await setup(page);
+    let savedLane, release;
+    await page.route('**/api/v1/board/columns/lane/launches', route => {
+        if (route.request().method() === 'GET') return route.fulfill({ json: { revision: 2, selections: [] } });
+        savedLane = route.request().postDataJSON();
+        return route.fulfill({ json: { ...savedLane, revision: 3 } });
+    });
+    await page.route('**/api/v1/actions', async route => {
+        await new Promise(resolve => { release = resolve; });
+        const action = { ...route.request().postDataJSON(), id: 'vca', revision: 1 };
+        state.actions.push(action);
+        return route.fulfill({ json: action });
+    });
+    await page.evaluate(async () => {
+        const { mountLaunchLane } = await import('/js/modules/launch-lane-editor.js');
+        const host = document.createElement('div');
+        document.querySelector('#app-content').replaceChildren(host);
+        window.disposeLane = mountLaunchLane(window.app, host, 'lane');
+    });
+    const picker = page.locator('[data-lane-add-choice]');
+    await expect(page.locator('[data-lane-add]')).toBeDisabled();
+    await expect(page.locator('.ts-control')).toBeVisible();
+    await picker.evaluate((node, kind) => node.tomselect.setValue(`new:${kind}`), kind);
+    await page.locator('[data-lane-add]').click();
+    await expect.poll(() => Boolean(release)).toBe(true);
+    await expect(page.locator('[data-lane-save]')).toBeDisabled();
+    expect(await picker.evaluate(node => node.tomselect.isDisabled)).toBe(true);
+    release();
+    await expect(page.locator('[data-lane-selection-list] strong')).toHaveText(name);
+    expect(state.actions[0]).toMatchObject({ kind, check: { scope }, expectedRevision: 0 });
+    expect(savedLane).toBeUndefined();
+    expect(state.runs).toHaveLength(0);
+    await page.locator('[data-lane-save]').click();
+    await expect.poll(() => savedLane).toMatchObject({ revision: 2, selections: [{ definitionId: 'vca', definitionType: 'action', gate: 'result' }] });
+    await page.evaluate(() => window.disposeLane());
+    await expect(page.locator('.launch-lane-dropdown')).toHaveCount(0);
 });
 
 test('terminal picker manages Agents and Quick Launches in the shared editor', async ({ page }) => {
@@ -266,7 +346,7 @@ test('preset attachment readers use their owner and restore the editable draft',
 
 test('removing a staged file also removes its unsaved inline reference', async ({ page }) => {
     await setup(page);
-    await page.getByRole('button', { name: 'New agent', exact: true }).click();
+    await page.locator('.vb-page-actions').getByRole('button', { name: 'Create agent', exact: true }).click();
     await page.locator('[data-board-composer-file]').setInputFiles(file('remove.png'));
     await expect(page.locator('[data-board-composer-input]')).toHaveValue(/attachment:pending_/);
     await page.locator('[data-board-remove-pending]').click();

@@ -289,10 +289,10 @@ export class PythonScriptsController {
                         <code>.ps1</code>, <code>.sh</code> or <code>.py</code> file onto this panel.</span>
                     <div class="python-scripts-empty-actions">
                         <button class="btn btn-sm btn-primary" type="button" data-python-scripts-action="new">
-                            <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New script
+                            <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Create script
                         </button>
                         ${this._canImportFromHost() ? `<button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="import">
-                            <i class="fa-solid fa-file-import me-1" aria-hidden="true"></i>Add from disk
+                            <i class="fa-solid fa-file-import me-1" aria-hidden="true"></i>Import from disk
                         </button>` : ''}
                     </div>
                 </div>`
@@ -560,7 +560,7 @@ export class PythonScriptsController {
         await this.ensureState();
         let displayEdited = false;
         const values = await this._promptForm({
-            title: 'New script',
+            title: 'Create script',
             body: 'Choose pwsh, bash, or python, where to create your script and where it appears. Sign it when you are ready to run it.',
             fields: [{
                 key: 'runtime',
@@ -647,7 +647,7 @@ export class PythonScriptsController {
         }
         const picked = await this.app.pickFileSystemEntry({
             mode: 'file',
-            title: 'Add a script',
+            title: 'Import a script',
             filters: [
                 { label: 'Scripts', extensions: ['ps1', 'sh', 'py'] },
                 ...SCRIPT_RUNTIMES.map((runtime) => ({
@@ -663,7 +663,7 @@ export class PythonScriptsController {
         return this.importScript(picked.path);
     }
 
-    /** Shared by Add from disk and the VS Code Explorer command; never signs or runs. */
+    /** Shared by Import from disk and the VS Code Explorer command; never signs or runs. */
     async importScript(sourcePath) {
         if (!this._canImportFromHost()) {
             return this.app.showError('Adding a host file is available from the main VibeRails dashboard.');
@@ -699,10 +699,10 @@ export class PythonScriptsController {
             const scopeHelp = repoAllowed ? ` Repo scope applies to ${project}.`
                 : ' To use Repo scope, open VibeRails in this file’s repository.';
             const values = await this._promptForm({
-                title: 'Add script from disk',
+                title: 'Import script from disk',
                 body: `Runs from its own folder: ${sourcePath}. The file stays where it is.${scopeHelp}`,
                 fields,
-                submitLabel: 'Add script'
+                submitLabel: 'Import script'
             });
             if (values === null) return;
             const previousIds = new Set(this.state?.scripts.map(script => script.name));
@@ -908,7 +908,7 @@ export class PythonScriptsController {
     }
 
     /**
-     * The New script dialog keeps its two fields in step: a runtime pick re-extends the
+     * The Create script dialog keeps its two fields in step: a runtime pick re-extends the
      * name, and a typed name with a known extension moves the picker.
      */
     _syncRuntimeAndName(key, data) {
@@ -971,7 +971,7 @@ export class PythonScriptsController {
 
     /**
      * Dropped files are read in the browser and posted as text, so this works from a
-     * remote frontend too — unlike "Add from disk", which copies a path on the host.
+     * remote frontend too — unlike "Import from disk", which copies a path on the host.
      */
     async _acceptDroppedFiles(files) {
         const scripts = files.filter((file) => isScriptFileName(file.name));

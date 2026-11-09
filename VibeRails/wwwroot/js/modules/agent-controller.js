@@ -556,7 +556,7 @@ export class AgentController {
                     </button>
                     <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2" type="button"
                         data-rule-editor-add>
-                        <i class="fa-solid fa-plus" aria-hidden="true"></i>Add rule
+                        <i class="fa-solid fa-plus" aria-hidden="true"></i>Create rule
                     </button>
                 </div>
             </header>
@@ -564,7 +564,7 @@ export class AgentController {
                 ? `<div class="rules-files-detail-empty">
                         <span aria-hidden="true"><i class="fa-regular fa-circle-check"></i></span>
                         <strong>No rules yet</strong>
-                        <p>This file exists but enforces nothing. Add a rule to make validation act on it.</p>
+                        <p>This file exists but enforces nothing. Create a rule to make validation act on it.</p>
                    </div>`
                 : `<ul class="rules-rule-list">${ruleRows}</ul>`}
             <p class="rules-files-detail-foot">
@@ -639,7 +639,7 @@ export class AgentController {
             || rule.name === SIGNED_APPROVAL_RULE.template || !existing.has(rule.name));
 
         if (unused.length === 0) {
-            this.app.showToast('Add rule', 'Every available rule is already in this file.', 'info');
+            this.app.showToast('Create rule', 'Every available rule is already in this file.', 'info');
             return;
         }
 
@@ -658,7 +658,7 @@ export class AgentController {
                 <span><strong>${option.icon} ${option.value}</strong><small>${option.blurb}</small></span>
             </label>`).join('');
 
-        const modal = this.openRuleCrudModal('Add a rule', `
+        const modal = this.openRuleCrudModal('Create a rule', `
             <form id="inline-add-rule-form" class="rules-add-rule">
                 <p class="text-muted mb-2">Adding to <code>${this.app.escapeHtml(agent.path)}</code></p>
                 <div class="rules-add-rule-list">${options}</div>
@@ -693,7 +693,7 @@ export class AgentController {
                 <div class="rules-add-rule-levels">${levels}</div>
                 <div class="d-flex justify-content-end gap-2 mt-4">
                     <button type="button" class="btn btn-outline-secondary" data-action="close-modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Add rule</button>
+                    <button type="submit" class="btn btn-primary">Create rule</button>
                 </div>
             </form>`);
 
@@ -741,7 +741,7 @@ export class AgentController {
             const ruleTemplate = form.querySelector('input[name="inline-rule-pick"]:checked')?.value;
             const enforcement = form.querySelector('input[name="inline-rule-level"]:checked')?.value || 'WARN';
             if (!ruleTemplate) {
-                this.app.showToast('Add rule', 'Pick a rule first.', 'warning');
+                this.app.showToast('Create rule', 'Pick a rule first.', 'warning');
                 return;
             }
             let ruleText;
@@ -928,7 +928,7 @@ export class AgentController {
 
                 if (action === 'validate-agent' && !agent.rules?.length) {
                     element.disabled = true;
-                    element.title = 'Add a rule before validating this file.';
+                    element.title = 'Create a rule before validating this file.';
                 }
             });
 
@@ -942,7 +942,7 @@ export class AgentController {
         if (!agent.rules || agent.rules.length === 0) {
             return `<div class="rules-files-detail-empty mb-3">
                 <strong>No rules yet</strong>
-                <p>Use Add rule above to choose your first rule and its enforcement. Each rule will have its own Edit and Remove buttons.</p>
+                <p>Use Create rule above to choose your first rule and its enforcement. Each rule will have its own Edit and Remove buttons.</p>
             </div>`;
         }
 
@@ -1135,7 +1135,7 @@ export class AgentController {
                 <input type="radio" name="rule-enforcement" value="${option.value}" ${option.value === currentEnforcement ? 'checked' : ''}>
                 <span><strong>${option.value}</strong><small>${option.blurb}</small></span>
             </label>`).join('');
-        this.app.showModal(isEdit ? 'Edit rule enforcement' : 'Add rule', `
+        this.app.showModal(isEdit ? 'Edit rule enforcement' : 'Create rule', `
             <form id="rule-enforcement-form">
                 <p><strong>${this.app.escapeHtml(ruleText)}</strong></p>
                 <p class="text-muted small">${this.app.escapeHtml(agent.path || '')}</p>
@@ -1143,7 +1143,7 @@ export class AgentController {
                 <div class="rules-add-rule-levels">${levels}</div>
                 <div class="d-flex justify-content-end gap-2 mt-4">
                     <button type="button" class="btn btn-outline-secondary" data-action="close-modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">${isEdit ? 'Save enforcement' : 'Add rule'}</button>
+                    <button type="submit" class="btn btn-primary">${isEdit ? 'Save enforcement' : 'Create rule'}</button>
                 </div>
             </form>`);
 
@@ -1791,7 +1791,7 @@ export class AgentController {
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
                     </svg>
-                    Create Rule File
+                    Create rule file
                 </button>
             </div>
         `;

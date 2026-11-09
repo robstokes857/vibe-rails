@@ -345,7 +345,7 @@ test('Full editor offers rule-specific Edit and Remove controls with no selectio
     assert.match(html, /data-rule-delete="0"/);
     assert.doesNotMatch(html, /data-rule-select|>\s*Select\s*</);
     const empty = controller.renderAgentRules({ rules: [] });
-    assert.match(empty, /Use Add rule above/);
+    assert.match(empty, /Use Create rule above/);
     assert.doesNotMatch(empty, /data-rule-edit|data-rule-delete/);
 });
 
@@ -388,7 +388,7 @@ test('Open file in VS Code sends the exact selected file from a browser', async 
     assert.deepEqual(request, ['/api/v1/cli/launch/vscode', 'POST', { path: 'C:\\repo with spaces\\vc.rules.md' }]);
 });
 
-test('New rule file returns to Manage rules and selects the created path across separator differences', async t => {
+test('Create rule file returns to Manage rules and selects the created path across separator differences', async t => {
     const originalDocument = globalThis.document;
     t.after(() => { globalThis.document = originalDocument; });
     const createButton = { disabled: false };

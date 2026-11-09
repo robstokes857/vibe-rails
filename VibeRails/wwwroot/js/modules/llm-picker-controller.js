@@ -396,7 +396,7 @@ export class LlmPickerController {
                                         <h6>Agents and Quick Launches</h6>
                                         <button type="button" class="btn btn-sm btn-outline-primary"
                                                 data-llm-picker-action="create">
-                                            <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New quick launch
+                                            <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Create quick launch
                                         </button>
                                     </div>
                                     <div data-llm-picker-group="${ENVIRONMENT_GROUP}"></div>

@@ -199,7 +199,7 @@ export class ReviewInboxController {
             const who = view?.email ? ` for ${esc(view.email)}` : '';
             const line = view ? describeRefresh(view) : this.error ? 'The list could not be read.' : 'Loading…';
             status.innerHTML = `<span class="ri-muted">${esc(line)}${who}</span>`
-                + `<button type="button" class="btn btn-sm btn-outline-secondary" data-ri-action="refresh" ${this.busy || !view?.hasApiKey ? 'disabled' : ''}>`
+                + `<button type="button" class="btn btn-sm btn-secondary" data-ri-action="refresh" ${this.busy || !view?.hasApiKey ? 'disabled' : ''}>`
                 + `${this.busy === 'refresh' ? 'Checking…' : 'Check now'}</button>`;
         }
         const problem = this.root.querySelector('[data-ri-problem]');

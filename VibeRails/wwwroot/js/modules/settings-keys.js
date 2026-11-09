@@ -93,7 +93,7 @@ export class SettingsKeysPanel {
             <div class="sandbox-item-card text-start mb-3">
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <h5 class="sandbox-item-name mb-0">Your keys on this computer</h5>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-key-action="refresh">Refresh</button>
+                    <button type="button" class="btn btn-sm btn-secondary" data-key-action="refresh">Refresh</button>
                 </div>
                 <div data-keys-list></div>
                 <p class="small text-warning mt-2 mb-0" data-keys-warnings role="status" hidden></p>

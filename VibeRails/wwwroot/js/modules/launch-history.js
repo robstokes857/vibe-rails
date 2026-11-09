@@ -8,7 +8,7 @@ export const runHistorySection =
     () => `<section class="board-block board-activity" aria-label="Run history">
     <h3 class="board-block-label">Run history</h3>
     <p class="board-editor-muted">Runs in this project. Process status and check or review results are reported separately.</p>
-    <button type="button" class="btn btn-sm btn-outline-secondary" data-run-refresh>Refresh</button>
+    <button type="button" class="btn btn-sm btn-secondary" data-run-refresh>Refresh</button>
     <div data-run-list><p class="board-editor-muted">No runs yet.</p></div>
     <p data-run-error role="alert"></p>
     <button type="button" class="btn btn-sm btn-outline-secondary" data-run-more hidden>Load earlier runs</button>

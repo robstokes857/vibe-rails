@@ -58,7 +58,7 @@ const PAGES = Object.freeze({
         noun: 'agent',
         title: 'Agents',
         description: 'Saved CLI setups with a starting message. Run one now, on a schedule, around commits or from a Board lane.',
-        newLabel: 'New agent',
+        newLabel: 'Create agent',
         listTitle: 'Your agents',
         listHint: 'Run, edit, pause or remove an agent from one place.',
         emptyTitle: 'No agents yet',
@@ -74,7 +74,7 @@ const PAGES = Object.freeze({
         countNoun: 'workflow',
         title: 'Automations',
         description: 'Scripts you write and sign, and workflows that run them with checks, without an LLM — on demand, on a schedule, around commits or from a Board lane.',
-        newLabel: 'New automation',
+        newLabel: 'Create automation',
         listTitle: 'Your automations',
         listHint: 'Run, edit, sign, pause or remove a script or workflow from one place.',
         emptyTitle: 'No automations yet',
@@ -317,7 +317,7 @@ export class JobController {
                         <h1 class="jobs-page-title">${page.title}</h1>
                         <p>${page.description}</p>
                     </div>
-                    ${automations ? this.renderAutomationsHeaderActions() : `<div class="jobs-page-actions" role="group" aria-label="Add an ${page.noun}">
+                    ${automations ? this.renderAutomationsHeaderActions() : `<div class="jobs-page-actions" role="group" aria-label="Create ${page.noun}">
                         <button class="btn btn-outline-secondary" type="button" data-job-action="import-from-repository"
                                 title="Copy an ${page.noun} from another repository on this machine">
                             <i class="fa-solid fa-code-branch me-1" aria-hidden="true"></i>Import from repository
@@ -368,7 +368,7 @@ export class JobController {
                     <div class="jobs-history-body">
                         <div class="jobs-history-toolbar">
                             <span>Select an ${page.noun} to see all of its runs.</span>
-                            <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="refresh">
+                            <button class="btn btn-sm btn-secondary" type="button" data-job-action="refresh">
                                 <i class="fa-solid fa-rotate-right me-1" aria-hidden="true"></i>Refresh
                             </button>
                         </div>
@@ -389,7 +389,7 @@ export class JobController {
                     <i class="fa-solid fa-file-code" aria-hidden="true"></i>Script from disk…
                 </button>`
             : '';
-        return `<div class="jobs-page-actions" role="group" aria-label="Add an automation">
+        return `<div class="jobs-page-actions" role="group" aria-label="Create automation">
                 <details class="job-more jobs-page-menu">
                     <summary class="btn btn-outline-secondary" aria-haspopup="menu">
                         <i class="fa-solid fa-file-import me-1" aria-hidden="true"></i>Import<i class="fa-solid fa-chevron-down ms-1" aria-hidden="true"></i>
@@ -406,9 +406,9 @@ export class JobController {
                 </details>
                 <details class="job-more jobs-page-menu">
                     <summary class="btn btn-primary" aria-haspopup="menu" data-automations-new>
-                        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New<i class="fa-solid fa-chevron-down ms-1" aria-hidden="true"></i>
+                        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Create<i class="fa-solid fa-chevron-down ms-1" aria-hidden="true"></i>
                     </summary>
-                    <div class="job-more-menu jobs-new-menu" role="menu" aria-label="New">
+                    <div class="job-more-menu jobs-new-menu" role="menu" aria-label="Create">
                         <button type="button" role="menuitem" data-python-scripts-action="new">
                             <i class="fa-solid fa-file-code" aria-hidden="true"></i>
                             <span><strong>Script</strong><small>A pwsh, bash or python file, written with an agent beside the editor. Sign it, then run it.</small></span>
@@ -433,7 +433,7 @@ export class JobController {
                         title="The signing PIN approves scripts to run">
                     <i class="fa-solid fa-key me-1" aria-hidden="true"></i><span data-python-scripts-pin-label>Set PIN</span>
                 </button>
-                <button class="btn btn-sm btn-outline-secondary" type="button" data-python-scripts-action="refresh"
+                <button class="btn btn-sm btn-secondary" type="button" data-python-scripts-action="refresh"
                         title="Refresh" aria-label="Refresh the script list">
                     <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
                 </button>
@@ -691,10 +691,10 @@ export class JobController {
                         (VCA, Code quality). You can also drop a <code>.ps1</code>, <code>.sh</code> or <code>.py</code> file here.</span>
                     <div class="python-scripts-empty-actions">
                         <button class="btn btn-sm btn-primary" type="button" data-python-scripts-action="new">
-                            <i class="fa-solid fa-file-code me-1" aria-hidden="true"></i>New script
+                            <i class="fa-solid fa-file-code me-1" aria-hidden="true"></i>Create script
                         </button>
                         <button class="btn btn-sm btn-outline-primary" type="button" data-job-action="new">
-                            <i class="fa-solid fa-list-check me-1" aria-hidden="true"></i>New workflow
+                            <i class="fa-solid fa-list-check me-1" aria-hidden="true"></i>Create workflow
                         </button>
                         ${fromDisk}
                     </div>
@@ -1367,7 +1367,7 @@ export class JobController {
         const scheduleKind = Number(scheduled?.scheduleKind ?? SCHEDULE.INTERVAL);
         const projectPath = this.currentProjectPath();
 
-        this.app.showModal(isEdit ? `Edit ${source.name}` : `New ${page.noun}`, `
+        this.app.showModal(isEdit ? `Edit ${source.name}` : `Create ${page.noun}`, `
             <div data-job-editor data-mode="${this.mode}">
             <form data-job-form class="job-inline-form job-creation-form">
                 <div class="job-form-fields">
@@ -1630,14 +1630,14 @@ export class JobController {
                         <option value=""${choices.current ? '' : ' selected'} disabled>${choices.loading ? 'Loading scripts…' : 'Choose a script…'}</option>
                         ${choices.unlisted.map(option).join('')}${groups}
                     </select>
-                    <button class="btn btn-outline-secondary" type="button" data-workflow-action="new-script"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New script…</button>
+                    <button class="btn btn-outline-secondary" type="button" data-workflow-action="new-script"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Create script…</button>
                     <button class="btn btn-outline-secondary" type="button" data-workflow-action="browse-script">Browse repository…</button>
                 </div>
                 <small>A workflow runs a file inside this repository, as it was when you saved the workflow: save again after changing the script.${choices.hasMore ? ' Not every repository script is listed; use Browse repository… for the rest.' : ''}</small>
             </div>`;
     }
 
-    /** New script… creates a library script inside this repository and puts it in the step. */
+    /** Create script… creates a library script inside this repository and puts it in the step. */
     async newScriptForStep(action) {
         const project = this.currentProjectPath();
         if (!action || !project) {

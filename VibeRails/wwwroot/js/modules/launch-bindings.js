@@ -7,7 +7,7 @@ export const bindingSection = (
     <p class="board-editor-muted">Execution project: <strong>${escapeHtml(project || 'Current project')}</strong></p>
     <p class="board-editor-muted">Schedules run while Vibe Rails is open. Board lane runs are configured on the Board.</p>
     <div data-binding-list></div>
-    <button type="button" class="btn btn-sm btn-outline-secondary" data-binding-add>Add schedule or event</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" data-binding-add>Create schedule or event</button>
     <p class="board-editor-muted" data-binding-hint></p>
 </section>`;
 

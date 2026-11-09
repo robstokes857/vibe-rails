@@ -520,7 +520,7 @@ test('Rules and Code quality have independent pages without a docked terminal', 
     // Rules and Quality have separate navigation entries; rule-files remains an editor route.
     const rulesNavLinks = index.match(/data-action="navigate" data-view="rule-files"/g) || [];
     assert.equal(rulesNavLinks.length, 0);
-    assert.equal((index.match(/<span>QUALITY<\/span>/g) || []).length, 1);
+    assert.equal((index.match(/<span>Quality<\/span>/g) || []).length, 1);
     assert.equal((index.match(/data-action="navigate-home"/g) || []).length, 1);
     assert.equal((index.match(/class="app-sidebar"|switch-nav-layout|nav-layout\.js/g) || []).length, 0);
 

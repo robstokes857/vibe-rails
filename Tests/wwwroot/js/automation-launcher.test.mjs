@@ -474,9 +474,9 @@ test('launcher CSS keeps a fallback on every colour token', () => {
     }
 });
 
-test('the customize modal offers Import from repository, New agent and New automation, and hands each off to its page', (t) => {
+test('the customize modal offers Import from repository, Create agent and Create automation, and hands each off to its page', (t) => {
     const source = readFileSync(modulePath, 'utf8');
-    assert.match(source, /<h6>Add more<\/h6>/);
+    assert.match(source, /<h6>Create<\/h6>/);
     assert.match(source, /data-automation-nav-action="import-repository"/);
     assert.match(source, /data-automation-nav-action="new-agent"/);
     assert.match(source, /data-automation-nav-action="new-automation"/);

@@ -1056,9 +1056,9 @@ export class BoardController {
         if (filteredOut) return 'No cards match these filters.';
         if (this.isDoneLane(column)) return 'Nothing done yet.';
         if (/review/i.test(column.name)) return 'Park a card here when it is ready for eyes.';
-        if (/build|progress/i.test(column.name)) return 'Drag work in, or use New card.';
+        if (/build|progress/i.test(column.name)) return 'Drag work in, or use Create card.';
         if (/ready|next/i.test(column.name)) return 'Queue the next thing to build.';
-        return 'Nothing here. Add a card or drag one in.';
+        return 'Nothing here. Create a card or drag one in.';
     }
 
     renderLanes() {
@@ -1587,7 +1587,7 @@ export class BoardController {
         // cloneTemplate hoists the shared styles once; the Board page itself is not mounted.
         if (outsideBoard) this.app.cloneTemplate('board-template');
 
-        this.app.showModal(card ? cardLabel(card) : 'New card', `
+        this.app.showModal(card ? cardLabel(card) : 'Create card', `
             <div class="board-card-editor" data-board-card-editor data-card-id="${escapeHtml(card?.id || '')}">
                 ${cardEditorLayout({
                     main: `
@@ -3125,7 +3125,7 @@ export class BoardController {
         const source = board ? null : this.trackerSourceBoard();
         // The Manager tab appears only while Settings > AI board manager is on.
         const manager = Boolean(board && this.state.aiBoardManager);
-        this.app.showModal(board ? `Board · ${board.name}` : 'New board', `
+        this.app.showModal(board ? `Board · ${board.name}` : 'Create board', `
             <div class="board-lane-editor" data-board-board-editor>
                 ${board ? boardSettingsNavigation({ manager }) : source ? newBoardNavigation() : ''}
                 <section id="board-settings-general" data-board-settings-panel="general" ${board || source ? 'role="tabpanel" aria-labelledby="board-settings-tab-general"' : ''}>
@@ -3143,7 +3143,7 @@ export class BoardController {
                     ${board ? `<button type="button" class="btn btn-sm btn-outline-danger" data-board-delete-board>
                         <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete board
                     </button>` : '<span></span>'}
-                    <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-board>${board ? 'Save board' : 'Create'}</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-board>${board ? 'Save board' : 'Create board'}</button>
                 </div>
                 </section>
                 ${board ? `
@@ -3245,7 +3245,7 @@ export class BoardController {
         return [this.currentBoard(), ...this.state.boards].find(board => board && !boardTracker(board)) || null;
     }
 
-    // The New board dialog's Jira and Azure DevOps tabs. Connect saves the connection on the
+    // The Create board dialog's Jira and Azure DevOps tabs. Connect saves the connection on the
     // source board with newBoard, so the server always copies that board's lanes into a new
     // dedicated board and moves the connection there (EnsureDedicated…BoardAsync), never turning
     // the source board itself into it; the panel follows. The dialog stays open on the result and
@@ -3354,7 +3354,7 @@ export class BoardController {
         this.state.editingColumnId = column?.id || null;
         this.state.editingColumnColor = column?.color?.toLowerCase() || LANE_COLORS[1];
 
-        this.app.showModal(column ? `Lane · ${column.name}` : 'New lane', `
+        this.app.showModal(column ? `Lane · ${column.name}` : 'Create lane', `
             <div class="board-lane-editor" data-board-lane-editor>
                 <label class="board-editor-label" for="board-lane-name">Name</label>
                 <input type="text" class="form-control form-control-sm mb-3" id="board-lane-name"
@@ -3380,7 +3380,7 @@ export class BoardController {
                     ${column ? `<button type="button" class="btn btn-sm btn-outline-danger" data-board-delete-lane>
                         <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete lane
                     </button>` : '<span></span>'}
-                    <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-lane>Save</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-board-save-lane>${column ? 'Save lane' : 'Create lane'}</button>
                 </div>
                 ${column ? laneAutomationSection() : '<p class="board-editor-muted mt-3">Save the lane to configure an Automation.</p>'}
             </div>

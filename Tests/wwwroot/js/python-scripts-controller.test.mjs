@@ -244,7 +244,7 @@ test('Clicking a script opens the workbench view in every host', () => {
     }
 });
 
-test('New script and Duplicate land in the workbench for the new file', async () => {
+test('Create script and Duplicate land in the workbench for the new file', async () => {
     const app = createApp();
     app.apiCall = async (url, method = 'GET', body = null) => {
         app.calls.push({ url, method, body });
@@ -255,7 +255,7 @@ test('New script and Duplicate land in the workbench for the new file', async ()
             { id: `id-${body.name}`, name: body.name, path: `/scripts/${body.name}`, status: 'unapproved' }] };
     };
     const controller = controllerWith([SCRIPT], app);
-    controller._promptForm = async ({ title }) => ({ name: title.startsWith('New') ? 'fresh.py' : 'nightly-copy.py' });
+    controller._promptForm = async ({ title }) => ({ name: title === 'Create script' ? 'fresh.py' : 'nightly-copy.py' });
 
     await controller._newScriptAndOpen();
     assert.equal(app.calls[0].url, '/api/v1/python-scripts/create');
@@ -781,7 +781,7 @@ test('Opening in VS Code tells a never-signed script to sign, and a signed one t
     }
 });
 
-test('New script says pwsh, bash, or python and keeps the picker and the file name in step', async () => {
+test('Create script says pwsh, bash, or python and keeps the picker and the file name in step', async () => {
     const app = createApp();
     app.apiCall = async (url, method, body) => {
         app.calls.push({ url, method, body });
@@ -798,7 +798,7 @@ test('New script says pwsh, bash, or python and keeps the picker and the file na
 
     const name = await controller.newScript();
 
-    assert.equal(form.title, 'New script');
+    assert.equal(form.title, 'Create script');
     assert.match(form.body, /pwsh, bash, or python/);
     const runtime = form.fields.find((field) => field.key === 'runtime');
     assert.equal(runtime.type, 'select');
