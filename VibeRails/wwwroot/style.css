@@ -19727,6 +19727,10 @@ body.performance-mode .brand-text-sm {
 .ai-agents-view { display: grid; gap: var(--space-5); min-width: 0; }
 .ai-agents-view .vb-page-header { margin-bottom: 0; }
 .ai-agents-view .vb-page-heading { flex: 1; }
+.prompt-variable-help { margin-top: var(--space-3); }
+.prompt-variable-help .btn code { padding: 0; background: transparent; font-size: inherit; }
+.prompt-variable-help details { border-top: 1px solid var(--color-border); padding-top: var(--space-2); }
+.prompt-variable-help details code { overflow-wrap: anywhere; }
 .launch-catalog { display: grid; gap: var(--space-5); width: 100%; max-width: 1200px; margin-inline: auto; }
 .launch-catalog-section { display: grid; gap: var(--space-3); min-width: 0; padding: var(--space-5); border: 1px solid var(--color-border); border-radius: var(--radius-surface); background: var(--color-bg-surface); }
 .launch-section-heading { display: flex; align-items: center; gap: var(--space-3); }

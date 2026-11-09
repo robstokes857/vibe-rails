@@ -30,6 +30,10 @@ uploads. Provider drafts and editor text are independent of `launch-history.js` 
 close and navigation guards retain unsaved work. Typed references use the shared caret
 popup, including built-ins and existing custom variables; step syntax is rejected.
 Manual template values become a revision-checked run prompt override, never a preset edit.
+`prompt-variable-help.js` also lists the supported launch placeholders below the Agent
+prompt. Its native buttons insert at the caret or replace the selection, restore prompt
+focus and notify the composer so preview, dirty tracking and Agent/Quick Launch status update.
+Keep this list aligned with launch placeholder support; retired step tokens stay absent.
 
 `launch-lane-editor.js` keeps ordered definition IDs and process/result/review gates.
 Its add picker uses the shared Tom Select helper, including search, viewport positioning,

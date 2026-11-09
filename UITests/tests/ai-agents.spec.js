@@ -59,6 +59,67 @@ test('shared editor creates an Agent, keeps provider drafts and uses native type
     expect(state.requests.filter(r=>/environments|\/jobs|\/automations/.test(r.path))).toEqual([]);
 });
 
+test('prompt help inserts every supported variable and saves literal placeholders', async ({ page }) => {
+    const state = await setup(page);
+    await page.locator('.vb-page-actions').getByRole('button', { name: 'Create agent', exact: true }).click();
+    const editor = page.locator('[data-launch-editor]');
+    const prompt = editor.getByLabel('Initial prompt (optional)', { exact: true });
+    const variables = editor.getByRole('group', { name: 'Insert a prompt variable' });
+    const tokens = ['{{name}}', '{{name default="…"}}', '{{datetime}}', '{{date}}', '{{time}}',
+        '{{git_branch}}', '{{env_name}}', '{{worktree}}', '{{board_card}}'];
+    await expect(variables.getByRole('button')).toHaveText(tokens);
+    await expect(prompt).toHaveAttribute('aria-describedby', 'launch-prompt-variable-help');
+    await editor.getByLabel('Name', { exact: true }).fill('Variable examples');
+    for (const token of tokens) {
+        await variables.getByRole('button', { name: `Insert ${token}:`, exact: false }).click();
+        await expect(prompt).toBeFocused();
+        await expect(prompt).toHaveValue(tokens.slice(0, tokens.indexOf(token) + 1).join(''));
+    }
+    await expect(editor.locator('[data-launch-kind]')).toHaveText('Agent · starts with this prompt.');
+    await expect(editor.locator('[data-board-composer-live]')).toContainText('{{time}}');
+    await editor.locator('[data-launch-save]').click();
+    await expect.poll(() => state.presets.length).toBe(1);
+    expect(state.presets[0].initialPrompt).toBe(tokens.join(''));
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    await page.getByRole('button', { name: 'Variable examples', exact: true }).click();
+    await expect(prompt).toHaveValue(tokens.join(''));
+});
+
+test('variable shortcuts preserve the caret, replace selections, support undo and mark drafts dirty', async ({ page }) => {
+    const state = await setup(page);
+    state.presets.push({ id: 'quick', name: 'Quick', cli: 'codex', initialPrompt: '', enabled: true, revision: 1 });
+    await page.locator('[data-agent-refresh]').click();
+    await page.getByRole('button', { name: 'Quick', exact: true }).click();
+    const editor = page.locator('[data-launch-editor]');
+    const prompt = editor.getByLabel('Initial prompt (optional)', { exact: true });
+    const time = editor.getByRole('button', { name: 'Insert {{time}}: Current time', exact: true });
+    await time.focus();
+    await time.press('Enter');
+    await expect(prompt).toHaveValue('{{time}}');
+    await expect(prompt).toBeFocused();
+    await expect(editor.locator('[data-launch-kind]')).toHaveText('Agent · starts with this prompt.');
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    const confirm = page.getByRole('alertdialog');
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await prompt.fill('Before selected after');
+    await prompt.evaluate(input => input.setSelectionRange(7, 7));
+    await time.click();
+    await expect(prompt).toHaveValue('Before {{time}}selected after');
+    expect(await prompt.evaluate(input => input.selectionStart)).toBe(15);
+    await prompt.press('ControlOrMeta+z');
+    await expect(prompt).toHaveValue('Before selected after');
+    await prompt.evaluate(input => input.setSelectionRange(7, 15));
+    const branch = editor.getByRole('button', { name: 'Insert {{git_branch}}: Current Git branch', exact: true });
+    await branch.focus();
+    await branch.press('Space');
+    await expect(prompt).toHaveValue('Before {{git_branch}} after');
+    await expect(prompt).toBeFocused();
+    expect(await prompt.evaluate(input => input.selectionStart)).toBe(21);
+    await editor.locator('[data-launch-save]').click();
+    await expect.poll(() => state.presets[0].initialPrompt).toBe('Before {{git_branch}} after');
+});
+
 test('conflict retains source and history refresh never changes the draft',async({page})=>{
     const state=await setup(page);
     state.presets.push({id:'preset_saved',name:'Saved',cli:'codex',initialPrompt:'Original',enabled:true,revision:2,options:{base:{effort:'high'}}});
@@ -86,7 +147,20 @@ for(const width of [320,375,768,1024])test(`editor footer and single scroller at
     const close=await page.getByRole('button',{name:'Close dialog',exact:true}).boundingBox();
     expect(close.width).toBeGreaterThanOrEqual(44);expect(close.height).toBeGreaterThanOrEqual(44);
     expect(await editor.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBeTruthy();
+    const variables = editor.getByRole('group', { name: 'Insert a prompt variable' });
+    await expect(variables).toBeVisible();
+    expect(await variables.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    if (width <= 375) {
+        const time = variables.getByRole('button', { name: 'Insert {{time}}: Current time', exact: true });
+        const target = await time.boundingBox();
+        expect(target.width).toBeGreaterThanOrEqual(44);
+        expect(target.height).toBeGreaterThanOrEqual(44);
+    }
     await page.screenshot({path:testInfo.outputPath(`editor-${width}.png`)});
+    await variables.scrollIntoViewIfNeeded();
+    await page.screenshot({path:testInfo.outputPath(`variables-${width}.png`)});
+    await variables.getByRole('button', { name: 'Insert {{time}}: Current time', exact: true }).click();
+    await expect(editor.getByLabel('Initial prompt (optional)', { exact: true })).toHaveValue('{{time}}');
 });
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
 const file=name=>({name,mimeType:'image/png',buffer:png});
@@ -195,6 +269,7 @@ test('Create script saves a script and schedule without an action type or purpos
     expect(state.actions[0]).toMatchObject({kind:'script',check:null,script:{path:'scripts/test.py',runtime:0}});
     expect(state.bindings[0]).toMatchObject({definitionType:'action',trigger:{kind:0,scheduleKind:2,localTime:'08:30'}});
     expect(await editor.locator('[data-definition-launch-options]').count()).toBe(0);
+    await expect(editor.getByRole('group', { name: 'Insert a prompt variable' })).toHaveCount(0);
 });
 
 test('history polling preserves expanded configuration, evidence and focused controls',async({page},testInfo)=>{

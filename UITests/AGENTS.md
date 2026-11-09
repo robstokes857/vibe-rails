@@ -114,7 +114,9 @@ Run `node UITests/node_modules/@playwright/test/cli.js test --config UITests/pla
 from the repository root. The production frontend uses intercepted typed definition,
 binding, run and attachment APIs. Tests cover provider drafts, typed references, revision
 conflicts, navigation guards, staged-upload retries, caret placement, history preservation,
-Action fields, schedules and layouts at 320/375/768/1024px. The Board harness also covers
+Action fields, schedules and layouts at 320/375/768/1024px. Prompt-variable shortcuts cover
+click/keyboard insertion, selection replacement, undo and saved literal placeholders.
+The Board harness also covers
 the new ordered lane and manual-card adapters alongside existing comments, attachment,
 manager and navigation behavior. The older `playwright.agents-editor.config.js` fixtures
 exercise the retired Environment/Job editor and are not the current acceptance harness.

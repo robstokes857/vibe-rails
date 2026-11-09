@@ -354,8 +354,12 @@ Board cards and AI Agent definitions share the desktop card-editor shell and con
 wide main content, narrow settings sidebar, a divider, one shared scroller and a separate
 persistent footer. Main content is the name/title, directly editable prompt/description,
 existing attachment controls, then Comments (Board) or Run history (definitions).
-Typed caret suggestions replace helper toolbars; no Preview/Write/Edit mode switch is
-needed. Agents reuse the Board provider and launch-options controls. Actions use their
+Typed caret suggestions provide file, card, session and variable references; no
+Preview/Write/Edit mode switch is needed. Agent prompt help also lists supported
+`{{...}}` variables as small secondary buttons below the input, with descriptions.
+Clicking or keyboard-activating a variable inserts it at the cursor (replacing any
+selection) and returns focus to the prompt. The buttons wrap on narrow screens.
+Agents reuse the Board provider and launch-options controls. Actions use their
 script/check fields. Automatic runs name the execution project. Mobile stacks these same
 slots without moving Save into the scroller.
 

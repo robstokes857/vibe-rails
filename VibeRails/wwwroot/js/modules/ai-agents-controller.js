@@ -29,6 +29,7 @@ import { bindingSection, mountBindings } from './launch-bindings.js';
 import { PythonScriptsController } from './python-scripts-controller.js';
 import { openLaunchTerminal } from './launch-terminal.js';
 import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
+import { promptVariableHelp, bindPromptVariableHelp } from './prompt-variable-help.js';
 
 const labels = {
     agent: 'Agents',
@@ -283,7 +284,7 @@ export class AiAgentsController {
             saved?.name || (isPreset ? 'Create agent' : 'Create script'),
             `<div class="board-card-editor" data-launch-editor>${cardEditorLayout(
                 {
-                    main: `${field('Name', 'name', saved?.name || '')}${isPreset ? `<section class="board-block"><h3 class="board-block-label">Initial prompt <span class="text-muted">(optional)</span></h3>${composerMarkup({ name: 'prompt', label: 'Initial prompt (optional)', value: saved?.initialPrompt || '', placeholder: 'Describe the task. Leave blank for a Quick Launch.', livePreview: true })}<p class="board-editor-muted" data-launch-kind></p></section>` : area('Description (optional)', 'description', saved?.description || '')}`,
+                    main: `${field('Name', 'name', saved?.name || '')}${isPreset ? `<section class="board-block"><h3 class="board-block-label">Initial prompt <span class="text-muted">(optional)</span></h3>${composerMarkup({ name: 'prompt', label: 'Initial prompt (optional)', value: saved?.initialPrompt || '', placeholder: 'Describe the task. Leave blank for a Quick Launch.', livePreview: true })}<p class="board-editor-muted" data-launch-kind></p>${promptVariableHelp()}</section>` : area('Description (optional)', 'description', saved?.description || '')}`,
                     attachments: isPreset
                         ? attachmentSection(attachments.length)
                         : '',
@@ -409,6 +410,8 @@ export class AiAgentsController {
         const optionsByCli = new Map([[cli, saved?.options?.base || null]]),
             extrasByCli = new Map();
         if (isPreset) {
+            prompt.setAttribute('aria-describedby', 'launch-prompt-variable-help');
+            disposers.push(bindPromptVariableHelp(editor, prompt));
             const provider = editor.querySelector('[data-launch-provider]');
             const optionHost = editor.querySelector(
                 '[data-definition-launch-options]'
