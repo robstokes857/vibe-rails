@@ -53,6 +53,16 @@ versions' settings survive a read/modify/save by this version. The known retired
 `TokenSaverStages` and `TokenSaverCaptureEnabled` keys are still discarded. Binaries shipped
 before this support can still drop unfamiliar fields; the current release cannot repair their writes.
 
+## Test-result compression (VB-0FYXL-377)
+
+The shared `CommandShapes` classifier delegates TestRun recognition to a bounded shell
+grammar; other shapes keep the whole-command metacharacter restriction. Codex's Responses
+rewriter additionally recognizes complete literal code-mode test programs, correlates calls
+with outputs, validates exec-result JSON envelopes, and runs decoded output strings through
+the existing compression pipeline. It splices only those strings, preserving result metadata
+and request framing. Dynamic/mixed programs and unknown envelopes do not gain test elision.
+The stage and scope defaults are unchanged. See the [supported forms and invariants](../TokenSaver/README.md#test-commands-and-codex-code-mode).
+
 ## Incremental token-savings publishing (VIBE-215)
 
 The existing byte-based `TokenSavings` tally remains unchanged. While a root backend is open,

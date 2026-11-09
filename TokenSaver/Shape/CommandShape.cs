@@ -47,7 +47,7 @@ public enum CommandShape
 /// every rule fails toward None:
 ///
 ///   • Whole-command rule — any shell metacharacter (<c>| &lt; &gt; &amp; ; ` $ ( )</c> or a newline)
-///     returns None, wherever it appears, INCLUDING inside quotes. We only classify when the string
+///     returns None for every shape except TestRun, INCLUDING inside quotes. We only classify when the string
 ///     we were handed IS the command whose output we are about to filter; one <c>| head</c>, one
 ///     <c>2&gt;&amp;1</c>, one <c>&amp;&amp; ls</c> and the payload is no longer that command's
 ///     output at all. Quote-aware parsing would rescue <c>rg -n "a|b" src/</c>, at the cost of being
@@ -79,10 +79,11 @@ public enum CommandShape
 /// unrelated line match those patterns; the one real leak is a test's own captured stdout printed
 /// inline (e.g. <c>pytest -s</c>), where a print that impersonates a result line gets counted into
 /// the filter's <c>[... N passed ...]</c> marker instead of shown — an accepted best-effort loss,
-/// never a parse of output we misunderstood. The whole-command metacharacter rule still applies
-/// unchanged, so piped or redirected test runs are None like everything else. Wrappers
-/// (<c>docker compose run app pytest</c>, <c>sudo pytest</c>) are None by the first-token rule —
-/// classifying through a wrapper means guessing which binary actually ran.
+/// never a parse of output we misunderstood. TestRun also has a narrow, quote-aware exception to
+/// the whole-command/first-token rules: literal directory/environment setup, timeout, known runner
+/// paths, stderr merging, stdin-only line filters and trailing status echoes. See
+/// <see cref="TestRunCommands"/>. Unknown wrappers, expansions and compound commands still decline;
+/// none of these allowances apply to the other shapes.
 /// </summary>
 public static class CommandShapes
 {
@@ -335,6 +336,9 @@ public static class CommandShapes
     /// </summary>
     public static CommandShape Classify(string? command)
     {
+        if (TestRunCommands.IsTestRun(command))
+            return CommandShape.TestRun;
+
         if (string.IsNullOrEmpty(command) || command.AsSpan().IndexOfAny(ShellMetacharacters) >= 0)
             return CommandShape.None;
 
@@ -349,67 +353,9 @@ public static class CommandShapes
             "ls" or "dir" or "tree" => CommandShape.DirectoryListing,
             "grep" or "rg" or "ripgrep" or "ag" => ClassifyGrep(tokens),
             "find" => ClassifyFind(tokens),
-            // Test runners: no flag scan, per the weaker per-line contract (class remarks).
-            "pytest" or "jest" or "vitest" or "mocha" => CommandShape.TestRun,
-            "dotnet" or "go" or "cargo" or "playwright" =>
-                SecondTokenIs(tokens, "test") ? CommandShape.TestRun : CommandShape.None,
-            "npm" or "pnpm" or "yarn" or "bun" => ClassifyPackageManagerTest(tokens),
-            "npx" or "bunx" => ClassifyRunnerLauncher(tokens),
-            "python" or "python3" => ClassifyPythonModule(tokens),
-            "uv" => ClassifyUvRun(tokens),
             _ => CommandShape.None,
         };
     }
-
-    private static bool SecondTokenIs(string[] tokens, string subcommand) =>
-        tokens.Length >= 2 && Unquote(tokens[1]) == subcommand;
-
-    /// <summary>
-    /// <c>npm test</c> / <c>npm t</c> / <c>npm run test…</c> and the pnpm/yarn/bun equivalents
-    /// (which also run scripts without <c>run</c>). The script itself can be anything, but the
-    /// per-line drop patterns only ever match real runner output, so a mislabeled script costs a
-    /// no-op, not a mangle.
-    /// </summary>
-    private static CommandShape ClassifyPackageManagerTest(string[] tokens)
-    {
-        if (tokens.Length < 2)
-            return CommandShape.None;
-
-        var second = Unquote(tokens[1]);
-        if (IsTestScriptName(second))
-            return CommandShape.TestRun;
-        if (second is "run" or "run-script" && tokens.Length >= 3 && IsTestScriptName(Unquote(tokens[2])))
-            return CommandShape.TestRun;
-        return CommandShape.None;
-    }
-
-    private static bool IsTestScriptName(string script) =>
-        script is "test" or "t" || script.StartsWith("test:", StringComparison.Ordinal);
-
-    private static CommandShape ClassifyRunnerLauncher(string[] tokens)
-    {
-        if (tokens.Length < 2)
-            return CommandShape.None;
-
-        return Unquote(tokens[1]) switch
-        {
-            "jest" or "vitest" or "mocha" => CommandShape.TestRun,
-            "playwright" => tokens.Length >= 3 && Unquote(tokens[2]) == "test"
-                ? CommandShape.TestRun
-                : CommandShape.None,
-            _ => CommandShape.None,
-        };
-    }
-
-    private static CommandShape ClassifyPythonModule(string[] tokens) =>
-        tokens.Length >= 3 && Unquote(tokens[1]) == "-m" && Unquote(tokens[2]) == "pytest"
-            ? CommandShape.TestRun
-            : CommandShape.None;
-
-    private static CommandShape ClassifyUvRun(string[] tokens) =>
-        tokens.Length >= 3 && Unquote(tokens[1]) == "run" && Unquote(tokens[2]) == "pytest"
-            ? CommandShape.TestRun
-            : CommandShape.None;
 
     private static CommandShape ClassifyGit(string[] tokens)
     {

@@ -81,6 +81,7 @@ public static class CodexResponsesRewriter
         }
 
         var toolUses = new Dictionary<string, ToolUseInfo>(StringComparer.Ordinal);
+        var duplicateCallIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in items)
         {
             if (item.CallId is null || !item.IsToolCall)
@@ -90,8 +91,12 @@ public static class CodexResponsesRewriter
             // the same call-id map as function/custom tools so shell_call.action.commands reaches
             // the paired shell_call_output instead of being discarded as unrelated metadata.
             var name = item.Name ?? (item.IsIntrinsicShellCall ? "shell_command" : null);
-            if (name is not null)
-                toolUses[item.CallId] = new ToolUseInfo(name, item.Command);
+            if (name is not null && !duplicateCallIds.Contains(item.CallId)
+                && !toolUses.TryAdd(item.CallId, new ToolUseInfo(name, item.Command)))
+            {
+                toolUses.Remove(item.CallId);
+                duplicateCallIds.Add(item.CallId);
+            }
         }
 
         var seen = 0;
@@ -169,6 +174,11 @@ public static class CodexResponsesRewriter
 
             foreach (var item in qualifying)
             {
+                var codeOutput = item.Name == "exec" && plan.EnabledIds.Contains(CompressionCatalog.ElidePassedTests)
+                    ? CodexTestCommands.Classify(item.Command) : TestOutputKind.None;
+                var shape = item.Name == "exec"
+                    ? codeOutput == TestOutputKind.Text ? CommandShape.TestRun : CommandShape.None
+                    : CommandShapes.Classify(item.Command);
                 var itemChanged = false;
                 foreach (var (start, end) in item.Ranges)
                 {
@@ -188,17 +198,31 @@ public static class CodexResponsesRewriter
 
                         var raw = (ReadOnlySpan<char>)unescaped.AsSpan(0, charLength);
                         var trace = captures is not null ? new List<StageTrace>() : null;
-                        var current = CompressionPipeline.Run(
-                            raw,
-                            plan,
-                            CommandShapes.Classify(item.Command),
-                            item.PreserveFileContentsWhenCommandUnknown
-                                || CommandShapes.ReadsFileContents(item.Command),
-                            buffers,
-                            out var changed,
-                            ref candidateStats,
-                            ref candidateCondense,
-                            trace);
+                        ReadOnlySpan<char> current;
+                        bool changed;
+                        var isEnvelope = codeOutput == TestOutputKind.Envelope
+                            || item.Name != "exec" && shape == CommandShape.TestRun && raw.TrimStart().StartsWith("{");
+                        if (isEnvelope && plan.EnabledIds.Contains(CompressionCatalog.ElidePassedTests)
+                            && CodexTestOutput.TryRewrite(raw, plan, buffers, out var structured,
+                                ref candidateStats, ref candidateCondense, trace))
+                        {
+                            current = structured;
+                            changed = !raw.SequenceEqual(current);
+                        }
+                        else
+                        {
+                            current = CompressionPipeline.Run(
+                                raw,
+                                plan,
+                                isEnvelope ? CommandShape.None : shape,
+                                item.PreserveFileContentsWhenCommandUnknown
+                                    || CommandShapes.ReadsFileContents(item.Command),
+                                buffers,
+                                out changed,
+                                ref candidateStats,
+                                ref candidateCondense,
+                                trace);
+                        }
 
                         if (changed)
                         {
@@ -401,6 +425,7 @@ public static class CodexResponsesRewriter
     private static ResponseItem ScanItem(ref Utf8JsonReader reader)
     {
         var item = new ResponseItem();
+        string? arguments = null;
         var directOutputRanges = new List<(int Start, int End)>();
         var contentOutputRanges = new List<(int Start, int End)>();
         var shellOutputRanges = new List<(int Start, int End)>();
@@ -438,7 +463,7 @@ public static class CodexResponsesRewriter
             {
                 reader.Read();
                 if (reader.TokenType == JsonTokenType.String)
-                    item.Command = ExtractCommand(reader.GetString());
+                    arguments = reader.GetString();
                 else
                     reader.Skip();
             }
@@ -479,6 +504,9 @@ public static class CodexResponsesRewriter
                 reader.Skip();
             }
         }
+
+        if (arguments is not null)
+            item.Command = ExtractCommand(arguments, item.Name);
 
         if (item.Type is "function_call_output" or "custom_tool_call_output" or "local_shell_call_output")
         {
@@ -540,7 +568,7 @@ public static class CodexResponsesRewriter
         return commands is { Count: > 0 } ? string.Join('\n', commands) : singleCommand;
     }
 
-    private static string? ExtractCommand(string? arguments)
+    private static string? ExtractCommand(string? arguments, string? toolName)
     {
         if (string.IsNullOrWhiteSpace(arguments))
             return null;
@@ -548,11 +576,18 @@ public static class CodexResponsesRewriter
         try
         {
             using var document = JsonDocument.Parse(arguments);
-            return document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty("command", out var command)
-                && command.ValueKind == JsonValueKind.String
-                    ? command.GetString()
-                    : null;
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return null;
+            var key = toolName switch { "exec_command" => "cmd", "exec" => "code", _ => "command" };
+            string? value = null;
+            var seen = false;
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (property.Name is not ("command" or "cmd" or "code")) continue;
+                if (seen || property.Name != key || property.Value.ValueKind != JsonValueKind.String) return null;
+                seen = true;
+                value = property.Value.GetString();
+            }
+            return value;
         }
         catch (JsonException)
         {

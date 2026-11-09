@@ -162,9 +162,9 @@ public class ShapeFilterTests
     [InlineData("pytest -v | tail -20")]
     [InlineData("dotnet test 2>&1")]
     [InlineData("go test ./... && echo done")]
-    public void Classify_TestRunWithMetacharacters_IsNone(string command)
+    public void Classify_TestRunWithSupportedWrappers_IsTestRun(string command)
     {
-        Assert.Equal(CommandShape.None, CommandShapes.Classify(command));
+        Assert.Equal(CommandShape.TestRun, CommandShapes.Classify(command));
     }
 
     // ---------------------------------------------------------------------

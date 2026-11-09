@@ -96,9 +96,9 @@ public static class CompressionPipeline
         CommandShape shape,
         bool readsFileContents,
         PipelineScratch scratch,
-        out bool changed,
-        ref MinifyStats minifyStats,
-        ref CondenseStats condenseStats,
+        scoped out bool changed,
+        scoped ref MinifyStats minifyStats,
+        scoped ref CondenseStats condenseStats,
         ICollection<StageTrace>? trace = null)
     {
         changed = false;

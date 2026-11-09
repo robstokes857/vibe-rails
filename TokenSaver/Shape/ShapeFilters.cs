@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace TokenSaver.Shape;
 
@@ -13,10 +14,12 @@ namespace TokenSaver.Shape;
 ///      groups with <c>  line: content</c> beneath, in ORIGINAL order (see below).
 ///   P. <see cref="CommandShape.PathList"/> — paths become <c>directory:</c> groups with filenames
 ///      indented 2 spaces.
-///   T. <see cref="CommandShape.TestRun"/> — each run of lines reporting an individual PASSING
-///      test (pytest's <c>path::name PASSED</c>, jest/vitest's <c>✓ name</c> / <c>PASS file</c>,
+///   T. <see cref="CommandShape.TestRun"/> — each run of lines reporting a PASSING
+///      result (pytest's <c>path::name PASSED</c>, jest/vitest's <c>✓ name</c> / <c>PASS file</c>,
 ///      dotnet's <c>Passed Name [3 ms]</c>, go's <c>--- PASS:</c> / <c>=== RUN</c>, cargo's
-///      <c>test name ... ok</c>) becomes one <c>[... N passed ...]</c> marker. Everything else —
+///      <c>test name ... ok</c>, TAP, unittest, nextest and deno) becomes one
+///      <c>[... N passed ...]</c> marker. N counts result lines, including suites and Go packages,
+///      not a distinct-test total. Everything else —
 ///      failures, errors, skips, captured logs, summaries — is kept byte-verbatim, IN PLACE.
 ///      T is the one transform here that destroys content (it is Lossy like the condenser's,
 ///      not Reshaping): a green test's only information is that it passed, and the marker keeps
@@ -412,7 +415,7 @@ public static class ShapeFilters
     }
 
     /// <summary>
-    /// True when <paramref name="line"/> provably reports an individual PASSING test (or, for go,
+    /// True when <paramref name="line"/> reports a PASSING test/suite/package result (or, for go,
     /// the scheduler bookkeeping that only ever accompanies one). <paramref name="isResult"/> is
     /// true for actual results — those are what the marker counts; bookkeeping lines are elided
     /// with their run but never counted as a pass. Every pattern requires runner-specific
@@ -425,7 +428,7 @@ public static class ShapeFilters
     {
         isResult = false;
         var t = line.AsSpan().Trim();
-        if (t.IsEmpty)
+        if (t.IsEmpty || t[0] == '[')
             return false;
 
         // jest/vitest/mocha/playwright per-test lines. √ is jest on legacy Windows consoles.
@@ -438,6 +441,21 @@ public static class ShapeFilters
         // jest's per-suite banner: "PASS src/foo.test.ts (1.2 s)". go's bare "PASS" has no
         // trailing space and stays.
         if (t.StartsWith("PASS ", StringComparison.Ordinal))
+        {
+            // nextest shares Jest's prefix. Require its duration/name when the next token is '['.
+            if (t[5..].TrimStart().StartsWith("[", StringComparison.Ordinal)
+                && !PassPattern(t, @"^PASS\s+\[\s*[0-9]+(?:\.[0-9]+)?s\]\s+\S.*$"))
+                return false;
+            isResult = true;
+            return true;
+        }
+
+        // TAP directives can report skips/TODOs with 'ok'; leave them and their reasons visible.
+        // These count result lines (including nested suites), never claim the runner's test total.
+        if (PassPattern(t, @"^ok [0-9]+ - [^#]+$")
+            || PassPattern(t, @"^\S.* \([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\) \.\.\. ok$")
+            || PassPattern(t, @"^ok[ \t]+[^ \t]+\t[0-9]+(?:\.[0-9]+)?s$")
+            || PassPattern(t, @"^\S.* \.\.\. ok \([0-9]+(?:\.[0-9]+)?(?:ms|s)\)$"))
         {
             isResult = true;
             return true;
@@ -484,6 +502,9 @@ public static class ShapeFilters
 
         return false;
     }
+
+    private static bool PassPattern(ReadOnlySpan<char> line, string pattern) =>
+        Regex.IsMatch(line, pattern, RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
 
     /// <summary>
     /// pytest -v: <c>path::name PASSED</c>, optionally right-padded with a <c>[ 45%]</c> progress

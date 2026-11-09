@@ -118,7 +118,7 @@ payload under the truncation threshold).
 | 7 | `git-status-group` | Reshaping | on | Groups porcelain `XY path` lines under one header per status. |
 | 8 | `grep-group` | Reshaping | on | Groups `path:line:content` under one header per file. |
 | 9 | `find-group` | Reshaping | on | Groups a flat path list under one header per directory. |
-| 10 | `elide-passed-tests` | Lossy | on | Runs of individual passing-test lines from a recognised test runner → one `[... N passed ...]` marker. Failures/errors/skips/logs/summaries kept verbatim, in place. |
+| 10 | `elide-passed-tests` | Lossy | on | Runs of passing result lines from a recognised test runner → one `[... N passed ...]` marker. Supports narrow shell wrappers and literal Codex code-mode calls/JSON results. Failures/errors/skips/logs/overall summaries stay in place. N counts result lines, which can include suites or packages. |
 | 11 | `dedupe-lines` | Lossy | on | 3+ identical lines → one, tagged `[xN]`. |
 | 12 | `truncate-long` | Lossy | **off** | Keeps first 150 + last 50 lines, elides the middle. Widens to 1200/200 when the producing command reads file contents and the payload is at most 256 KiB — see [the side door](#the-side-door-scope-read-is-off-cat-is-not). |
 
@@ -144,11 +144,58 @@ on. The default set is pinned by `LlmProxySettingsServiceTests.CuratedDefaults_*
 
 **`elide-passed-tests` earns its place twice.** A green test's only information is
 that it passed, so per-test pass lines (pytest -v, jest/vitest `✓`, dotnet test,
-go test -v, cargo test — commands recognised in `CommandShape.Classify`, wrappers
-and pipes declined) compress to a counting marker at near-zero information cost.
+go test -v, cargo test — commands recognised in `CommandShapes.Classify`, including
+the narrow wrappers described below) compress to a counting marker at near-zero information cost.
 And because it runs *before* `truncate-long`, it fixes that stage's worst case on
 test output when an override enables truncation: without it, a big suite's failure
 section can land in the truncated middle while 150 lines of passes survive at the head.
+
+### Test commands and Codex code-mode
+
+`Shape/TestRunCommands.cs` recognizes `node --test`, .NET/Go/Rust tests, unittest/pytest,
+nextest, deno, and JavaScript test scripts/runners (including `npm --prefix … run test:e2e`).
+Executable paths work with either slash style; xUnit `Tests.exe`, `*.Tests.exe` and
+`*.Tests` apphosts are supported. `dotnet run --project IntegrationTest` is a specific
+allowance for this repository's integration runner, not a general `dotnet run` rule.
+
+Only TestRun gets a quote-aware shell subset: literal directory/environment setup,
+inline environment assignments, `timeout`, a single runner, optional `2>&1` / `*>&1`,
+stdin-only `tail`/`head`/`grep`/`findstr`/`Select-String`/`Select-Object`, then optional
+status echoes. Unknown syntax, output redirects, file-reading filter arguments, a second
+runner, build prefixes, substitution, and runner arguments containing `$` decline.
+The dollar exceptions are the `$env:` assignment prefix and `$?` in status echoes.
+All other command shapes retain their whole-command metacharacter rule.
+
+`Shape/CodexTestCommands.cs` recognizes complete, bounded JavaScript programs, never
+evaluates them, and requires every call to be a literal `tools.exec_command({cmd:…})`
+or `tools.shell_command({command:…})` test invocation. Supported output forms include
+`text(await …)`, a result variable followed by `text(result)` / `text(result.output)` /
+`text(JSON.stringify(result))`, and `Promise.all` / `Promise.allSettled` batches printed
+as arrays or with `forEach(text)` / a simple `forEach(x => text(x))` callback.
+Simple `for (const result of results)` loops and objects projecting that result's
+`output`/exit/session/timing fields are supported too, including `JSON.stringify`.
+The specific ``if (result.session_id) text(`SESSION_ID=${result.session_id}`)`` suffix
+is allowed; it cannot inject another command or arbitrary output.
+Mixed test/file-read batches, dynamic command expressions, interpolated templates,
+mutations and unrecognized statements get no new test elision. Background `wait` /
+`write_stdin` calls without the original command do not gain test classification.
+
+`Minify/CodexTestOutput.cs` validates known result envelopes, decodes only their `output`
+strings, runs those through `CompressionPipeline.Run`, then splices them back. Metadata,
+exit codes, session IDs and surrounding JSON are preserved exactly. Arrays and fulfilled
+`allSettled` results are supported; unknown envelopes and rejected batch entries decline.
+The inner JSON token, enclosing string and outer request all enforce never-grows. Captures
+keep the original JavaScript and envelope and aggregate one trace entry per stage.
+Direct function calls read the tool's own `cmd`, `command` or `code` argument; duplicate
+call IDs are not trusted for correlation. Scope and stage switches remain unchanged.
+
+New pass patterns cover TAP (excluding `# SKIP`/`# TODO` directives), verbose unittest,
+nextest duration lines, Go package results and deno. A marker counts result lines rather
+than asserting a distinct-test total: a suite/package and its individual results may both
+appear. Default .NET runs usually have no per-test passes to remove. The xUnit v3 4.0.2
+verbose reporter was checked directly: it emits `[STARTING]` and `[FINISHED] Time: …`;
+those are not proof of passing and remain intact. ANSI-bearing output still fails open;
+`ansi-strip` remains off by default. Emitted markers remain fixed points.
 
 ### Scopes — a separate axis
 
@@ -634,7 +681,8 @@ smudge byte-exact fixtures on a fresh Windows checkout and you'll get failures w
   when their nullable keys are absent from settings.json (pre-split files). Once the
   UI saves, each provider stands on its own value. See [Settings](#settings).
 - **Shape filters key off the command, never off output sniffing.** `CommandShape.Classify`
-  refuses anything containing a pipe, redirect, `&&`, `;`, or `$(` — if we can't see
+  refuses anything containing a pipe, redirect, `&&`, `;`, or `$(` except the narrow
+  TestRun wrapper grammar above — if we can't see
   the whole command, we don't know the output's shape, and guessing means mangling
   output we didn't understand.
 - **On Windows-native runners the shape stages silently no-op on `dotnet test`.**
