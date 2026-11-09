@@ -1593,8 +1593,11 @@ test('The workbench styles fill the viewport without overlap and carry fallbacks
     const css = readFileSync(stylePath, 'utf8');
     const marker = css.indexOf("Python script workbench (view 'python-script')");
     assert.ok(marker > css.indexOf('Environment Steps editor'), 'the section is appended after the fallback marker');
-    assert.ok(marker > css.indexOf('Python scripts (Automation page section'), 'the section is appended at the very end');
-    const block = css.slice(marker);
+    assert.ok(marker > css.indexOf('Python scripts (Automation page section'), 'the section follows Python scripts');
+    const end = css.indexOf('/* ── Performance mode', marker);
+    assert.ok(marker >= 0 && end > marker, 'expected the workbench CSS section boundaries');
+    // Keep the fallback contract scoped to the workbench as later components are appended.
+    const block = css.slice(marker, end);
 
     // Editor host: flex child with min-height 0 inside a flex column, Monaco filling it absolutely.
     assert.match(block, /\.python-workbench-body \{[^}]*display: flex;[^}]*min-height: 0;/);

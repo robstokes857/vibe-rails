@@ -306,7 +306,11 @@ test('every env-step colour has a fallback so the panel is never transparent', (
     // An undefined custom property invalidates the whole declaration, which is the documented
     // cause of the transparent-background bug.
     const css = readFileSync(stylePath, 'utf8');
-    const block = css.slice(css.indexOf('Environment Steps editor'));
+    const start = css.indexOf('Environment Steps editor');
+    const end = css.indexOf('Server-backed File Explorer', start);
+    assert.ok(start >= 0 && end > start, 'expected the env-step CSS section boundaries');
+    // Later components use the shared theme tokens and are outside this legacy fallback contract.
+    const block = css.slice(start, end);
 
     assert.ok(block.includes('.env-step-row {'), 'expected the env-step CSS block to exist');
     for (const match of block.matchAll(/var\((--color-[a-z-]+)([^)]*)\)/g)) {
