@@ -37,6 +37,114 @@ async function setup(page) {
     return state;
 }
 
+test('quick actions use explicit Run buttons and preserve launch and keyboard behavior', async ({ page }, testInfo) => {
+    const state = await setup(page);
+    state.presets.push(
+        { id: 'release', name: 'Release Vibe Rails Client App', cli: 'codex', initialPrompt: 'Release', enabled: true },
+        { id: 'hidden', name: 'Disabled agent', cli: 'codex', initialPrompt: 'Hidden', enabled: false }
+    );
+    state.actions.push({ id: 'script', name: 'Build <client> & test', kind: 'script' });
+    await page.locator('[data-agent-refresh]').click();
+    await expect(page.locator('[data-agent-edit="release"]')).toBeVisible();
+    await page.evaluate(() => {
+        window.quickActionLaunches = [];
+        window.app.aiAgentsController.launch = async (...args) => window.quickActionLaunches.push(args);
+    });
+    const trigger = page.getByRole('button', { name: 'Launch an agent or automation', exact: true });
+    const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
+    await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');
+    await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['Codex', 'Script']);
+    for (const id of ['release', 'script']) {
+        const catalogRow = page.locator('.launch-catalog-row').filter({ has: page.locator(`[data-agent-edit="${id}"]`) });
+        const menuRow = panel.locator('.launch-menu-row').filter({ has: page.locator(`[data-launch-id="${id}"]`) });
+        await expect(menuRow.locator('.launch-menu-name')).toHaveText(await catalogRow.locator('[data-agent-edit]').innerText());
+        await expect(menuRow.locator('.launch-menu-subtitle')).toHaveText(await catalogRow.locator('.launch-catalog-copy p').innerText());
+        expect(await menuRow.locator('.launch-provider-logo').evaluate(el => el.outerHTML))
+            .toBe(await catalogRow.locator('.launch-provider-logo').evaluate(el => el.outerHTML));
+    }
+    await expect(panel.locator('img.launch-provider-logo')).toBeVisible();
+    await expect.poll(() => panel.locator('img.launch-provider-logo').evaluate(el => el.complete && el.naturalWidth > 0)).toBe(true);
+    await expect(panel.locator('.fa-code')).toBeVisible();
+    await expect(panel.getByText('Disabled agent')).toHaveCount(0);
+    await expect(panel.getByText('Build <client> & test', { exact: true })).toBeVisible();
+    await expect(panel.locator('client')).toHaveCount(0);
+    const runAgent = panel.getByRole('button', { name: 'Run Release Vibe Rails Client App', exact: true });
+    await expect(runAgent).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath('quick-actions-desktop.png') });
+    await panel.getByText('Release Vibe Rails Client App', { exact: true }).click();
+    expect(await page.evaluate(() => window.quickActionLaunches)).toEqual([]);
+    await runAgent.click();
+    await expect(panel).toHaveCount(0);
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(await page.evaluate(() => window.quickActionLaunches)).toEqual([['release', 'preset']]);
+    await trigger.click();
+    await expect(panel.getByRole('button', { name: 'Run Release Vibe Rails Client App' })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(panel.getByRole('button', { name: 'Run Build <client> & test', exact: true })).toBeFocused();
+    await page.keyboard.press('Enter');
+    expect(await page.evaluate(() => window.quickActionLaunches)).toEqual([['release', 'preset'], ['script', 'action']]);
+    await trigger.click();
+    await expect(panel).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    state.presets = [];
+    state.actions = [];
+    await trigger.click();
+    await expect(panel.getByRole('status')).toContainText('No quick actions available');
+    await expect(panel.getByRole('button', { name: 'Manage AI Agents', exact: true })).toBeFocused();
+    await panel.getByRole('button', { name: 'Manage AI Agents', exact: true }).click();
+    await expect(panel).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'AI Agents', exact: true })).toBeVisible();
+});
+
+test('quick actions match catalog descriptions and provider branding for other launch types', async ({ page }) => {
+    const state = await setup(page);
+    state.presets.push(
+        { id: 'claude', name: 'Review', description: 'Review <changes> & report', cli: 'claude', initialPrompt: 'Review', enabled: true },
+        { id: 'quick', name: 'Quick terminal', cli: 'opencode', initialPrompt: '', enabled: true },
+        { id: 'unknown', name: 'Custom provider', cli: 'custom', initialPrompt: 'Work', enabled: true }
+    );
+    state.actions.push({ id: 'script', name: 'Build', description: 'Compile <client>', kind: 'script' });
+    await page.locator('[data-agent-refresh]').click();
+    await expect(page.locator('[data-agent-edit="claude"]')).toBeVisible();
+    await page.getByRole('button', { name: 'Launch an agent or automation', exact: true }).click();
+    const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
+    await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['Review <changes> & report', 'OpenCode', 'custom', 'Compile <client>']);
+    await expect(panel.locator('changes, client')).toHaveCount(0);
+    for (const id of ['claude', 'quick', 'unknown', 'script']) {
+        const catalogRow = page.locator('.launch-catalog-row').filter({ has: page.locator(`[data-agent-edit="${id}"]`) });
+        const menuRow = panel.locator('.launch-menu-row').filter({ has: page.locator(`[data-launch-id="${id}"]`) });
+        await expect(menuRow.locator('.launch-menu-subtitle')).toHaveText(await catalogRow.locator('.launch-catalog-copy p').innerText());
+        expect(await menuRow.locator('.launch-provider-logo').evaluate(el => el.outerHTML))
+            .toBe(await catalogRow.locator('.launch-provider-logo').evaluate(el => el.outerHTML));
+    }
+});
+
+for (const width of [320, 375, 768, 1024]) {
+    test(`quick actions keep long labels and Run buttons inside the ${width}px viewport`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 700 });
+        const state = await setup(page);
+        state.presets.push({ id: 'release', name: 'Release Vibe Rails Client App with a very long descriptive agent name', cli: 'codex', initialPrompt: 'Release', enabled: true });
+        state.actions.push({ id: 'script', name: 'BuildAndValidateAllClientPackagesWithoutSpaces', kind: 'script' });
+        await page.getByRole('button', { name: 'Launch an agent or automation', exact: true }).click();
+        const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
+        await expect(panel.locator('.launch-menu-row')).toHaveCount(2);
+        for (const element of [panel, ...await panel.locator('.launch-menu-name, .launch-menu-run').all()]) {
+            const box = await element.boundingBox();
+            expect(box.x).toBeGreaterThanOrEqual(0);
+            expect(box.x + box.width).toBeLessThanOrEqual(width);
+        }
+        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+        if (width <= 375) {
+            const button = await panel.locator('.launch-menu-run').first().boundingBox();
+            expect(button.height).toBeGreaterThanOrEqual(44);
+        }
+        await page.screenshot({ path: testInfo.outputPath(`quick-actions-${width}.png`) });
+    });
+}
+
 test('shared editor creates an Agent, keeps provider drafts and uses native typed variables',async({page},testInfo)=>{
     const state=await setup(page);
     await page.locator('.vb-page-actions').getByRole('button',{name:'Create agent',exact:true}).click();

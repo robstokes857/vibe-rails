@@ -19789,8 +19789,74 @@ body.performance-mode .brand-text-sm {
 [data-launch-editor] .board-editor-actions { flex-wrap: wrap; }
 .launch-save-error { flex: 1 0 100%; margin: 0; color: var(--feedback-error-fg); overflow-wrap: anywhere; }
 .launch-save-error:empty { display: none; }
-.launch-menu { position: fixed; z-index: 1080; display: grid; gap: var(--space-2); padding: var(--space-4); width: min(360px, calc(100vw - 16px)); max-height: 70vh; overflow: auto; background: var(--color-bg-surface, #14141c); border: 1px solid var(--control-border); border-radius: var(--radius-surface); box-shadow: var(--shadow-menu); }
-.launch-menu .btn { text-align: left; white-space: normal; }
+.launch-menu {
+    position: fixed;
+    z-index: 1080;
+    display: grid;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    width: min(400px, calc(100vw - 16px));
+    max-height: 70vh;
+    overflow: auto;
+    background: var(--color-bg-surface-hover);
+    color: var(--color-text);
+    border: 1px solid var(--control-border);
+    border-radius: var(--radius-surface);
+    box-shadow: var(--shadow-menu);
+}
+.launch-menu-heading {
+    margin: 0;
+    font: 600 14px/1.4 var(--font-sans);
+    color: var(--color-text-muted);
+}
+.launch-menu-list {
+    display: grid;
+    gap: var(--space-2);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.launch-menu-row {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    background: var(--color-bg-base);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+}
+.launch-menu-icon {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+}
+.launch-menu-details { display: grid; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
+.launch-menu-name { font: 600 14px/1.5 var(--font-sans); }
+.launch-menu-subtitle { font: 400 12px/1.5 var(--font-sans); color: var(--color-text-muted); }
+.launch-menu .launch-menu-run {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    white-space: nowrap;
+}
+.launch-menu-run i, .launch-menu-manage i { flex: none; }
+.launch-menu-footer { border-top: 1px solid var(--color-border); padding-top: var(--space-2); }
+.launch-menu .launch-menu-manage {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    width: 100%;
+    text-align: left;
+    white-space: normal;
+}
+.launch-menu-empty { margin: 0; color: var(--color-text-muted); font-size: 14px; }
+@media (max-width: 575.98px) {
+    .launch-menu-row { gap: var(--space-2); padding: var(--space-2); }
+}
 
 /* Ordered lane runs share the standard fields, row surfaces and searchable picker. */
 .launch-lane-editor { display: grid; gap: var(--space-4); min-width: 0; }

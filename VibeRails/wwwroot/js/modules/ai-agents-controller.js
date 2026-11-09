@@ -1,4 +1,5 @@
-import { escapeHtml, confirmDialog, getCliBrand } from './utils.js';
+import { escapeHtml, confirmDialog } from './utils.js';
+import { launchPresentation } from './launch-presentation.js';
 import {
     LaunchApi,
     attachmentForEditor,
@@ -32,13 +33,6 @@ import { promptVariableHelp, bindPromptVariableHelp } from './prompt-variable-he
 import { bindPromptReferenceHighlights } from './prompt-reference-highlights.js';
 import { bindPromptImagePreviews } from './prompt-image-previews.js';
 
-const labels = {
-    agent: 'Agents',
-    'quick-launch': 'Quick Launches',
-    script: 'Script',
-    vca: 'VCA check',
-    'code-quality': 'Code quality check'
-};
 const field = (label, name, value = '', type = 'text') =>
     `<label class="launch-field">${label}<input class="form-control" type="${type}" data-launch-field="${name}" value="${escapeHtml(value)}"></label>`;
 const area = (label, name, value = '') =>
@@ -125,10 +119,8 @@ export class AiAgentsController {
                         return `<section class="launch-catalog-section" aria-labelledby="launch-section-${index}"><header class="launch-section-heading"><span class="launch-section-icon" aria-hidden="true"><i class="fa-solid fa-${icon}"></i></span><div><h2 id="launch-section-${index}">${title} <span class="launch-section-count">${entries.length}</span></h2><p>${description}</p></div></header>${
                             entries
                                 .map((item) => {
-                                    const brand = item.cli
-                                        ? getCliBrand(item.cli)
-                                        : null;
-                                    return `<article class="launch-catalog-row">${brand?.logo ? `<img class="launch-provider-logo" src="${escapeHtml(brand.logo)}" alt=""${brand.logoFilter ? ` style="filter:${escapeHtml(brand.logoFilter)}"` : ''}>` : `<span class="launch-provider-logo" aria-hidden="true"><i class="fa-solid fa-${icon}"></i></span>`}<div class="launch-catalog-copy"><button class="btn btn-link" data-agent-edit="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button><p>${escapeHtml(item.description || (item.definitionType === 'action' ? labels[item.kind] : brand?.label || item.cli))}</p>${item.ineligibleReason ? `<p class="text-warning">Unavailable: ${escapeHtml(item.ineligibleReason)}</p>` : ''}</div><button class="btn btn-secondary" data-agent-run="${escapeHtml(item.id)}" aria-label="Run ${escapeHtml(item.name)}"${item.canLaunch ? '' : ' disabled'}><i class="fa-solid fa-play" aria-hidden="true"></i> Run</button></article>`;
+                                    const presentation = launchPresentation(item);
+                                    return `<article class="launch-catalog-row">${presentation.logoHtml}<div class="launch-catalog-copy"><button class="btn btn-link" data-agent-edit="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button><p>${escapeHtml(presentation.subtitle)}</p>${item.ineligibleReason ? `<p class="text-warning">Unavailable: ${escapeHtml(item.ineligibleReason)}</p>` : ''}</div><button class="btn btn-secondary" data-agent-run="${escapeHtml(item.id)}" aria-label="Run ${escapeHtml(item.name)}"${item.canLaunch ? '' : ' disabled'}><i class="fa-solid fa-play" aria-hidden="true"></i> Run</button></article>`;
                                 })
                                 .join('') ||
                             `<div class="launch-catalog-empty"><i class="fa-solid fa-${icon}" aria-hidden="true"></i><h3>No ${title.toLowerCase()} yet</h3><button class="btn btn-secondary" data-agent-new="${type}"><i class="fa-solid fa-plus" aria-hidden="true"></i> ${action}</button></div>`

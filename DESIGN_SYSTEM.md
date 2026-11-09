@@ -753,6 +753,24 @@ Desktop aliases for values specified above (these add no new visual choices):
 
 The desktop footer (`.app-footer`) is hidden on every view. Put persistent status in the top bar, not the footer.
 
+#### Desktop Quick actions
+
+The top-bar play button opens a compact **Quick actions** popover. Each launch row
+matches its AI Agents catalog entry: the same provider logo or fallback icon,
+name, and muted subtitle. Show the saved description when present; otherwise show
+the provider label (such as **Codex**) for presets and the type label for Actions.
+Reuse the catalog's provider assets, filters and existing Font Awesome fallback
+icons, including `code` for Scripts, without adding a colored tile behind logos.
+Keep a separate secondary **Run** button matching the catalog's dark fill, border,
+text color and play icon. Icons are
+decorative; shared presentation logic keeps the catalog and dropdown aligned.
+
+Use the Menu panel surface, 16px padding and 8px gaps. Rows use the base surface,
+a quiet border and 12px padding. Keep Run visible beside long names, including on
+narrow screens. Place **Manage AI Agents** in a quieter footer after a separator.
+The trigger references the popover with `aria-controls` and `aria-haspopup="dialog"`;
+ordinary buttons support Tab, and Escape closes it and returns focus to the trigger.
+
 #### Top bar account
 
 Application Settings opens from **Account settings** in the account dropdown. The desktop

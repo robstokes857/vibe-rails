@@ -83,6 +83,11 @@ Quick actions for eligible Agents, Quick Launches and Actions. Application Setti
 **Account settings** in the account dropdown; when signed out, a text **Settings** link
 stays visible beside **Sign in / Sign up**. There is no standalone Settings icon.
 Its footer opens **Manage AI Agents**.
+`launch-menu.js` renders each eligible item with the same provider logo or fallback icon,
+name and subtitle as the AI Agents catalog, plus a matching secondary **Run** button.
+Both use `launch-presentation.js`: descriptions take precedence over provider/type labels,
+and Scripts retain the catalog's distinct code icon. The popover uses ordinary buttons and dialog semantics, with Tab navigation
+and Escape returning focus to the top-bar trigger. Keep launch dispatch keyed by definition ID.
 Rules runs validation only; Quality restores or starts its own cached scan when opened.
 
 Comments includes agent checkpoints and legacy note rows. Attention entries appear first; the
