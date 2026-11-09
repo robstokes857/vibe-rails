@@ -19,14 +19,15 @@ around the map, so opening either panel shortens the map down to its minimum hei
 
 ## Composition and lifetime
 
-- `viewer.js` owns the split map/health/file-list composition and the saved-details panel.
-  File selection focuses Atlas and its inspector; **Open details** replaces the sidebar with an
-  inline panel of saved measurements and captured excerpts (never a modal or window).
-  **Show in code explorer** and Escape return to the map. Copy context is absent.
-- The details panel leads with what is wrong (`findings.js`): the file's rating and health, how
+- `viewer.js` owns the split map/health/file-list composition. File selection focuses Atlas
+  and its inspector; **Open details** opens `file-details-modal.js`, a wide native dialog with
+  read-only Monaco and a findings/actions sidebar. **Show in code explorer** and Escape return
+  to the map. Structural entities without a saved file still use the inline details panel.
+- The findings sidebar leads with what is wrong (`findings.js`): the file's rating and health, how
   many measurements are past a limit and, when one function or type holds several of them, where.
   **What to fix first** lists every problem worst first with the first one open: where it was
-  measured, what the metric means, how to fix it, its limits and the captured code. Measurements
+  measured, what the metric means, how to fix it and its limits. Selecting a finding moves
+  Monaco to its source line; **Captured excerpt** shows its saved code instead. Measurements
   within their limits fold under one disclosure, and one row is open at a time. A radar category
   or score-card metric opens its own row instead. A problem is a raw value past its own warning or
   critical limit in the direction the metric reads, never a concern threshold (higher-is-better
@@ -34,6 +35,21 @@ around the map, so opening either panel shortens the map down to its minimum hei
   index, a composite that only rises when they are fixed, after them; then critical before
   warning; within a level, distance past the warning limit (capped at twice the
   warning-to-critical span, so NPath cannot drown the rest), then category weight.
+- `source-editor.js` uses the shared `monaco-loader.js` and the existing authenticated
+  `/code-analyzer/source` route. Working-tree scans read current disk content; unpushed scans
+  request `scope=unpushed` (current HEAD). Both are explicitly distinct from saved scan excerpts.
+  Missing, binary, oversized or failed source reads fall back to captured excerpts; a failed
+  Monaco load still displays inert plain text. Close/replacement/navigation aborts requests,
+  disposes editor models and pickers, and prevents late async mounts. Native dialog modality
+  contains focus; Monaco Find owns its first Escape, then Escape closes the reader.
+- The Quality controller supplies source scope, repository path and the existing ignore flow.
+  **Open fix terminal** uses the shared agent picker and launch dispatcher with a bounded prompt
+  containing only this file's saved findings, selected measurement, excerpt and scan timestamp.
+  Success closes the reader; failure keeps it retryable. **Ignore file** opens the existing
+  optional-reason confirmation; cancel returns to the reader, while success rescans the same scope.
+  Saved Board reports omit live-source and mutation/launch callbacks: they show captured excerpts
+  without implying that an older report describes this checkout. The nested dialog keeps the
+  parent card and its drafts intact.
 - The chrome is compact: the sidebar is the grade, the radar and the file list, with **Git
   changes** available beside the default **Report files** list and the changed files lit on the map on load.
   1.5 seconds after Atlas is ready, the first report file is selected using the normal 800 ms map focus
@@ -58,7 +74,8 @@ around the map, so opening either panel shortens the map down to its minimum hei
 
 Excerpts and report timestamps describe the supplied scan; the graph describes the current
 working tree. An absent map file can still open its saved details. Report text is escaped;
-no source is executed, copied to the clipboard or sent to an external service by this viewer.
+no source is executed. Only an explicit **Open fix terminal** action sends the file's report
+context to the selected agent.
 
 ## Graph contract
 

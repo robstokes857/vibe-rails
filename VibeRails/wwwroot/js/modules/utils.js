@@ -531,9 +531,9 @@ export function enhanceSelectWithTomSelect(selectEl, options = {}) {
         allowEmptyOption: true,
         maxOptions: null,
         plugins: searchable ? ['dropdown_input'] : [],
-        // Render the dropdown in <body> so parent cards with overflow:hidden
-        // (#vb-terminal-panel, sandbox cards) can't clip it.
-        dropdownParent: 'body',
+        // Escape clipping cards, but stay in a native dialog's top layer when present.
+        // A body-mounted menu would be inert behind that modal.
+        dropdownParent: selectEl.closest('dialog') || 'body',
         render: {
             ...render,
             no_results: (_data, escape) =>
@@ -717,8 +717,10 @@ function positionTomSelectDropdown(ts) {
     const desiredTop = flipped ? wrapperRect.top - gap - bounds.height : wrapperRect.bottom + gap;
     const top = Math.max(viewportTop + margin, Math.min(desiredTop, viewportTop + viewportHeight - margin - bounds.height));
     const left = Math.max(viewportLeft + margin, Math.min(wrapperRect.left, viewportLeft + viewportWidth - margin - bounds.width));
-    dropdown.style.top = `${top + window.scrollY}px`;
-    dropdown.style.left = `${left + window.scrollX}px`;
+    const nativeDialog = dropdown.parentElement?.tagName === 'DIALOG';
+    dropdown.style.position = nativeDialog ? 'fixed' : 'absolute';
+    dropdown.style.top = `${top + (nativeDialog ? 0 : window.scrollY)}px`;
+    dropdown.style.left = `${left + (nativeDialog ? 0 : window.scrollX)}px`;
     dropdown.classList.toggle('ts-dropdown-flipped', flipped);
 }
 

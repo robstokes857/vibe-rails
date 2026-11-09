@@ -1,5 +1,8 @@
 import { getEnabledLlmItems, mountLlmPicker, setLlmPickerValue } from './pickers/llm-picker.js';
 import { parseLlmSelection } from './utils.js';
+import { LaunchApi } from './launch-api.js';
+import { openLaunchTerminal } from './launch-terminal.js';
+import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
 
 const LAST_AGENT_KEY = 'viberails.projectHealth.fixAgent';
 
@@ -44,7 +47,7 @@ export function mountProjectHealthFixPickers(app, root) {
     };
 }
 
-export async function launchProjectHealthFix(app, { title, prompt, workingDirectory, selectionValue }) {
+export async function launchProjectHealthFix(app, { title, prompt, workingDirectory, selectionValue, signal }) {
     const selection = parseLlmSelection(selectionValue, app.data?.environments || []);
     if (!selection.cli || selection.cli === 'shell'
         || selection.kind === 'environment') {
@@ -54,7 +57,21 @@ export async function launchProjectHealthFix(app, { title, prompt, workingDirect
     rememberAgent(selectionValue);
     try {
         if (selection.kind === 'preset') {
-            return Boolean(await app.aiAgentsController.launch(selection.presetId, 'preset', { focusTerminal: true, promptPrefix: prompt }));
+            const api = new LaunchApi(app);
+            const preset = await api.definition('preset', selection.presetId, { signal });
+            if (signal?.aborted) return false;
+            const resolved = await resolvePromptTemplateForLaunch(app, {
+                initialPrompt: preset.initialPrompt, environmentName: preset.name
+            });
+            if (!resolved || resolved.canceled || signal?.aborted) return false;
+            const run = await api.run(selection.presetId, 'preset', {
+                promptPrefix: prompt, initialPrompt: resolved.initialPrompt,
+                expectedRevision: preset.revision, nativeTerminal: false
+            });
+            const opened = await openLaunchTerminal(app, api, run, { signal });
+            if (!opened && !signal?.aborted)
+                app.showToast('Could not open terminal', 'Check the run in AI Agents before retrying; it may still be queued.', 'warning');
+            return opened;
         }
         if (typeof app.terminalController?.launchInFocus !== 'function') {
             throw new Error('The terminal is unavailable. Reload the page and try again.');
@@ -71,6 +88,7 @@ export async function launchProjectHealthFix(app, { title, prompt, workingDirect
         if (opened === false) throw new Error('The terminal could not open. Try again.');
         return true;
     } catch (error) {
+        if (signal?.aborted) return false;
         app.showToast('Could not launch agent', error?.message || 'The terminal could not open. Try again.', 'error');
         return false;
     }

@@ -722,7 +722,14 @@ report files and Git changes, and the same list feeds the map's change highlight
 is the default list. One second after the map is ready, the viewer focuses the first report
 file with Atlas's normal animation; user input or leaving the view cancels that selection.
 The request retains the existing repository containment and read limits. No preview fixtures are shipped.
-Scan/exclusion controls and all rule/commit enforcement remain outside the viewer.
+File **Open details** uses a nested native modal with read-only Monaco beside the saved
+findings. The existing source endpoint supplies current working-tree text (or current HEAD
+for an unpushed scan); captured excerpts remain explicitly separate and provide the fallback.
+The Quality controller supplies the existing exclusion flow and repository context for the
+shared agent picker and file-scoped **Open fix terminal** action. Saved Board reports use
+captured excerpts without actions against a potentially different checkout. Closing or
+replacing a reader aborts source requests and disposes Monaco models and picker state.
+All rule/commit enforcement remains outside the viewer.
 See the [viewer integration contract](../VibeRails/wwwroot/js/modules/code-report/README.md)
 for data limits, vendor provenance, themes/CSP, lifecycle and regression tests.
 

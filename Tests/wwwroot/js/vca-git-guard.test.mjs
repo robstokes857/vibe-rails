@@ -408,8 +408,19 @@ function projectHealthLauncherHarness(t, { remembered = '', launch = () => true 
             },
             setValue(element, value) { element.value = value; }
         },
-        aiAgentsController: { launch(id, type, options) { const input = { id, type, ...options }; launches.push(input); return launch(input); } },
-        terminalController: { launchInFocus(options) { launches.push(options); return launch(options); } },
+        async apiCall(path, method, body) {
+            if (path === '/api/v1/presets/preset_7') return { name: 'Quality reviewer', initialPrompt: 'Review code.', revision: 3 };
+            assert.equal(path, '/api/v1/runs');
+            assert.equal(method, 'POST');
+            launches.push(body);
+            return await launch(body)
+                ? { id: 'run', tabId: 'tab', sessionId: 'session', status: 'running' }
+                : { id: 'run', status: 'failed' };
+        },
+        terminalController: {
+            launchInFocus(options) { launches.push(options); return launch(options); },
+            async adoptLaunchedTab(id) { assert.equal(id, 'tab'); return true; }
+        },
         showModal() { assert.fail('Fix should launch directly without a modal'); },
         showToast(...args) { toasts.push(args); }
     };
@@ -468,9 +479,11 @@ test('Project health launches the selected global preset with the quality brief'
     const { controller, launches, choose } = projectHealthLauncherHarness(t);
     choose('quality', 'preset:preset_7:opencode');
     assert.equal(await controller.launchProjectHealthFix('quality'), true);
-    assert.equal(launches[0].id, 'preset_7');
-    assert.equal(launches[0].type, 'preset');
-    assert.equal(launches[0].focusTerminal, true);
+    assert.equal(launches[0].definitionId, 'preset_7');
+    assert.equal(launches[0].definitionType, 'preset');
+    assert.equal(launches[0].nativeTerminal, false);
+    assert.equal(launches[0].expectedRevision, 3);
+    assert.equal(launches[0].initialPrompt, 'Review code.');
     assert.match(launches[0].promptPrefix, /CODE QUALITY/);
     assert.doesNotMatch(launches[0].promptPrefix, /\nRULES\n/);
 });

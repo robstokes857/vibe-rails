@@ -733,6 +733,15 @@ The desktop Quality page places its **Code quality** heading, scan status and ac
 above the repository map and report. The scan guide opens directly below that header;
 the scan-options menu opens downward over the report.
 
+Quality's **Open details** opens a wide modal reader: read-only Monaco in the main
+pane, saved findings and remediation actions in a right sidebar. Selecting a finding
+reveals its source line; label current source separately from captured scan excerpts.
+Offer the shared agent picker with **Open fix terminal** and **Ignore file** beside
+the findings. A successful terminal launch closes the reader. Keep errors recoverable,
+support Escape and focus return, and stack the panes on narrow screens with scrolling
+inside the modal. Saved Board evidence retains its captured excerpts and does not
+offer actions against a potentially different checkout.
+
 The desktop top bar is compact: 44px tall, a 36px mascot, 8px side gutters and gaps,
 and sentence-case navigation with 8px horizontal link padding. Desktop links are 36px
 tall; touch/narrow layouts retain 44px targets. Hide labels at the existing compact

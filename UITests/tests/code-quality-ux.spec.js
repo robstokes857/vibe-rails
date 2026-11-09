@@ -140,7 +140,7 @@ async function installQualityApi(page, { empty = false } = {}) {
                 { key: 'base:claude', kind: 'base', group: 'Base CLIs', label: 'Claude (default)', cli: 'claude', enabled: true, order: 0 },
                 { key: 'base:codex', kind: 'base', group: 'Base CLIs', label: 'Codex (default)', cli: 'codex', enabled: true, order: 1 },
                 { key: 'base:shell', kind: 'base', group: 'Base CLIs', label: 'Terminal', cli: 'shell', enabled: true, order: 2 },
-                { key: 'env:902:codex', kind: 'environment', group: 'Custom Environments', label: 'Review agent (Codex)', cli: 'codex', environmentId: 902, enabled: true, order: 0 }
+                { key: 'preset:review:codex', kind: 'agent', group: 'AI Agents', label: 'Review agent (Codex)', cli: 'codex', enabled: true, order: 0 }
             ] }
         };
         return route.fulfill({ json: payloads[path] || {} });
@@ -216,7 +216,7 @@ for (const rulesView of ['dashboard', 'agents']) {
         await expect(rulesLink).toHaveAttribute('aria-current', 'page');
         await expect.poll(() => validations).toBe(1);
         expect(scanRequests).toHaveLength(0);
-        await expect(page.locator('.code-report')).toHaveCount(0);
+        await expect(page.locator('.code-report:not(.quality-file-layer)')).toHaveCount(0);
         await expect(page.locator('[data-rule-manager]')).toBeVisible();
 
         await qualityLink.click();
@@ -230,7 +230,7 @@ for (const rulesView of ['dashboard', 'agents']) {
 
         await rulesLink.click();
         await expect.poll(() => validations).toBe(2);
-        await expect(page.locator('.code-report')).toHaveCount(0);
+        await expect(page.locator('.code-report:not(.quality-file-layer)')).toHaveCount(0);
         await qualityLink.click();
         await expect(page.locator('.code-report .qr')).toHaveAttribute('data-state', 'complete');
         expect(scanRequests).toHaveLength(1);
@@ -247,7 +247,7 @@ for (const width of [1920, 1492, 1210, 1100, 1000, 768, 390]) {
         } }));
         await openQuality(page);
         const nav = page.locator('.app-subnav');
-        await expect(nav.locator('.app-subnav-links > button').nth(2)).toHaveText('QUALITY');
+        await expect(nav.locator('.app-subnav-links > button').nth(2)).toHaveText('Quality');
         await expect(nav.locator('.app-subnav-links > button').nth(3)).toHaveText('Rules');
         const account = nav.locator('[data-action="account-menu"]');
         const play = nav.getByRole('button', { name: 'Launch an agent or automation', exact: true });
@@ -255,7 +255,7 @@ for (const width of [1920, 1492, 1210, 1100, 1000, 768, 390]) {
         expect(await nav.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
         if (width >= 1210) {
-            const report = await page.locator('.code-report').boundingBox();
+            const report = await page.locator('.code-report:not(.quality-file-layer)').boundingBox();
             expect(report.width).toBeGreaterThan(width - 90);
             const header = await page.locator('.code-quality-bar').boundingBox();
             expect(header.y).toBeLessThan(200);
@@ -279,7 +279,7 @@ for (const width of [1920, 1492, 1210, 1100, 1000, 768, 390]) {
 
 async function openDetails(page) {
     await openQuality(page);
-    const report = page.locator('.code-report');
+    const report = page.locator('.code-report:not(.quality-file-layer)');
     await expect(report).toBeVisible();
     await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete', { timeout: 25_000 });
     // Explicit interaction keeps these manual-exploration tests out of the opening map tour.
@@ -341,7 +341,7 @@ for (const view of ['code-quality']) {
         const { scanRequests } = await installQualityApi(page);
         await page.goto(`/?view=${view}`, { waitUntil: 'domcontentloaded' });
 
-        const report = page.locator('.code-report');
+        const report = page.locator('.code-report:not(.quality-file-layer)');
         await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete');
         expect(await page.evaluate(() => {
             const viewer = window.app.ruleController.codeReportViewer;
@@ -350,12 +350,12 @@ for (const view of ['code-quality']) {
 
         // Document-level Escape must close saved details without navigating away.
         await report.getByRole('button', { name: /^Complexity:/ }).click();
-        await expect(report.locator('.details-panel')).toBeVisible();
-        await report.locator('.details-panel h2').press('Escape');
-        await expect(report.locator('.details-panel')).toBeHidden();
+        await expect(page.locator('.quality-file-modal')).toBeVisible();
+        await page.locator('[data-quality-close]').press('Escape');
+        await expect(page.locator('.quality-file-modal')).toBeHidden();
         await expect(report).toBeVisible();
 
-        await page.locator('[data-action="navigate"][data-view="automations"]:visible').click();
+        await page.locator('[data-action="navigate"][data-view="ai-agents"]:visible').click();
         await expect(report).toHaveCount(0);
         await page.locator('[data-action="navigate"][data-view="code-quality"]:visible').click();
         await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete');
@@ -400,7 +400,7 @@ test('the first Report file animates into focus 1.5 seconds after a delayed map 
         await route.fulfill({ json: graphResponse() });
     });
     await openQuality(page);
-    const report = page.locator('.code-report');
+    const report = page.locator('.code-report:not(.quality-file-layer)');
     const first = report.locator('.qr-file').first();
     await expect(first).toHaveAttribute('data-path', PAYMENT_PATH);
     await expect(report.locator('[data-list="report"]')).toHaveAttribute('aria-pressed', 'true');
@@ -429,14 +429,14 @@ test('the first Report file animates into focus 1.5 seconds after a delayed map 
     const delay = await page.evaluate(() => window.fileFocusedAt - window.mapReadyAt);
     expect(delay).toBeGreaterThanOrEqual(1450);
     expect(delay).toBeLessThan(3000);
-    await expect(report.locator('.details-panel')).toBeHidden();
+    await expect(page.locator('.quality-file-modal')).toBeHidden();
 });
 
 for (const interaction of ['another file', 'Git changes', 'map search']) {
     test(`opening selection yields to ${interaction}`, async ({ page }) => {
         await installQualityApi(page);
         await openQuality(page);
-        const report = page.locator('.code-report');
+        const report = page.locator('.code-report:not(.quality-file-layer)');
         const map = page.frameLocator('.code-report iframe');
         await page.evaluate(() => window.app.ruleController.codeReportViewer.ready);
         if (interaction === 'another file') {
@@ -496,8 +496,10 @@ test('report selection focuses the isolated map and opens saved details', async 
     })).toEqual([4, 5, 6, expect.any(Number)]);
     await expect(map.locator('#inspector .entity-note')).toContainText('Measured in the scan from');
     await map.getByRole('button', { name: /Open details/ }).click();
-    const dialog = report.locator('.details-panel');
+    const dialog = page.locator('.quality-file-modal');
     await expect(dialog).toBeVisible();
+    await expect(dialog.locator('.view-lines')).toContainText('source line');
+    await dialog.getByRole('button', { name: 'Captured excerpt', exact: true }).click();
     // The details open on the verdict and the worst problem, already expanded with its fix and code.
     await expect(dialog.locator('.verdict-rating')).toHaveText('At risk');
     await expect(dialog.locator('.verdict-summary strong')).toHaveText('3 critical problems');
@@ -505,22 +507,22 @@ test('report selection focuses the isolated map and opens saved details', async 
     const worst = dialog.locator('.finding-toggle').first();
     await expect(worst).toHaveAttribute('aria-expanded', 'true');
     await expect(dialog.locator('.finding-fix')).toContainText('Flatten it');
-    await expect(dialog.locator('.code-excerpt')).toContainText('cognitive_complexity evidence');
+    await expect(dialog.locator('.view-lines')).toContainText('cognitive_complexity evidence');
     // The fix is readable without scrolling the panel: it ends above the sticky action bar.
     expect(await dialog.evaluate(panel => panel.querySelector('.finding-fix').getBoundingClientRect().bottom
-        <= panel.querySelector('.details-actions').getBoundingClientRect().top)).toBe(true);
+        <= panel.querySelector('.quality-file-actions').getBoundingClientRect().top)).toBe(true);
     await expect(dialog.locator('.within-limits')).not.toHaveAttribute('open', '');
     await expect(dialog.locator('.within-limits summary')).toContainText('Within limits');
     // One measurement is open at a time: opening the next problem closes the first.
     await dialog.locator('.finding-toggle').nth(1).click();
     await expect(worst).toHaveAttribute('aria-expanded', 'false');
-    await expect(dialog.locator('.code-excerpt')).toContainText('cyclomatic_complexity evidence');
+    await expect(dialog.locator('.view-lines')).toContainText('cyclomatic_complexity evidence');
     await expect(dialog.getByRole('button', { name: /Copy context/i })).toHaveCount(0);
     await dialog.getByRole('button', { name: 'Show in code explorer' }).click();
     await expect(dialog).not.toBeVisible();
     await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
     expect(scanRequests).toHaveLength(1);
-    expect(sourceRequests).toHaveLength(0);
+    expect(sourceRequests).toEqual([PAYMENT_PATH]);
 });
 
 test('inspector shows saved file measurements and hides unavailable metrics through refresh and failure', async ({ page }) => {
@@ -577,9 +579,9 @@ test('radar supports keyboard categories, saved detail activation and Escape', a
     const size = report.getByRole('button', { name: /^Size:/ });
     await expect(size).toBeFocused();
     await size.press('Enter');
-    await expect(report.locator('.details-panel')).toBeVisible();
-    await report.locator('.details-panel h2').press('Escape');
-    await expect(report.locator('.details-panel')).not.toBeVisible();
+    await expect(page.locator('.quality-file-modal')).toBeVisible();
+    await page.locator('[data-quality-close]').press('Escape');
+    await expect(page.locator('.quality-file-modal')).not.toBeVisible();
     await expect(report).toBeVisible();
 });
 
@@ -609,6 +611,7 @@ test('large graphs draw every entity on the canvas field and still focus report 
 });
 
 test('repository sized graphs light the hovered entity above a veil and rotate under CPU throttling', async ({ page }, testInfo) => {
+    test.slow(); // This complete interaction sequence intentionally runs at 4x CPU throttling.
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
@@ -667,7 +670,7 @@ test('the field animates bounded signals and the Cards view keeps SVG curves and
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await installQualityApi(page);
     await page.goto('/?view=code-quality', { waitUntil: 'domcontentloaded' });
-    const report = page.locator('.code-report');
+    const report = page.locator('.code-report:not(.quality-file-layer)');
     const map = page.frameLocator('.code-report iframe');
     await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready');
     await expect(map.locator('#stage')).toHaveClass(/constellation/);
@@ -928,7 +931,7 @@ test('a dense field hides its declarations zoomed out and reveals them on hover,
 test('the sidebar lists Git changes beside report files and opens the shared diff viewer', async ({ page }) => {
     const { diffRequests } = await installQualityApi(page);
     await openQuality(page);
-    const report = page.locator('.code-report');
+    const report = page.locator('.code-report:not(.quality-file-layer)');
     await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete', { timeout: 25_000 });
     const map = page.frameLocator('.code-report iframe');
     await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready');
@@ -987,7 +990,7 @@ test('change rows gain their map-locate action when the graph arrives after the 
         await route.fulfill({ json: graphResponse() }).catch(() => {});
     });
     await openQuality(page);
-    const report = page.locator('.code-report');
+    const report = page.locator('.code-report:not(.quality-file-layer)');
     await report.locator('.qr-list-switch').getByRole('button', { name: /Git changes/ }).click();
     const list = report.locator('[data-changes-list]');
     await expect(list.locator('.change-row')).toHaveCount(3);
@@ -1058,13 +1061,14 @@ test('graph failures leave saved report and all metrics accessible', async ({ pa
     const report = await openDetails(page);
     await expect(report.locator('[data-code-map]')).toContainText('Map unavailable');
     await report.getByRole('button', { name: new RegExp(PAYMENT_PATH) }).click();
-    const details = report.locator('.details-panel');
+    const details = page.locator('.quality-file-modal');
     await expect(details).toBeVisible();
-    await expect(details.locator('.code-excerpt')).toContainText('cognitive_complexity evidence');
+    await details.getByRole('button', { name: 'Captured excerpt', exact: true }).click();
+    await expect(details.locator('.view-lines')).toContainText('cognitive_complexity evidence');
     // Every measurement stays reachable: the ones within their limits fold under one disclosure.
     await details.locator('.within-limits > summary').click();
     await details.getByRole('button', { name: /Parameters per function/ }).click();
-    await expect(report.locator('.code-excerpt')).toContainText('parameter_count evidence');
+    await expect(details.locator('.view-lines')).toContainText('parameter_count evidence');
     await expect(details.locator('.finding-fix')).toHaveCount(0);
     await expect(details.locator('.finding[data-metric="parameter_count"] .finding-where')).toHaveText('Process, line 18 · warning above 15 · critical at 25');
 });
@@ -1076,11 +1080,12 @@ test('a radar category opens its worst measurement even when it is within its li
         const viewer = window.app.ruleController.codeReportViewer;
         viewer.showFile(viewer.response.report.files[0], 'fan_out');
     });
-    const details = report.locator('.details-panel');
+    const details = page.locator('.quality-file-modal');
     await expect(details.locator('.within-limits')).toHaveAttribute('open', '');
     const fanOut = details.locator('.finding[data-metric="fan_out"] .finding-toggle');
     await expect(fanOut).toHaveAttribute('aria-expanded', 'true');
-    await expect(details.locator('.code-excerpt')).toContainText('fan_out evidence');
+    await details.getByRole('button', { name: 'Captured excerpt', exact: true }).click();
+    await expect(details.locator('.view-lines')).toContainText('fan_out evidence');
     await expect(fanOut).toBeInViewport();
 });
 
@@ -1129,9 +1134,10 @@ test('long file lists scroll independently and saved excerpts remain inert text'
         const viewer = window.app.ruleController.codeReportViewer;
         viewer.showFile(viewer.response.report.files[0], 'cognitive_complexity');
     });
-    const dialog = report.locator('.details-panel');
-    await expect(dialog.locator('.code-excerpt')).toContainText('<img src=x');
-    await expect(dialog.locator('img')).toHaveCount(0);
+    const dialog = page.locator('.quality-file-modal');
+    await dialog.getByRole('button', { name: 'Captured excerpt', exact: true }).click();
+    await expect(dialog.locator('.view-lines')).toContainText('<img src=x');
+    await expect(dialog.locator('[data-source-editor] img')).toHaveCount(0);
     await expect(dialog).toContainText('Report captured');
     await expect(dialog).toContainText('2026');
     expect(await page.evaluate(() => window.reportInjected)).toBeUndefined();
@@ -1149,7 +1155,7 @@ test('navigation aborts a late graph and route re-entry uses the cached report',
     });
     await openQuality(page);
     await expect.poll(() => started).toBe(true);
-    await page.locator('[data-action="navigate"][data-view="automations"]:visible').click();
+    await page.locator('[data-action="navigate"][data-view="ai-agents"]:visible').click();
     release();
     await expect(page.locator('.code-report iframe')).toHaveCount(0);
     await page.locator('[data-action="navigate"][data-view="code-quality"]:visible').click();
@@ -1201,7 +1207,7 @@ test('scan exclusions remain available on Project health', async ({ page }) => {
 
 for (const choice of [
     { value: 'base:codex', cli: 'codex', environmentName: null },
-    { value: 'env:902:codex', cli: 'codex', environmentName: 'Review agent' }
+    { value: 'base:claude', cli: 'claude', environmentName: null }
 ]) {
     test(`Fix code quality directly launches inline selection ${choice.value} and remembers it`, async ({ page }) => {
         await installQualityApi(page);
@@ -1346,8 +1352,8 @@ test('returning to QUALITY restores the completed empty transcript without resca
     const { scanRequests } = await installQualityApi(page, { empty: true });
     await openQuality(page);
     await expect.poll(() => scanRequests.length).toBe(1);
-    await page.locator('[data-action="navigate"][data-view="automations"]:visible').click();
-    await expect(page.locator('#app-content [data-view="automations"]')).toBeVisible();
+    await page.locator('[data-action="navigate"][data-view="ai-agents"]:visible').click();
+    await expect(page.getByRole('heading', { name: 'AI Agents', exact: true })).toBeVisible();
     await page.locator('[data-action="navigate"][data-view="code-quality"]:visible').click();
     const quality = page.locator('.project-health-quality');
     await expect(quality.locator('.code-report')).toContainText('No source files in this report.');
@@ -1461,4 +1467,239 @@ test('shared agent picker follows its control when an inner panel scrolls', asyn
     await page.locator('[data-picker-scroll-panel]').evaluate(panel => { panel.scrollTop = 80; });
     await expect.poll(async () => Math.round((await dropdown.boundingBox()).y - initialTop)).toBe(-80);
     await expectDropdownInsideViewport(page, dropdown);
+});
+
+async function showFileModal(page, preferredName = 'cognitive_complexity') {
+    await page.evaluate(name => {
+        const viewer = window.app.ruleController.codeReportViewer;
+        viewer.showFile(viewer.response.report.files[0], name);
+    }, preferredName);
+    const modal = page.locator('.quality-file-modal');
+    await expect(modal).toBeVisible();
+    await expect(modal.locator('.monaco-editor')).toBeVisible();
+    return modal;
+}
+
+test('file quality uses full source, follows finding lines and disposes Monaco on Escape', async ({ page }) => {
+    const { sourceRequests } = await installQualityApi(page);
+    await openQuality(page);
+    const modal = await showFileModal(page);
+    await expect(modal.locator('[data-source-status]')).toHaveText('Current working tree · Read-only');
+    const editorState = () => page.evaluate(() => {
+        const editor = monaco.editor.getEditors().find(editor => editor.getDomNode()?.closest('.quality-file-modal'));
+        return { line: editor.getPosition().lineNumber, readOnly: editor.getRawOptions().readOnly,
+            source: editor.getValue(), models: monaco.editor.getModels().length };
+    });
+    expect(await editorState()).toMatchObject({ line: 12, readOnly: true, models: 1 });
+    await modal.locator('[data-metric="cyclomatic_complexity"] button').click();
+    expect(await editorState()).toMatchObject({ line: 28 });
+    expect(sourceRequests).toEqual([PAYMENT_PATH]);
+    await modal.getByRole('button', { name: 'Captured excerpt', exact: true }).click();
+    expect((await editorState()).source).toBe('// cyclomatic_complexity evidence at line 28');
+    await modal.getByRole('button', { name: 'Current file', exact: true }).click();
+    expect((await editorState()).source).toContain('source line 80');
+    await modal.locator('.inputarea').focus();
+    await page.keyboard.press('Control+f');
+    await expect(modal.locator('.find-widget')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(modal).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(modal).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => monaco.editor.getModels().length)).toBe(0);
+    await expect(page.getByRole('heading', { name: 'Code quality', exact: true })).toBeVisible();
+});
+
+test('file fix terminal uses selected agent and this file report, retaining the modal on failure', async ({ page }) => {
+    await installQualityApi(page);
+    await openQuality(page);
+    await page.evaluate(() => {
+        window.__fileLaunches = [];
+        window.__fileLaunchOk = false;
+        window.app.terminalController.launchInFocus = async options => {
+            window.__fileLaunches.push(options);
+            return window.__fileLaunchOk;
+        };
+    });
+    const modal = await showFileModal(page, 'cyclomatic_complexity');
+    const control = await inlineAgentControl(modal.locator('[data-project-health-fix-agent]'));
+    await control.click();
+    const option = modal.locator('.ts-dropdown:visible [data-value="base:codex"]');
+    await expect(option).toBeInViewport();
+    await option.click();
+    await modal.getByRole('button', { name: 'Open fix terminal', exact: true }).click();
+    await expect(modal.locator('[data-quality-action-status]')).toContainText('did not open');
+    await expect(modal).toBeVisible();
+    const [launch] = await page.evaluate(() => window.__fileLaunches);
+    expect(launch.cli).toBe('codex');
+    expect(launch.forceNewTab).toBe(true);
+    expect(launch.initialPrompt).toContain(PAYMENT_PATH);
+    expect(launch.initialPrompt).not.toContain(HELPER_PATH);
+    expect(launch.initialPrompt).toContain('Cyclomatic complexity; Process, line 28');
+    expect(launch.initialPrompt).toContain('2026-10-08T12:00:00Z');
+    await page.evaluate(() => { window.__fileLaunchOk = true; });
+    await modal.getByRole('button', { name: 'Open fix terminal', exact: true }).click();
+    await expect(modal).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => monaco.editor.getModels().length)).toBe(0);
+});
+
+test('file ignore reuses reason confirmation, supports cancel and refreshes the report', async ({ page }) => {
+    const { scanRequests } = await installQualityApi(page);
+    await openQuality(page);
+    const modal = await showFileModal(page);
+    await modal.getByRole('button', { name: 'Ignore file', exact: true }).click();
+    const confirmation = page.locator('.analyzer-ignore-modal');
+    await expect(confirmation).toContainText(PAYMENT_PATH);
+    await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(modal).toBeVisible();
+    await modal.getByRole('button', { name: 'Ignore file', exact: true }).click();
+    await confirmation.getByLabel('Test files', { exact: true }).check();
+    const ignored = page.waitForRequest(request => request.url().endsWith('/code-analyzer/ignores') && request.method() === 'POST');
+    await confirmation.getByRole('button', { name: 'Ignore file', exact: true }).click();
+    expect((await ignored).postDataJSON()).toMatchObject({ path: PAYMENT_PATH, matchKind: 'file', reasonKind: 'test' });
+    await expect.poll(() => scanRequests.length).toBe(2);
+    await expect(page.locator('.qr-file[data-path="' + PAYMENT_PATH + '"]')).toHaveCount(0);
+    await expect(modal).toHaveCount(0);
+});
+
+for (const [kind, response, notice] of [
+    ['missing', { exists: false, content: null }, 'missing or unreadable'],
+    ['binary', { isBinary: true, content: 'binary' }, 'Binary source'],
+    ['large', { truncated: true, content: null }, 'too large'],
+    ['error', null, 'could not be loaded']
+]) {
+    test(`file quality falls back to captured source for ${kind} files`, async ({ page }) => {
+        await installQualityApi(page);
+        await page.route('**/api/v1/code-analyzer/source?*', route => route.fulfill(response
+            ? { json: response } : { status: 503, json: { error: 'Source unavailable' } }));
+        await openQuality(page);
+        const modal = await showFileModal(page);
+        await expect(modal.locator('[data-source-status]')).toContainText(notice);
+        await expect(modal.locator('.view-lines')).toContainText('cognitive_complexity evidence');
+        await expect(modal.getByRole('button', { name: 'Current file', exact: true })).toBeDisabled();
+    });
+}
+
+test('file quality ignores a source response after close and preserves unpushed scope', async ({ page }) => {
+    await installQualityApi(page);
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    let sourceUrl;
+    await page.route('**/api/v1/code-analyzer/source?*', async route => {
+        sourceUrl = route.request().url();
+        await pending;
+        await route.fulfill({ json: { content: 'late source' } }).catch(() => {});
+    });
+    await openQuality(page);
+    await page.evaluate(() => { window.app.ruleController.lastAnalyzerUnpushed = true; });
+    const modal = await showFileModal(page);
+    await expect.poll(() => sourceUrl).toContain('scope=unpushed');
+    await modal.getByRole('button', { name: 'Close file quality' }).click();
+    release();
+    await expect(modal).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => monaco.editor.getModels().length)).toBe(0);
+});
+
+for (const width of [320, 375, 768, 1024, 1440]) {
+    test(`file quality modal fits ${width}px and keeps actions reachable`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        await installQualityApi(page);
+        await openQuality(page);
+        const modal = await showFileModal(page);
+        const dimensions = await modal.evaluate(element => ({ width: element.clientWidth, scroll: element.scrollWidth,
+            left: element.getBoundingClientRect().left, right: element.getBoundingClientRect().right }));
+        expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.width + 1);
+        expect(dimensions.left).toBeGreaterThanOrEqual(0);
+        expect(dimensions.right).toBeLessThanOrEqual(width);
+        const fix = modal.getByRole('button', { name: 'Open fix terminal', exact: true });
+        await fix.scrollIntoViewIfNeeded();
+        await expect(fix).toBeInViewport();
+        const control = await inlineAgentControl(modal.locator('[data-project-health-fix-agent]'));
+        await control.click();
+        const option = modal.locator('.ts-dropdown:visible [data-value="base:codex"]');
+        await expect(option).toBeInViewport();
+        await option.click();
+        await modal.getByRole('button', { name: 'Close file quality' }).focus();
+        await modal.screenshot({ path: testInfo.outputPath(`file-quality-${width}.png`) });
+        await page.keyboard.press('Escape');
+        await expect(modal).toHaveCount(0);
+    });
+}
+
+test('saved agent file fix waits for a terminal and preserves the reader on failed startup', async ({ page }) => {
+    await installQualityApi(page);
+    await page.route('**/api/v1/presets/review', route => route.fulfill({ json: {
+        id: 'review', name: 'Review agent', initialPrompt: 'Review this file.', revision: 7
+    } }));
+    let succeeds = false;
+    const requests = [];
+    await page.route('**/api/v1/runs', route => {
+        requests.push(route.request().postDataJSON());
+        return route.fulfill({ json: succeeds
+            ? { id: 'run-2', status: 'running', tabId: 'tab-2', sessionId: 'session-2' }
+            : { id: 'run-1', status: 'failed' } });
+    });
+    await openQuality(page);
+    await page.evaluate(() => {
+        window.__adopted = [];
+        window.app.terminalController.adoptLaunchedTab = async id => { window.__adopted.push(id); return true; };
+    });
+    const modal = await showFileModal(page);
+    const control = await inlineAgentControl(modal.locator('[data-project-health-fix-agent]'));
+    await control.click();
+    await modal.locator('[data-value="preset:review:codex"]').click();
+    await modal.getByRole('button', { name: 'Open fix terminal', exact: true }).click();
+    await expect(modal.locator('[data-quality-action-status]')).toBeVisible();
+    expect(requests[0]).toMatchObject({ definitionId: 'review', expectedRevision: 7,
+        initialPrompt: 'Review this file.', nativeTerminal: false });
+    expect(requests[0].promptPrefix).toContain(PAYMENT_PATH);
+    expect(await page.evaluate(() => window.__adopted)).toEqual([]);
+    succeeds = true;
+    await modal.getByRole('button', { name: 'Open fix terminal', exact: true }).click();
+    await expect(modal).toHaveCount(0);
+    expect(await page.evaluate(() => window.__adopted)).toEqual(['tab-2']);
+});
+
+test('saved agent prompt cancellation returns to file quality without starting a run', async ({ page }) => {
+    await installQualityApi(page);
+    await page.route('**/api/v1/presets/review', route => route.fulfill({ json: {
+        id: 'review', name: 'Review agent', initialPrompt: 'Review {{topic}}.', revision: 7
+    } }));
+    let runs = 0;
+    await page.route('**/api/v1/runs', route => { runs++; return route.fulfill({ json: { id: 'unexpected' } }); });
+    await openQuality(page);
+    const modal = await showFileModal(page);
+    const control = await inlineAgentControl(modal.locator('[data-project-health-fix-agent]'));
+    await control.click();
+    await modal.locator('[data-value="preset:review:codex"]').click();
+    await modal.getByRole('button', { name: 'Open fix terminal', exact: true }).click();
+    await expect(page.locator('[data-prompt-template-modal]')).toBeVisible();
+    await page.locator('[data-prompt-template-modal]').getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(modal).toBeVisible();
+    expect(runs).toBe(0);
+    await expect.poll(() => page.evaluate(() => monaco.editor.getModels().length)).toBe(1);
+});
+
+test('saved Board report reader keeps parent drafts and uses only captured excerpts', async ({ page }) => {
+    const { sourceRequests } = await installQualityApi(page);
+    await openQuality(page);
+    await page.evaluate(async response => {
+        window.app.showModal('Saved check', '<input id="parent-draft" value="unsaved"><div id="saved-viewer"></div>');
+        const { CodeReportViewer } = await import('/js/modules/code-report/viewer.js');
+        window.__savedViewer = new CodeReportViewer(document.querySelector('#saved-viewer'), window.app);
+        await window.__savedViewer.setResponse(response);
+        document.querySelector('#parent-draft').focus();
+        window.__savedViewer.showFile(response.report.files[0]);
+    }, scanResponse());
+    const modal = page.locator('.quality-file-modal');
+    await expect(modal.locator('.view-lines')).toContainText('cognitive_complexity evidence');
+    await expect(modal.locator('[data-quality-fix], [data-quality-ignore], [data-source-mode="file"]')).toHaveCount(0);
+    expect(sourceRequests).toEqual([]);
+    await modal.locator('[data-quality-close]').focus();
+    await page.keyboard.press('Tab');
+    expect(await page.evaluate(() => Boolean(document.activeElement.closest('.quality-file-modal')))).toBe(true);
+    await modal.locator('[data-quality-close]').press('Escape');
+    await expect(page.locator('#parent-draft')).toHaveValue('unsaved');
+    await expect(page.locator('#parent-draft')).toBeFocused();
+    await page.evaluate(() => { window.__savedViewer.destroy(); window.app.closeModal(); });
+    await expect.poll(() => page.evaluate(() => monaco.editor.getModels().length)).toBe(0);
 });

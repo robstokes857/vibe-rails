@@ -63,6 +63,9 @@ The tests cover compact actions, file-to-map selection, visible domain links and
 saved metrics, radar keyboard access, themes/reduced motion, independent scrolling, narrow layouts,
 failure/empty states, request cancellation and cleanup, exclusion/restore flow, agent choice,
 independent Rules/Quality checks, and responsive navigation with Settings in the account dropdown.
+The file-details cases exercise the real Monaco reader, finding-line navigation, captured
+excerpts, source fallbacks, ignore/cancel/rescan, file-scoped fix prompts, launch failure,
+picker placement inside the native dialog, cleanup and 320–1440px layouts.
 
 ### Focused Page Header Tests (No Backend Required)
 

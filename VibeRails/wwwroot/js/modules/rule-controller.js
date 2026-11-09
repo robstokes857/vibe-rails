@@ -507,7 +507,11 @@ export class RuleController {
         this.focusedMode = false;
         this.viewRoot = root;
         const reportHost = root.querySelector('[data-code-analyzer-report]');
-        this.codeReportViewer = reportHost ? new CodeReportViewer(reportHost, this.app) : null;
+        this.codeReportViewer = reportHost ? new CodeReportViewer(reportHost, this.app, {
+            getSourceScope: () => this.lastAnalyzerUnpushed ? 'unpushed' : 'working-tree',
+            getWorkingDirectory: () => this.hookStatus?.repositoryPath || this.app.data?.configs?.rootPath || null,
+            onIgnoreFile: (file, onReturn) => this.promptIgnoreAnalyzerFile({ path: file.file }, onReturn)
+        }) : null;
         this.bindCodeQualityControls(root);
         this.bindProjectHealthControls(root);
         this.bindActionMenuAutoClose(root);

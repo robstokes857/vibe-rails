@@ -6,7 +6,7 @@ import { enhanceRadar } from './radar-interactions.js';
 import { isConfirmDialogOpen } from '../utils.js';
 import { openDiffModal } from '../diff-modal.js';
 import { reportPath, withReportMetrics } from './graph-metrics.js';
-import { fileFindings } from './findings.js';
+import { openFileDetailsModal } from './file-details-modal.js';
 
 export { reportPath } from './graph-metrics.js';
 
@@ -21,20 +21,10 @@ const STATUS_CODES = { modified: 'M', added: 'A', deleted: 'D', renamed: 'R', co
 // Sidebar scrollers that keep the wheel inside the panel; innermost first when nested.
 const SIDEBAR_SCROLLERS = '.code-excerpt,.qr-files,.qr-changes,.details-panel';
 const basename = path => reportPath(path).split('/').pop();
-// One measurement's evidence, rendered when its row expands: what it means, what to change, its limits and the code.
-const findingBody = item => [
-    item.meaning ? `<p class="finding-meaning">${esc(item.meaning)}</p>` : '',
-    item.level !== 'ok' && item.fix ? `<p class="finding-fix"><strong>How to fix.</strong> ${esc(item.fix)}</p>` : '',
-    // A row within its limits already shows both of them; a problem's row shows only the one it crossed.
-    item.level !== 'ok' || item.higherIsBetter ? `<p class="finding-limits">${esc(item.limitsText)}</p>` : '',
-    item.name === 'npath_complexity' && item.value >= 1_000_000_000
-        ? '<p class="finding-limits">NPath is an estimate capped at 1 billion paths, not an exact count.</p>' : '',
-    item.snippet ? `<div class="snippet-heading">${item.line ? `Code at line ${esc(item.line)}` : 'Code'}</div><pre class="code-excerpt">${esc(item.snippet)}</pre>` : ''
-].join('');
-
 /** A host-owned report view. Networking uses app.apiCall; no fixture or global route state. */
 export class CodeReportViewer {
-    constructor(host, app) {
+    constructor(host, app, options = {}) {
+        this.options = options;
         this.host = host;
         this.app = app;
         this.document = host.ownerDocument;
@@ -43,8 +33,6 @@ export class CodeReportViewer {
         this.destroyed = false;
         this.activeList = 'report';
         const titleId = `code-report-details-${++instanceId}`;
-        // Finding panel ids come from this counter, never from DOM text read back into markup.
-        this.findingIdPrefix = `${titleId}-finding`;
         host.innerHTML = `<div class="code-report code-report-compact">
             <main aria-label="Interactive code report">
                 <div class="code-layout">
@@ -67,12 +55,12 @@ export class CodeReportViewer {
         this.root = host.querySelector('.code-report');
         this.mapHost = this.root.querySelector('[data-code-map]');
         this.qualityHost = this.root.querySelector('[data-quality-report]');
-        // Details replace the health summary in the sidebar: the report stays inline, never a modal.
+        // Structural entities without a saved file use the inline sidebar; file reports use Monaco.
         this.details = this.root.querySelector('.details-panel');
         this.root.querySelector('[data-close-details]').addEventListener('click', () => this.closeDetails(true));
         // Captured so the app's document-level Escape (Back) does not also leave Project health.
         this.onKeydown = event => {
-            if (isConfirmDialogOpen()) return;
+            if (this.fileModal || isConfirmDialogOpen()) return;
             if (event.key !== 'Escape' || this.details.hidden || event.defaultPrevented) return;
             event.preventDefault();
             event.stopPropagation();
@@ -222,7 +210,7 @@ export class CodeReportViewer {
         this.autoFocusTimer = this.window.setTimeout(() => {
             this.autoFocusTimer = null;
             if (!this.isCurrent(generation) || this.autoFocusCancelled || this.document.hidden
-                || !this.root.isConnected || !this.details.hidden || this.activeList !== 'report') return;
+                || !this.root.isConnected || this.fileModal || !this.details.hidden || this.activeList !== 'report') return;
             const first = this.qualityHost.querySelector('.qr-file');
             const path = first?.dataset.path;
             // Saved files may no longer exist in the map. Don't open a details panel or
@@ -492,7 +480,11 @@ export class CodeReportViewer {
         heading.focus({ preventScroll: true });
     }
 
-    closeDetails(restoreFocus) {
+    closeDetails(restoreFocus = false) {
+        this.fileFixRequest?.abort();
+        this.fileFixRequest = null;
+        this.fileModal?.close(restoreFocus);
+        this.fileModal = null;
         if (this.details.hidden) return;
         this.details.hidden = true;
         this.qualityHost.hidden = false;
@@ -500,62 +492,23 @@ export class CodeReportViewer {
         this.detailsReturn = null;
     }
 
-    // What is wrong leads: the verdict, then every problem worst first with the first one open
-    // (where, what it means, how to fix it, the code), then the measurements within their limits
-    // folded away. A preferred metric (a radar category or score card row) opens instead.
     showFile(file, preferredName) {
-        if (!file) return;
-        const findings = fileFindings(file);
-        const items = findings.measurements;
-        const preferred = items.find(item => item.name === preferredName);
-        const open = preferred || findings.problems[0];
-        const captured = new Date(this.response?.startedUtc);
-        const date = Number.isNaN(captured.valueOf()) ? 'Saved report' : `Report captured ${captured.toLocaleString()}`;
-        const prefix = this.findingIdPrefix;
-        const row = (item, index) => `<div class="finding" data-level="${item.level}" data-metric="${esc(item.name)}">`
-            + `<button type="button" class="finding-toggle" data-finding="${index}" aria-expanded="false" aria-controls="${prefix}-${index}">`
-            + `<span class="finding-head">${item.level === 'ok' ? '' : `<span class="finding-level">${esc(item.levelLabel)}</span>`}`
-            + `<span class="finding-name">${esc(item.label)}</span><strong class="finding-value">${esc(item.valueText)}</strong></span>`
-            + `<small class="finding-where">${esc(item.where)} · ${esc(item.limitText)}</small></button>`
-            + `<div class="finding-body" id="${prefix}-${index}" hidden></div></div>`;
-        const problems = findings.problems.length;
-        const within = items.slice(problems);
-        const body = `<div class="details-path">${esc(file.file)}</div>
-            <div class="file-verdict" data-tone="${findings.tone}"><span class="verdict-rating">${esc(findings.ratingLabel)}</span>
-                <span class="verdict-summary"><strong>${esc(findings.headline)}</strong><span>Health ${esc(findings.healthText)} / 100</span></span></div>
-            ${findings.hotspot ? `<p class="verdict-hotspot">${esc(findings.hotspot)}</p>` : ''}
-            ${problems ? `<h3 class="findings-heading">What to fix first</h3><div class="finding-list">${items.slice(0, problems).map(row).join('')}</div>`
-                : `<p class="detail-note">${items.length ? 'Every measurement is within its limits.' : 'No measurements were saved for this file.'}</p>`}
-            ${within.length ? `<details class="within-limits"${preferred?.level === 'ok' ? ' open' : ''}><summary>${problems ? 'Within limits' : 'All measurements'} <span class="file-count">${within.length}</span></summary>`
-                + `<div class="finding-list">${within.map((item, index) => row(item, problems + index)).join('')}</div></details>` : ''}
-            <p class="detail-note details-provenance">${esc(date)}. Excerpts may differ from the current working tree.</p>`;
-        this.openDetails(basename(file.file), 'FILE QUALITY', body, () => this.focusFile(file.file));
-        // One measurement is open at a time, so its excerpt sits beside its row.
-        const toggles = [...this.details.querySelectorAll('[data-finding]')];
-        const panelOf = button => this.document.getElementById(button.getAttribute('aria-controls'));
-        const collapse = button => {
-            button.setAttribute('aria-expanded', 'false');
-            const panel = panelOf(button);
-            panel.hidden = true;
-            panel.replaceChildren();
+        if (!file || this.destroyed) return;
+        this.closeDetails();
+        this.fileFixRequest = new AbortController();
+        const generation = this.generation;
+        const reopen = () => {
+            if (this.isCurrent(generation)) this.showFile(file, preferredName);
         };
-        const expand = button => {
-            for (const other of toggles) if (other !== button && other.getAttribute('aria-expanded') === 'true') collapse(other);
-            const panel = panelOf(button);
-            panel.innerHTML = findingBody(items[Number(button.dataset.finding)]);
-            panel.hidden = false;
-            button.setAttribute('aria-expanded', 'true');
-        };
-        for (const button of toggles) button.addEventListener('click', () =>
-            button.getAttribute('aria-expanded') === 'true' ? collapse(button) : expand(button));
-        const first = open && toggles[items.indexOf(open)];
-        if (!first) return;
-        expand(first);
-        // An explicitly requested measurement may sit below the fold; bring it under the sticky header.
-        if (preferred && preferred !== findings.problems[0]) {
-            const header = this.details.querySelector('.details-header');
-            this.details.scrollTop += first.getBoundingClientRect().top - this.details.getBoundingClientRect().top - (header?.offsetHeight || 0) - 8;
-        }
+        this.fileModal = openFileDetailsModal({
+            app: this.app, file, preferredName, capturedUtc: this.response?.startedUtc,
+            sourceScope: this.options.getSourceScope?.(),
+            workingDirectory: this.options.getWorkingDirectory?.(),
+            launchRequest: this.fileFixRequest, onReturn: reopen,
+            onIgnore: this.options.onIgnoreFile ? () => this.options.onIgnoreFile(file, reopen) : null,
+            onLocate: () => this.focusFile(file.file),
+            onClose: () => { this.fileModal = null; }
+        });
     }
 
     showCategory(category) {
