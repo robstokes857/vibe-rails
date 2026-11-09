@@ -10,6 +10,16 @@ deletion outbox contains no card payload; remote history still uses the existing
 protocol. Backup archives remain independent. Older soft-deleted rows are left untouched.
 Computed legacy keys are reserved per project; `StoredCardKey` reserves genuine stored keys
 globally. Two legacy projects may both have a deleted `VB-1` without conflicting.
+`board-card-deletion/3` repairs the first shipped `/1` table, which lacked `StoredCardKey`,
+by adding the nullable column and its unique index when absent. Existing receipts are not
+backfilled and old constraints stay in place (that earliest table still reserves `CardKey`
+globally). Fresh databases already have the column and inline uniqueness. Never rely on
+editing an applied table-creation migration to upgrade an existing database.
+Identity checks recognize random keys in older receipts' `CardKey` without rewriting them;
+older writers may continue omitting the new column.
+The `BoardReleaseGate` HTTP integration cases create/read cards across host restarts using
+both fresh databases and the pinned original deletion table. Release builds run them on
+Windows, Linux and macOS before publishing; an empty or skipped test selection fails the gate.
 `board-card-deletion/2` adds a shared insertion sequence for future Card Log entries and
 deletion receipts, including inserts from older binaries. Existing log rows keep their
 rowid order ahead of future entries; no history is backfilled. Card cascades remove their

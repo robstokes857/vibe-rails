@@ -1,10 +1,39 @@
 using System.Data;
 using Microsoft.Data.Sqlite;
+using VibeRails.Data.Sqlite;
 
 namespace VibeRails.Services.Board;
 
 public sealed partial class BoardStore
 {
+    // The first shipped deletion table had only CardKey. Version 1 was later edited to add
+    // StoredCardKey, so its receipt does not tell us which shape is installed. Keep the old
+    // table, rows and constraints; a new additive step repairs that shape on ordinary startup.
+    private static void ApplyStoredDeletionKeyMigration(SqliteConnection db, SqliteTransaction transaction)
+    {
+        if (SqliteSchema.AdoptStatement(db, transaction,
+            "ALTER TABLE BoardDeletedCards ADD COLUMN StoredCardKey TEXT COLLATE NOCASE"))
+        {
+            // Fresh databases already have the equivalent inline UNIQUE constraint.
+            SqliteSchema.Execute(db, transaction,
+                "CREATE UNIQUE INDEX IX_BoardDeletedCards_StoredCardKey ON BoardDeletedCards(StoredCardKey);");
+        }
+    }
+
+    private static async Task<bool> IsDeletedCardIdentityAsync(SqliteConnection db, SqliteTransaction transaction,
+        string project, string cardId, string cardKey, CancellationToken ct) =>
+        // Older receipts and older writers have no StoredCardKey. A random key in CardKey is
+        // still globally reserved; computed legacy keys remain scoped to their project.
+        await ScalarLongAsync(db, transaction,
+            $"""
+            SELECT COUNT(*) FROM BoardDeletedCards
+            WHERE CardId = $id OR StoredCardKey = $key
+                OR (CardKey = $key AND (ProjectPath = $project{ProjectPathCollation}
+                    OR (StoredCardKey IS NULL AND $stored = 1)));
+            """,
+            ("$id", cardId), ct, ("$key", cardKey), ("$project", project),
+            ("$stored", BoardKeys.TryParseStored(cardKey, out _) ? 1 : 0)) > 0;
+
     // Identity/delivery receipts only: no retained card text, discussion, files or recordings.
     // No FK to the card/board: identities must remain reserved after either is removed.
     private const string CardDeletionSchemaSql = """

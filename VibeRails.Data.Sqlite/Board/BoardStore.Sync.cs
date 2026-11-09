@@ -624,9 +624,7 @@ public sealed partial class BoardStore
         var number = ParseKeyNumber(cardKey);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
-        if (await ScalarLongAsync(connection, transaction,
-            $"SELECT COUNT(*) FROM BoardDeletedCards WHERE CardId = $id OR StoredCardKey = $key OR (ProjectPath = $project{ProjectPathCollation} AND CardKey = $key);",
-            ("$id", cardId), cancellationToken, ("$key", cardKey), ("$project", project)) > 0)
+        if (await IsDeletedCardIdentityAsync(connection, transaction, project, cardId, cardKey, cancellationToken))
             throw new BoardValidationException("The remote card identity was permanently deleted locally.");
         var taken = await ScalarLongAsync(connection, transaction,
             "SELECT COUNT(*) FROM BoardCards WHERE Id = $id OR CardKey = $key;",

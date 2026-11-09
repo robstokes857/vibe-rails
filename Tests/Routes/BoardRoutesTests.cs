@@ -270,6 +270,11 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         ParserConfigs.SetGitState(_project, isInGit: true);
         _connectionString = $"Data Source={Path.Combine(_root, "state.db")};Mode=ReadWriteCreate;Cache=Shared";
 
+        await StartHostAsync();
+    }
+
+    private async Task StartHostAsync()
+    {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");

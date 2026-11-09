@@ -85,6 +85,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang zlib1g-dev
 
+      # Run on every release OS before publishing. The normal test job also covers these,
+      # but only on Linux; this gate exercises the real HTTP/SQLite upgrade path on each OS.
+      - name: Gate release on Board card creation and database upgrades
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          dotnet test Tests/Tests.csproj `
+            -c "$env:CONFIGURATION" -f "$env:FRAMEWORK" `
+            --filter "Category=BoardReleaseGate" `
+            --logger "trx;LogFileName=board-release-gate.trx" `
+            --results-directory "test-results/board-release-gate"
+          if ($LASTEXITCODE -ne 0) { throw "Board release integration tests failed ($LASTEXITCODE)." }
+          [xml]$results = Get-Content -LiteralPath "test-results/board-release-gate/board-release-gate.trx" -Raw
+          $counters = $results.TestRun.ResultSummary.Counters
+          if ([int]$counters.total -lt 2 -or [int]$counters.passed -ne [int]$counters.total) {
+              throw "Both fresh and upgraded Board creation cases must run and pass before release."
+          }
+
       - name: Publish NativeAOT (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
