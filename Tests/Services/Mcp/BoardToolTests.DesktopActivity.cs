@@ -8,7 +8,7 @@ namespace Tests.Services.Mcp;
 public sealed partial class BoardToolTests
 {
     private BoardTool DesktopTool(DesktopMcpActivityTracker tracker) => new(_service, _resolver, _store,
-        new BoardWorkflowService(_store, new BoardReviewService(_store, _service)), desktopActivity: tracker);
+        new BoardWorkflowService(), desktopActivity: tracker);
 
     [Theory]
     [InlineData(null)]

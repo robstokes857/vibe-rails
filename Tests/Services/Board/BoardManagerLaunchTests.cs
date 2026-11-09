@@ -53,8 +53,8 @@ public sealed class BoardManagerLaunchTests : IDisposable
 
     /// <summary>owners says whether a recorded owner process is still running its session (VIBE-262).</summary>
     private BoardLaunchService Launcher(Func<int, DateTime, bool>? owners = null) =>
-        new(_store, _repository.Object, _tabs.Object, new BoardContextEstimator(
-            new BoardService(_store, new Mock<IBoardCommitService>().Object, new NullBoardLiveSessionProbe()), _store, _repository.Object),
+        new(_store, _tabs.Object, new BoardContextEstimator(
+            new BoardService(_store, new Mock<IBoardCommitService>().Object, new NullBoardLiveSessionProbe()), _store),
             launchSettings: () => new Settings { CreateVibeStoryTracking = _nudge }, sessionOwnerRunning: owners);
 
     /// <summary>The tab child of another VibeRails window on this machine.</summary>

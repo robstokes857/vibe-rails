@@ -38,7 +38,7 @@ public sealed partial class BoardToolTests
         }
         Assert.Equal("", (await _service.AttachSessionAsync(_project, "PROJ-1", _resolver.CurrentSessionId, null, Ct))!.Selection);
         // Base launches nudged, saved environments not: the two switches disagree on purpose.
-        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)),
+        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(),
             launchSettings: () => new Settings { CreateVibeStoryTracking = true, CreateVibeStoryTrackingCustomEnvs = false });
 
         var read = await tool.GetBoardCard("PROJ-1", cancellationToken: Ct);

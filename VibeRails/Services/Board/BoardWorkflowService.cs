@@ -3,7 +3,7 @@ using VibeRails.DTOs;
 namespace VibeRails.Services.Board;
 
 /// <summary>Explicit agent progress and decisions for the current ordered lane workflow.</summary>
-public sealed class BoardWorkflowService(IBoardStore store, BoardReviewService reviews, VibeRails.Services.Launches.BoardLaunchWorkflow? launches = null)
+public sealed class BoardWorkflowService(VibeRails.Services.Launches.BoardLaunchWorkflow? launches = null)
 {
     /// <summary>Record a scoped decision; a review pass must cite the caller's current canonical evidence.</summary>
     public async Task ReportAsync(string project, string cardId, string workspace, BoardAuthor author,

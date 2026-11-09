@@ -13,7 +13,7 @@ public sealed partial class BoardToolTests
     public async Task OrdinaryCommentsSyncByDefaultAndMcpCanKeepInternalNotes()
     {
         var (card, _, _, _) = await JiraFixtureAsync();
-        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)));
+        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService());
         await tool.AddBoardComment("Shared update", card.Key, Ct);
         await tool.AddBoardComment("Internal note", card.Key, Ct, syncToJira: false);
         await tool.AppendBoardNote("Another internal note", card.Key, Ct, syncToJira: false);
@@ -30,7 +30,7 @@ public sealed partial class BoardToolTests
         _resolver.CurrentSessionId = "jira-worker";
         await _store.LinkSessionAsync(_project, card.Id, _resolver.CurrentSessionId, null, "base:codex", "codex", "Codex", BoardSessionRecord.LaunchOrigin, Ct);
         var links = new[] { "https://viberails.ai/shared/session?key=" + new string('a', 64), "https://viberails.ai/shared/session?key=" + new string('b', 64) };
-        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)), jiraComments: comments);
+        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(), jiraComments: comments);
         var result = await tool.AddJiraComment("Done and tested.", [.. links, links[0]], cancellationToken: Ct);
         Assert.StartsWith("Posted Jira comment 55 to APP-7:", result);
         Assert.Contains("https://jira.example/secure/ViewIssue.jspa?id=10007&focusedCommentId=55", result);
@@ -51,7 +51,7 @@ public sealed partial class BoardToolTests
         var board = await _store.CreateBoardAsync(_project, "Destination", Ct);
         var lane = (await _store.GetColumnsAsync(_project, Ct, board.Id))[0];
         await _store.MoveCardAsync(_project, card.Id, lane.Id, null, Ct);
-        var result = await new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)), jiraComments: comments).AddJiraComment("Done", card: card.Key, cancellationToken: Ct);
+        var result = await new BoardTool(_service, _resolver, _store, new BoardWorkflowService(), jiraComments: comments).AddJiraComment("Done", card: card.Key, cancellationToken: Ct);
         Assert.StartsWith("Posted Jira comment", result);
         Assert.Single(client.Invocations);
     }
@@ -78,7 +78,7 @@ public sealed partial class BoardToolTests
         if (problem == "token") secrets.Setup(s => s.ReadToken("jira-connection")).Returns((string?)null);
         if (problem == "unlinked") await _store.DeleteJiraConnectionAsync(_project, card.BoardId, "jira-connection", Ct);
         if (problem == "ambiguous") await _store.AddJiraLinkAsync(new(card.Id, "jira-connection", "10008", "APP-8", null, DateTime.UtcNow, DateTime.UtcNow), Ct);
-        Assert.StartsWith("FAIL:", await new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)), jiraComments: comments).AddJiraComment("Done", card: card.Key, cancellationToken: Ct));
+        Assert.StartsWith("FAIL:", await new BoardTool(_service, _resolver, _store, new BoardWorkflowService(), jiraComments: comments).AddJiraComment("Done", card: card.Key, cancellationToken: Ct));
         Assert.Empty(client.Invocations);
         Assert.Empty((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments);
     }
@@ -90,7 +90,7 @@ public sealed partial class BoardToolTests
         client.Setup(c => c.AddCommentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
             It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new JiraCommentResult(false, true, "Check Jira before retrying."));
-        var result = await new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)), jiraComments: comments).AddJiraComment("Done", card: card.Key, cancellationToken: Ct);
+        var result = await new BoardTool(_service, _resolver, _store, new BoardWorkflowService(), jiraComments: comments).AddJiraComment("Done", card: card.Key, cancellationToken: Ct);
         Assert.StartsWith("UNCONFIRMED:", result);
         Assert.Single(client.Invocations);
         Assert.Empty((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments);
@@ -103,7 +103,7 @@ public sealed partial class BoardToolTests
         var service = new Mock<IBoardService>();
         service.Setup(s => s.AddCommentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<BoardAuthor>(), It.IsAny<string>(), Ct))
             .ThrowsAsync(new IOException("SECRET local failure"));
-        var result = await new BoardTool(service.Object, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, service.Object)), jiraComments: comments).AddJiraComment("Done", card: card.Id, cancellationToken: Ct);
+        var result = await new BoardTool(service.Object, _resolver, _store, new BoardWorkflowService(), jiraComments: comments).AddJiraComment("Done", card: card.Id, cancellationToken: Ct);
         Assert.StartsWith("Posted Jira comment", result);
         Assert.Contains("Do not repost", result);
         Assert.DoesNotContain("SECRET", result);
@@ -114,7 +114,7 @@ public sealed partial class BoardToolTests
     public async Task JiraCommentRejectsOversizedInputAndLinksBeforePosting()
     {
         var (card, _, client, comments) = await JiraFixtureAsync();
-        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(_store, new BoardReviewService(_store, _service)), jiraComments: comments);
+        var tool = new BoardTool(_service, _resolver, _store, new BoardWorkflowService(), jiraComments: comments);
         Assert.StartsWith("FAIL:", await tool.AddJiraComment(new string('x', 20001), card: card.Key, cancellationToken: Ct));
         Assert.StartsWith("FAIL:", await tool.AddJiraComment("Done", Enumerable.Repeat("invalid", 21).ToArray(), card.Key, Ct));
         Assert.StartsWith("FAIL:", await tool.AddJiraComment("Done", ["https://evil.example/"], card.Key, Ct));

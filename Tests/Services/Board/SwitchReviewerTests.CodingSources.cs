@@ -67,7 +67,7 @@ public sealed partial class SwitchReviewerTests
         var estimator = new Mock<IBoardContextEstimator>(MockBehavior.Strict);
         using var services = new ServiceCollection().BuildServiceProvider();
         var dispatcher = new VibeRails.Services.Launches.LaunchDispatcher(launches, launchService, tabs.Object, services.GetRequiredService<IServiceScopeFactory>(), boards);
-        var launcher = new BoardLaunchService(boards, repository, tabs.Object, estimator.Object,
+        var launcher = new BoardLaunchService(boards, tabs.Object, estimator.Object,
             launchStore: launches, launchService: launchService, launchDispatcher: dispatcher);
         await launcher.LaunchAsync(project, card.Id, null, Ct, intent);
 

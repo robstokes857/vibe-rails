@@ -38,7 +38,7 @@ public sealed partial class BoardToolTests
             .Callback<string, StartTerminalRequest, CancellationToken>((_, request, _) => captured = request)
             .ReturnsAsync(new TerminalStatusResponse(true, sessionId, "codex", _project));
         var repository = Mock.Of<IRepository>();
-        var launcher = new BoardLaunchService(_store, repository, tabs.Object, new BoardContextEstimator(_service, _store, repository));
+        var launcher = new BoardLaunchService(_store, tabs.Object, new BoardContextEstimator(_service, _store));
         await launcher.LaunchAsync(_project, saved.Id, null, Ct);
         Assert.Equal(saved.BaseLlmOptions, captured!.BaseLlmOptions);
         Assert.Equal("codex", captured.Cli);

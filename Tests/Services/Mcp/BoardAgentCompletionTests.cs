@@ -32,7 +32,7 @@ public sealed class BoardAgentCompletionTests : IDisposable
         service = new BoardService(store, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
         resolver = new Resolver(root);
         launches = new($"Data Source={Path.Combine(root, "launches.db")};Pooling=False");
-        tool = new BoardTool(service, resolver, store, new BoardWorkflowService(store, new BoardReviewService(store, service)), launches: launches);
+        tool = new BoardTool(service, resolver, store, new BoardWorkflowService(), launches: launches);
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public sealed class BoardAgentCompletionTests : IDisposable
             Assert.Single(await store.GetAgentCompletionsAsync(root, card.Id, Ct));
         }
 
-        var secondClient = new BoardTool(service, new Resolver(root), store, new BoardWorkflowService(store, new BoardReviewService(store, service)));
+        var secondClient = new BoardTool(service, new Resolver(root), store, new BoardWorkflowService());
         var status = await secondClient.GetBoardAgentStatus(card.Key, session, Ct);
         Assert.Contains("Agent reported succeeded", status);
         Assert.Contains("Tests passed", status);
@@ -196,7 +196,7 @@ public sealed class BoardAgentCompletionTests : IDisposable
         Assert.Contains("Scope ambiguous", await tool.BeginBoardReview("unknown", "Terminal review", card: card.Key, cancellationToken: Ct));
         var review = Assert.Single(await store.GetReviewsAsync(root, card.Id, cancellationToken: Ct));
         using var tracker = new DesktopMcpActivityTracker(store, true, _ => null, TimeProvider.System);
-        var desktop = new BoardTool(service, resolver, store, new BoardWorkflowService(store, new BoardReviewService(store, service)), desktopActivity: tracker);
+        var desktop = new BoardTool(service, resolver, store, new BoardWorkflowService(), desktopActivity: tracker);
         Assert.StartsWith("FAIL:", await desktop.BeginBoardReview("unknown", "Desktop review", card: card.Key, cancellationToken: Ct));
         Assert.StartsWith("FAIL:", await desktop.SaveBoardReview(review.Id, "Incomplete", "None", "None", "Unknown", card.Key, Ct));
         Assert.Null((await store.GetReviewAsync(root, card.Id, review.Id, Ct))!.ReportedUtc);
