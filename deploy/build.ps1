@@ -8,7 +8,7 @@
 param(
     [string] $Project = "",
     [string] $Configuration = "Release",
-    [string] $Framework = "net10.0",
+    [string] $Framework = "net11.0",
     [string] $OutputRoot = "deploy/artifacts/aot",
 
     # Windows build (local)
@@ -17,8 +17,8 @@ param(
     # Linux build (docker)
     [string] $LinuxRid = "linux-x64",
     [switch] $BuildLinuxViaDocker = $true,
-    # Match release.yml's Ubuntu 24.04 glibc/toolchain floor; revisit only with a deliberate compatibility change.
-    [string] $LinuxDockerImage = "mcr.microsoft.com/dotnet/sdk:10.0-noble-aot"
+    # Built from the Dockerfile's .NET 11 SDK + Noble toolchain stage by default.
+    [string] $LinuxDockerImage = "viberails-build:11.0.100-noble-aot"
 )
 
 $ErrorActionPreference = "Stop"
@@ -158,6 +158,12 @@ $results += [pscustomobject]@{
 $linuxOut = Join-Path $outRoot $LinuxRid
 if ($BuildLinuxViaDocker) {
     Require-Cmd docker
+    if (-not $PSBoundParameters.ContainsKey('LinuxDockerImage')) {
+        & docker build --target build-base `
+            --file (Join-Path $repoRoot 'VibeRails/Dockerfile') `
+            --tag $LinuxDockerImage $repoRoot
+        if ($LASTEXITCODE -ne 0) { throw "Building the .NET 11 Noble SDK image failed with exit code $LASTEXITCODE" }
+    }
     # Ensure output dir exists and we can mount it
     New-Item -ItemType Directory -Force -Path $linuxOut | Out-Null
     Publish-AotLinuxViaDocker -projectPath $projectPath -rid $LinuxRid -outDir $linuxOut -image $LinuxDockerImage -repoRoot $repoRoot

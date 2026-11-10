@@ -5,7 +5,7 @@
 going off the rails</strong></p>
   <p>
     <a href="https://marketplace.visualstudio.com/items?itemName=viberails.vscode-viberails"><img alt="VS Code Marketplace version" src="https://badgen.net/vs-marketplace/v/viberails.vscode-viberails?label=marketplace&color=0078D4" /></a>
-    <a href="https://dotnet.microsoft.com/"><img alt=".NET 10" src="https://img.shields.io/badge/.NET-10.0-512BD4" /></a>
+    <a href="https://dotnet.microsoft.com/"><img alt=".NET 11" src="https://img.shields.io/badge/.NET-11.0-512BD4" /></a>
     <a href="https://www.typescriptlang.org/"><img alt="TypeScript 7" src="https://img.shields.io/badge/TypeScript-7.0-3178C6" /></a>
     <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue.svg" /></a>
     <a href="https://viberails.ai/"><img alt="viberails.ai" src="https://img.shields.io/badge/web-viberails.ai-c084fc" /></a>
@@ -160,7 +160,8 @@ To connect a viberails.ai account, open **Settings → General → Account** and
 
 ## Build from source
 
-Prerequisites: the [.NET 10 SDK](https://dotnet.microsoft.com/download),
+Prerequisites: the [.NET 11 SDK](https://dotnet.microsoft.com/download) (11.0.100 or a later
+11.0 feature band, as selected by `global.json`),
 [Node.js 24 LTS](https://nodejs.org/) or later (builds read `.nvmrc`), Git, and VS Code 1.125 or
 later for the extension.
 

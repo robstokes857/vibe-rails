@@ -2,7 +2,7 @@
 
 **VibeRails** is A developer and enterprise friendly framework that helps keep vibe coding from going off the rails.
 
-[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
+[![.NET](https://img.shields.io/badge/.NET-11.0-512BD4)](https://dotnet.microsoft.com/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-7.0-3178C6)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -39,7 +39,7 @@
 
 ### Prerequisites
 
-- [.NET 10.0 SDK](https://dotnet.microsoft.com/download) or later
+- [.NET 11.0 SDK](https://dotnet.microsoft.com/download) or later
 - [Node.js 24 LTS+](https://nodejs.org/) (for VS Code extension development)
 - Git
 - One or more LLM CLIs: Claude, Codex, or Antigravity
@@ -104,7 +104,7 @@ VibeRails consists of four main components:
                      │ REST API
 ┌────────────────────▼────────────────────────────────────┐
 │                  VibeRails Backend                       │
-│              (ASP.NET Core + .NET 10.0)                  │
+│              (ASP.NET Core + .NET 11.0)                  │
 │  ┌──────────────┬──────────────┬──────────────────────┐ │
 │  │  Services    │  Repository  │  LLM Environments    │ │
 │  └──────────────┴──────────────┴──────────────────────┘ │
@@ -118,7 +118,7 @@ VibeRails consists of four main components:
 ### Technology Stack
 
 **Backend**
-- **.NET 10.0** with Native AOT compilation
+- **.NET 11.0** with Native AOT compilation
 - **ASP.NET Core Slim** for lightweight web serving
 - **SQLite** with WAL mode for concurrent access
 - **ModelContextProtocol** for MCP integration
@@ -255,7 +255,7 @@ dotnet run
 cd VibeRails
 dotnet publish -c Release -r win-x64 --self-contained
 
-# Output: bin/Release/net10.0/win-x64/publish/vb.exe
+# Output: bin/Release/net11.0/win-x64/publish/vb.exe
 ```
 
 **Platform-specific builds:**
@@ -836,7 +836,7 @@ We welcome contributions! Please follow these guidelines:
 git clone --recursive https://github.com/robstokes857/vibe-rails.git
 cd vibe-rails
 
-# Install .NET 10.0 SDK
+# Install .NET 11.0 SDK
 # https://dotnet.microsoft.com/download
 
 # Build solution
@@ -905,7 +905,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### Key Dependencies
 
-- **Microsoft.Data.Sqlite** (v10.0.10) - SQLite database access
+- **Microsoft.Data.Sqlite** (v11.0.0) - SQLite database access
 - **ModelContextProtocol / ModelContextProtocol.AspNetCore** (v2.0.0) - in-process MCP server + client
 - **Microsoft.ML.OnnxRuntime + sqlite-vec** - BGE embeddings + vector search (the real `search_history` backend)
 - **Pty.Net** (inlined fork, ConPTY only) - Pseudo-terminal support
@@ -915,7 +915,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-Built with modern .NET 10.0, Native AOT compilation, and the Model Context Protocol for next-generation AI development workflows.
+Built with modern .NET 11.0, Native AOT compilation, and the Model Context Protocol for next-generation AI development workflows.
 
 **Last Updated**: 2026-08-06
 **Version**: 1.9.11

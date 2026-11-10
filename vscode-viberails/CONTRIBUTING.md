@@ -6,7 +6,7 @@ Thanks for helping out. This document covers the extension in `vscode-viberails/
 
 - **Node.js 24 LTS+** and npm (`nvm use` reads the repository-root `.nvmrc`; both local development and the release workflow use it)
 - **PowerShell 7+** (`pwsh`) — every build/package/release script is PowerShell and runs on Windows, Linux, and macOS
-- **.NET 10 SDK** — needed only when you build the bundled backend
+- **.NET 11 SDK** — needed only when you build the bundled backend
 - **VS Code 1.125+**
 
 ## Repository layout

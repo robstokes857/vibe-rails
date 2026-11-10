@@ -105,7 +105,7 @@ reason. An already-authorized change does not need another approval or flag for 
 **VibeRails** is a desktop/web control panel for AI coding CLIs (Claude, Codex, Antigravity,
 Copilot, OpenCode, Grok): `vc.rules.md` rule enforcement (WARN/COMMIT/STOP), per-CLI
 environments, git-clone sandboxes, session logging, Automations, the kanban Board, and an
-in-process MCP server. Stack: .NET 10 / ASP.NET Core Slim with Native AOT, SQLite in WAL mode,
+in-process MCP server. Stack: .NET 11 / ASP.NET Core Slim with Native AOT, SQLite in WAL mode,
 vanilla JavaScript + Bootstrap 5 + xterm.js, xUnit v3. Live site: [https://viberails.ai/](https://viberails.ai/).
 
 The architecture reference (project layout, application and process-host modes, component

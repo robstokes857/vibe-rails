@@ -214,7 +214,7 @@ stdout per reply**.
 - `DisposeAsync()` sends EOF (a well-behaved worker exits cleanly), waits up to 5 s, then
   kills. It never throws; await `Completion` first if you want to assert a clean exit.
 
-## .NET 10 / AOT notes
+## .NET 11 / AOT notes
 
 - The library sets `IsAotCompatible` / `IsTrimmable` and the console sets `PublishAot`, with
   the trim + AOT analyzers enabled. **The whole solution builds with zero AOT/trim warnings**,

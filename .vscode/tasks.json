@@ -4,7 +4,7 @@
     {
       "label": "copy-backend",
       "type": "shell",
-      "command": "robocopy \"${workspaceFolder}\\VibeRails\\bin\\Debug\\net10.0\" \"${workspaceFolder}\\vscode-viberails\\bin\\win32-x64\" /MIR /NFL /NDL /NJH /NJS; if ($LASTEXITCODE -le 7) { exit 0 } else { exit 1 }",
+      "command": "robocopy \"${workspaceFolder}\\VibeRails\\bin\\Debug\\net11.0\" \"${workspaceFolder}\\vscode-viberails\\bin\\win32-x64\" /MIR /NFL /NDL /NJH /NJS; if ($LASTEXITCODE -le 7) { exit 0 } else { exit 1 }",
       "problemMatcher": [],
       "presentation": {
         "reveal": "silent"

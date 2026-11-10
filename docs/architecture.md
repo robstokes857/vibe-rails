@@ -260,7 +260,7 @@ does not attach the new session or change tool authorization.
 ## Technology Stack
 
 ### Backend
-- **.NET 10.0** - Modern .NET with AOT compilation support
+- **.NET 11.0** - Modern .NET with AOT compilation support
 - **ASP.NET Core Slim** - Lightweight web server
 - **SQLite** - Local database with WAL mode for concurrency
 - **ModelContextProtocol NuGet Package** (v2.0.0) - MCP foundation with custom service layer and tools
@@ -1713,8 +1713,12 @@ The tag-triggered [release workflow](../.github/workflows/release.yml) pins ever
 job to `ubuntu-24.04`, including tests, NativeAOT builds, VSIX packaging and publishing,
 and GitHub release uploads. This avoids the `ubuntu-latest` move to Ubuntu 26 beginning
 2026-10-19 changing the linker and apt toolchain underneath a release. The local
-[build script](../deploy/build.ps1) uses `mcr.microsoft.com/dotnet/sdk:10.0-noble-aot`;
-the [Dockerfile](../VibeRails/Dockerfile) also pins its .NET stages to Ubuntu 24.04 (Noble).
+[build script](../deploy/build.ps1) builds `viberails-build:11.0.100-noble-aot` from the
+[Dockerfile](../VibeRails/Dockerfile)'s `build-base` stage. Microsoft's .NET 11 images
+use Ubuntu 26.04 (Resolute), so this stage copies the portable SDK 11.0.100 binaries
+onto the .NET 10 Noble AOT image's Ubuntu 24.04 toolchain. The debug runtime uses
+the same overlay approach, and the final native image keeps Noble's runtime dependencies.
+A supplied `-LinuxDockerImage` selects a custom image and skips this image build.
 
 Measured on 2026-10-11 from the checksum-verified `vb-linux-x64.tar.gz` asset in
 [v10.11.19](https://github.com/robstokes857/vibe-rails/releases/tag/v10.11.19):
@@ -2007,7 +2011,7 @@ vb --web  # Explicit web-dashboard launch
 - **MCP SDK** - Model Context Protocol development kit
 
 ### Key Dependencies
-- **Microsoft.Data.Sqlite** (v10.0.11) - SQLite database access
+- **Microsoft.Data.Sqlite** (v11.0.0) - SQLite database access
 - **ModelContextProtocol** (v2.0.0) - MCP foundation
 - **ModelContextProtocol.AspNetCore** (v2.0.0) - ASP.NET Core integration for the in-process MCP server
 - **Pty.Net** (inlined fork) - Pseudo-terminal support

@@ -5,7 +5,7 @@ This directory contains the [Playwright](https://playwright.dev/) end-to-end tes
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) installed on your system.
-- .NET 10 SDK for the production snapshot fixtures used by the scrollback and Automation tests.
+- .NET 11 SDK for the production snapshot fixtures used by the scrollback and Automation tests.
 
 ## Setup
 
