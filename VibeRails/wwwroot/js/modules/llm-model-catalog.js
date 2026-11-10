@@ -56,12 +56,11 @@ export const LLM_MODEL_OPTIONS = Object.freeze({
     // Only generation-5 models are pinned (owner request 2026-10-02); older saves show "(custom)".
     'claude': [
         ['', 'Default (Claude recommended)'],
+        ['claude-fable-5-2[1m]', 'Fable 5.2'],
         ['claude-fable-5-1[1m]', 'Fable 5.1'],
         ['claude-fable-5[1m]', 'Fable 5'],
         ['claude-opus-5-5[1m]', 'Opus 5.5'],
-        ['claude-opus-5[1m]', 'Opus 5'],
         ['claude-sonnet-5-5[1m]', 'Sonnet 5.5'],
-        ['claude-sonnet-5[1m]', 'Sonnet 5'],
         ['claude-haiku-5-5[1m]', 'Haiku 5.5']
     ],
     'copilot': [

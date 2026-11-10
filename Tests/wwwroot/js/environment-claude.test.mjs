@@ -26,15 +26,15 @@ function createController() {
 // Opus 4.8/4.7, Sonnet 4.6 and Haiku 4.5 removed), and each is labelled by name, not by its ID.
 const PINNED_CLAUDE_MODELS = [
     '',
+    'claude-fable-5-2[1m]',
     'claude-fable-5-1[1m]',
     'claude-fable-5[1m]',
     'claude-opus-5-5[1m]',
-    'claude-opus-5[1m]',
     'claude-sonnet-5-5[1m]',
-    'claude-sonnet-5[1m]',
     'claude-haiku-5-5[1m]'
 ];
-const CLAUDE_MODEL_LABELS = ['Default (Claude recommended)', 'Fable 5.1', 'Fable 5', 'Opus 5.5', 'Opus 5', 'Sonnet 5.5', 'Sonnet 5', 'Haiku 5.5'];
+// Opus 5 and Sonnet 5 were unpinned 2026-11-10 (owner request); only their 5.5 successors remain.
+const CLAUDE_MODEL_LABELS = ['Default (Claude recommended)', 'Fable 5.2', 'Fable 5.1', 'Fable 5', 'Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5'];
 
 // Visible <option> text only; values legitimately carry the [1m] launch suffix.
 function optionTexts(html) {
@@ -47,7 +47,7 @@ function optionValues(html, id) {
     return [...slice.matchAll(/<option value="([^"]*)"/g)].map(match => match[1]);
 }
 
-test('Claude model dropdown lists Opus 5.5 between Fable 5 and Opus 5', () => {
+test('Claude model dropdown lists exactly the pinned models, in order', () => {
     const html = createController().buildCliSettingsHtml('claude', {});
     assert.deepEqual(optionValues(html, 'claude-model'), PINNED_CLAUDE_MODELS);
     assert.deepEqual(LLM_MODEL_OPTIONS.claude.map(([model]) => model), PINNED_CLAUDE_MODELS);
@@ -131,9 +131,10 @@ test('Board base Claude launch can select Opus 5.5', () => {
     assert.equal(normalizeBoardLaunchOptions('base:claude', { model: 'claude-opus-5-5[1m]' }).model, 'claude-opus-5-5[1m]');
 });
 
-test('Sonnet 5.5 sits above Sonnet 5, saves as its [1m] form, and a bare saved ID reopens as pinned', () => {
+test('Sonnet 5.5 replaces Sonnet 5, saves as its [1m] form, and a bare saved ID reopens as pinned', () => {
     const models = LLM_MODEL_OPTIONS.claude.map(([model]) => model);
-    assert.equal(models.indexOf('claude-sonnet-5-5[1m]') + 1, models.indexOf('claude-sonnet-5[1m]'));
+    assert.ok(models.includes('claude-sonnet-5-5[1m]'));
+    assert.ok(!models.includes('claude-sonnet-5[1m]') && !models.includes('claude-opus-5[1m]'));
 
     const controller = createController();
     const settings = controller.mergeClaudeSettingsFromCustomArgs({}, '--model claude-sonnet-5-5 --effort medium');
