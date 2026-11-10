@@ -25,9 +25,11 @@ Calls with `focusTerminal:true` retain the existing VibeRails terminal-tab flow.
 
 The catalog presents Agents, Quick Launches and Scripts with the shared surface and
 empty-state styles. **Create script** opens the script-only Action editor; existing checks
-remain editable under Board checks. The Agent editor hides Purpose, defaults new records
-to `work`, and preserves an existing record's purpose when saving. Initial prompts stay
-directly editable without a duplicate live message preview.
+remain editable under Board checks. Each catalog row exposes **Edit** and a confirmed **Delete**
+action. Delete uses revision-checked retirement, hides the definition from the catalog and retains
+its history and attachments. The Agent editor hides Purpose, defaults new records to `work`,
+and preserves an existing record's purpose when saving. Initial prompts stay directly editable
+without a duplicate live message preview.
 `prompt-reference-highlights.js` paints file, variable, card/session and commit references
 inside the native prompt with the same font metrics. Its non-interactive mirror preserves
 literal source, selection, Undo and caret suggestions; composition and forced colors use

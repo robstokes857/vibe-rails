@@ -52,6 +52,7 @@ export class AiAgentsController {
         this.pythonScripts = new PythonScriptsController(app);
         this.items = [];
         this.launching = new Set();
+        this.deleting = new Set();
     }
     unload() {
         this.loadAbort?.abort();
@@ -86,15 +87,17 @@ export class AiAgentsController {
             .querySelector('[data-agent-catalog]')
             .addEventListener('click', (event) => {
                 const button = event.target.closest(
-                    '[data-agent-edit], [data-agent-run]'
+                    '[data-agent-edit], [data-agent-run], [data-agent-delete]'
                 );
                 if (!button) return;
                 const item = this.items.find(
                     (item) =>
                         item.id ===
-                        (button.dataset.agentEdit || button.dataset.agentRun)
+                        (button.dataset.agentEdit || button.dataset.agentRun || button.dataset.agentDelete)
                 );
-                if (item)
+                if (item && button.hasAttribute('data-agent-delete'))
+                    void this.deleteDefinition(item, button);
+                else if (item)
                     void (button.hasAttribute('data-agent-edit')
                         ? this.openEditor(item.definitionType, item.id)
                         : this.launch(item.id, item.definitionType));
@@ -114,7 +117,7 @@ export class AiAgentsController {
             if (this.catalogSignature !== signature)
                 window.__viberails_launcherChanged__?.();
             this.catalogSignature = signature;
-            this.items = catalog.items;
+            this.items = catalog.items.filter((item) => !item.retired);
             this.app.data.launchCatalog = this.items;
             await this.app.llmPickerController.loadPreferences({ force: true });
             if (!this.root || abort.signal.aborted) return;
@@ -134,7 +137,7 @@ export class AiAgentsController {
                             entries
                                 .map((item) => {
                                     const presentation = launchPresentation(item);
-                                    return `<article class="launch-catalog-row">${presentation.logoHtml}<div class="launch-catalog-copy"><button class="btn btn-link" data-agent-edit="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button><p>${escapeHtml(presentation.subtitle)}</p>${item.ineligibleReason ? `<p class="text-warning">Unavailable: ${escapeHtml(item.ineligibleReason)}</p>` : ''}</div><button class="btn btn-secondary" data-agent-run="${escapeHtml(item.id)}" aria-label="Run ${escapeHtml(item.name)}"${item.canLaunch ? '' : ' disabled'}><i class="fa-solid fa-play" aria-hidden="true"></i> Run</button></article>`;
+                                    return `<article class="launch-catalog-row">${presentation.logoHtml}<div class="launch-catalog-copy"><button class="btn btn-link" data-agent-edit="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button><p>${escapeHtml(presentation.subtitle)}</p>${item.ineligibleReason ? `<p class="text-warning">Unavailable: ${escapeHtml(item.ineligibleReason)}</p>` : ''}</div><div class="launch-catalog-actions"><button type="button" class="btn btn-link" data-agent-edit="${escapeHtml(item.id)}" aria-label="Edit ${escapeHtml(item.name)}"><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit</button><button class="btn btn-secondary" data-agent-run="${escapeHtml(item.id)}" aria-label="Run ${escapeHtml(item.name)}"${item.canLaunch ? '' : ' disabled'}><i class="fa-solid fa-play" aria-hidden="true"></i> Run</button><button type="button" class="btn btn-danger" data-agent-delete="${escapeHtml(item.id)}" aria-label="Delete ${escapeHtml(item.name)}"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete</button></div></article>`;
                                 })
                                 .join('') ||
                             `<div class="launch-catalog-empty"><i class="fa-solid fa-${icon}" aria-hidden="true"></i><h3>No ${title.toLowerCase()} yet</h3><button class="btn btn-secondary" data-agent-new="${type}"><i class="fa-solid fa-plus" aria-hidden="true"></i> ${action}</button></div>`
@@ -147,6 +150,26 @@ export class AiAgentsController {
             if (this.root && !abort.signal.aborted)
                 this.root.querySelector('[data-agent-page-error]').textContent =
                     error.message;
+        }
+    }
+    async deleteDefinition(item, button) {
+        if (this.deleting.has(item.id)) return;
+        this.deleting.add(item.id);
+        try {
+            if (!(await confirmDialog({
+                title: `Delete "${item.name}"?`,
+                message: 'It will be removed from AI Agents and become unavailable for future runs in all projects, including Board lanes and schedules. Its history and attachments are retained.',
+                confirmLabel: 'Delete',
+                danger: true
+            }))) return;
+            button.disabled = true;
+            await this.api.retire(item.definitionType, item.id, item.revision);
+            await this.refresh();
+        } catch (error) {
+            this.app.showToast('AI Agents', error.message, 'error');
+        } finally {
+            this.deleting.delete(item.id);
+            button.disabled = false;
         }
     }
     async launch(

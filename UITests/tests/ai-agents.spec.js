@@ -7,7 +7,7 @@ async function setup(page) {
     ]};
     const base=[['codex','Codex'],['claude','Claude'],['copilot','Copilot'],['opencode','OpenCode']];
     const scope = p => !p.projectPaths?.length || p.projectPaths.includes(state.projects[0].id);
-    const items=()=>[...state.presets.map(p=>({id:p.id,name:p.name,description:p.description,definitionType:'preset',cli:p.cli,kind:p.initialPrompt?.trim()?'agent':'quick-launch',revision:p.revision,enabled:p.enabled,retired:false,canLaunch:p.enabled && scope(p),canRunAutomatically:p.enabled && !!p.initialPrompt?.trim() && scope(p),inProject:scope(p),ineligibleReason:scope(p)?null:'This definition is not available in this project.',supportsAttachments:true})),...state.actions.map(p=>({...p,definitionType:'action',canLaunch:scope(p),canRunAutomatically:scope(p),inProject:scope(p)}))];
+    const items=()=>[...state.presets.map(p=>({id:p.id,name:p.name,description:p.description,definitionType:'preset',cli:p.cli,kind:p.initialPrompt?.trim()?'agent':'quick-launch',revision:p.revision,enabled:p.enabled,retired:!!p.retired,canLaunch:p.enabled && !p.retired && scope(p),canRunAutomatically:p.enabled && !p.retired && !!p.initialPrompt?.trim() && scope(p),inProject:scope(p),ineligibleReason:scope(p)?null:'This definition is not available in this project.',supportsAttachments:true})),...state.actions.map(p=>({...p,definitionType:'action',canLaunch:!p.retired && scope(p),canRunAutomatically:!p.retired && scope(p),inProject:scope(p)}))];
     await page.addInitScript(()=>sessionStorage.setItem('viberails_tab','fixture'));
     await page.routeWebSocket('**/api/v1/events/ws*',()=>{});
     await page.route('**/api/v1/**',async route=>{
@@ -24,6 +24,17 @@ async function setup(page) {
         if(/^\/api\/v1\/runs\/[^/]+$/.test(path) && method==='GET') {
             const run = state.runs.find(run => run.id === path.split('/').pop());
             return ok({ ...run, ...(state.runUpdate || {}) });
+        }
+        const retirement = path.match(/^\/api\/v1\/(presets|actions)\/([^/]+)\/retire$/);
+        if (retirement && method === 'POST') {
+            const list = retirement[1] === 'presets' ? state.presets : state.actions;
+            const item = list.find(item => item.id === retirement[2]);
+            if (state.conflict || body.expectedRevision !== item.revision)
+                return route.fulfill({status:409,json:{error:'Changed elsewhere. Refresh before deleting.'}});
+            item.retired = true;
+            item.enabled = false;
+            item.revision++;
+            return route.fulfill({status:204});
         }
         if(path.endsWith('/attachments')) {
             if(method==='GET')return ok(state.files);
@@ -111,7 +122,7 @@ test('scope refresh excludes launch choices while preserving saved Board selecti
     state.presets.push({id:'local',name:'Local agent',cli:'codex',initialPrompt:'Work',enabled:true,revision:1},
         {id:'elsewhere',name:'Elsewhere agent',cli:'codex',initialPrompt:'Work',enabled:true,revision:1,projectPaths:['C:\\FIXTURES\\OTHER']});
     await page.locator('[data-agent-refresh]').click();
-    await expect(page.locator('[data-agent-edit="local"]')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Local agent', exact: true })).toBeVisible();
     const visibleKeys = await page.evaluate(() => ({
         terminal: window.app.llmPickerController.getItems('terminal').map(x => x.key),
         board: window.app.llmPickerController.getItems('assignee', {includeHidden:true}).map(x => x.key)
@@ -200,7 +211,7 @@ test('quick actions use explicit Run buttons and preserve launch and keyboard be
     );
     state.actions.push({ id: 'script', name: 'Build <client> & test', kind: 'script' });
     await page.locator('[data-agent-refresh]').click();
-    await expect(page.locator('[data-agent-edit="release"]')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Release Vibe Rails Client App', exact: true })).toBeVisible();
     await page.evaluate(() => {
         window.quickActionLaunches = [];
         window.app.aiAgentsController.launch = async (...args) => window.quickActionLaunches.push(args);
@@ -213,7 +224,7 @@ test('quick actions use explicit Run buttons and preserve launch and keyboard be
     for (const id of ['release', 'script']) {
         const catalogRow = page.locator('.launch-catalog-row').filter({ has: page.locator(`[data-agent-edit="${id}"]`) });
         const menuRow = panel.locator('.launch-menu-row').filter({ has: page.locator(`[data-launch-id="${id}"]`) });
-        await expect(menuRow.locator('.launch-menu-name')).toHaveText(await catalogRow.locator('[data-agent-edit]').innerText());
+        await expect(menuRow.locator('.launch-menu-name')).toHaveText(await catalogRow.locator('.launch-catalog-copy [data-agent-edit]').innerText());
         await expect(menuRow.locator('.launch-menu-subtitle')).toHaveText(await catalogRow.locator('.launch-catalog-copy p').innerText());
         expect(await menuRow.locator('.launch-provider-logo').evaluate(el => el.outerHTML))
             .toBe(await catalogRow.locator('.launch-provider-logo').evaluate(el => el.outerHTML));
@@ -263,7 +274,7 @@ test('quick actions match catalog descriptions and provider branding for other l
     );
     state.actions.push({ id: 'script', name: 'Build', description: 'Compile <client>', kind: 'script' });
     await page.locator('[data-agent-refresh]').click();
-    await expect(page.locator('[data-agent-edit="claude"]')).toBeVisible();
+    await expect(page.locator('.launch-catalog-copy [data-agent-edit="claude"]')).toBeVisible();
     await page.getByRole('button', { name: 'Launch an agent or automation', exact: true }).click();
     const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
     await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['Review <changes> & report', 'OpenCode', 'custom', 'Compile <client>']);
@@ -569,14 +580,52 @@ for (const width of [320, 375, 768, 1024, 1440]) test(`catalog follows the share
     await page.locator('[data-agent-refresh]').click();
     await expect(catalog.locator('.launch-catalog-row')).toHaveCount(3);
     expect(await catalog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await expect(catalog.getByRole('button', { name: 'Edit Review changes', exact: true })).toBeVisible();
+    await expect(catalog.getByRole('button', { name: 'Delete Review changes', exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`catalog-populated-${width}.png`), fullPage: true });
+});
+
+for (const type of ['presets', 'actions']) test(`catalog Delete confirms and retires ${type} with the displayed revision`, async ({ page }) => {
+    const state = await setup(page);
+    state[type].push({ id: 'delete-me', name: 'Delete candidate', cli: 'codex', initialPrompt: 'Review', kind: 'script', enabled: true, revision: 3 });
+    state.presets.push({ id: 'keep-me', name: 'Keep this agent', cli: 'codex', initialPrompt: 'Work', enabled: true, revision: 1 });
+    state.files.push({ id: 'attachment', name: 'retained.png', mimeType: 'image/png', size: 10 });
+    await page.locator('[data-agent-refresh]').click();
+    const remove = page.getByRole('button', { name: 'Delete Delete candidate', exact: true });
+    await expect(remove).toHaveClass(/btn-danger/);
+    await expect(remove.locator('.fa-trash-can')).toBeVisible();
+    await remove.click();
+    const confirmation = page.getByRole('alertdialog');
+    await expect(confirmation).toContainText('Delete "Delete candidate"?');
+    await expect(confirmation).toContainText('history and attachments are retained');
+    await expect(confirmation.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(remove).toBeFocused();
+    expect(state.requests.filter(r => r.path.endsWith('/retire'))).toHaveLength(0);
+    state.conflict = true;
+    await remove.click();
+    await confirmation.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(page.getByText('Changed elsewhere. Refresh before deleting.', { exact: true })).toBeVisible();
+    await expect(remove).toBeEnabled();
+    expect(state[type][0].retired).toBeUndefined();
+    state.conflict = false;
+    await remove.click();
+    await confirmation.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(remove).toHaveCount(0);
+    expect(state.requests.filter(r => r.path.endsWith('/retire')).map(r => ({ path:r.path, method:r.method, body:r.body })))
+        .toEqual(Array(2).fill({path:`/api/v1/${type}/delete-me/retire`,method:'POST',body:{expectedRevision:3}}));
+    expect(state[type][0]).toMatchObject({ id:'delete-me', retired:true, revision:4 });
+    expect(state.files).toHaveLength(1);
+    await expect(page.getByRole('button', { name: 'Keep this agent', exact: true })).toBeVisible();
+    await page.locator('[data-agent-refresh]').click();
+    await expect(page.getByRole('button', { name: 'Delete candidate', exact: true })).toHaveCount(0);
 });
 
 test('saving an agent hides Purpose and preserves its existing purpose', async ({ page }) => {
     const state = await setup(page);
     state.presets.push({ id: 'reviewer', name: 'Reviewer', cli: 'codex', initialPrompt: 'Review', purpose: 'code_review', enabled: true, revision: 1 });
     await page.locator('[data-agent-refresh]').click();
-    await page.getByRole('button', { name: 'Reviewer', exact: true }).click();
+    await page.getByRole('button', { name: 'Edit Reviewer', exact: true }).click();
     const editor = page.locator('[data-launch-editor]');
     await editor.getByText('Additional settings', { exact: true }).click();
     await expect(editor.getByLabel('Purpose', { exact: true })).toHaveCount(0);
