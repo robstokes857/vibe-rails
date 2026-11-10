@@ -29,8 +29,10 @@ public static class LaunchRoutes
             catch (Exception ex) when (ex is LaunchValidationException or AutomationScriptValidationException or ArgumentException or BoardValidationException)
             { return Results.BadRequest(new LaunchError(ex.Message, "invalid_launch")); }
         });
-        api.MapGet("/launch-catalog", async (LaunchService service, IBoardProjectResolver projects, CancellationToken ct) =>
-            Results.Ok(await service.CatalogAsync(await projects.ResolveAsync(ct), ct)));
+        api.MapGet("/launch-catalog", async (bool? includeAll, LaunchService service, IBoardProjectResolver projects, CancellationToken ct) =>
+            Results.Ok(await service.CatalogAsync(await projects.ResolveAsync(ct), ct, includeAll == true)));
+        api.MapGet("/launch-projects", async (VibeRails.DB.IRepository repository, IBoardProjectResolver projects, CancellationToken ct) =>
+            Results.Ok(await LaunchProjects.ListAsync(repository, await projects.ResolveAsync(ct), ct)));
         api.MapGet("/presets", async (ILaunchStore store, CancellationToken ct) => Results.Ok(await store.ListPresetsAsync(ct)));
         api.MapGet("/actions", async (ILaunchStore store, CancellationToken ct) => Results.Ok(await store.ListActionsAsync(ct)));
         api.MapGet("/presets/{id}", async (string id, ILaunchStore store, CancellationToken ct) =>

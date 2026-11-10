@@ -11,6 +11,14 @@ store. Retired Environment/Job definitions are retained without adoption or
 execution. Historical sections describing their launch paths are superseded by
 this component's [implementation and API contract](../VibeRails/Services/Launches/README.md).
 
+Definitions optionally select local project roots through the shared Projects editor
+(VIBE-307). Additive `DefinitionProjects` mappings preserve scope across older editor
+writes; no mappings means all projects. `LaunchProjectScope` shares normalized identity
+and membership checks between catalogs and transactional admission, including retries.
+Known roots come from saved project/session/sandbox metadata, never a repository scan.
+The AI Agents management view can still find definitions scoped elsewhere. Existing
+bindings and admitted runs remain stored; older binaries do not enforce the new scope.
+
 ## Corporate gateways for Codex and Claude
 
 `LlmProxySettingsService` resolves each destination from the saved Enterprise Network Proxy,

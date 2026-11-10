@@ -269,7 +269,7 @@ export class LlmPickerController {
             const outOfContext = (this.catalog || []).find((item) =>
                 ['agent', 'quick-launch'].includes(item.kind) && this._selectionValue(item, plainCliValues) === selectedValue);
             if (outOfContext && (!configuration.filterItem || configuration.filterItem(outOfContext))) {
-                optionItems.push(toOption(outOfContext, ' (agent)'));
+                optionItems.push(toOption(outOfContext, outOfContext.inProject === false ? ' (unavailable in this project)' : ' (agent)'));
             }
         }
 
@@ -306,7 +306,7 @@ export class LlmPickerController {
         const catalog = this.usingFallbackCatalog
             ? this._buildFallbackCatalog()
             : (this.catalog || this._buildFallbackCatalog());
-        return catalog.filter((item) => matcher(item, this._launchKind(item)));
+        return catalog.filter((item) => item.inProject !== false && matcher(item, this._launchKind(item)));
     }
 
     /** The classification is supplied by the shared server catalog. */
@@ -330,6 +330,7 @@ export class LlmPickerController {
                     ? null
                     : Number.parseInt(item.environmentId, 10),
                 enabled: Boolean(item?.enabled),
+                inProject: item?.inProject !== false,
                 order: Number.parseInt(item?.order, 10) || 0
             }))
             .filter((item) => item.key && item.label && item.cli)
@@ -353,7 +354,7 @@ export class LlmPickerController {
         const environmentItems = (this.app.data.launchCatalog || [])
             .filter(item => item.definitionType === 'preset' && !item.retired)
             .map((item, order) => ({ key:`preset:${item.id}:${item.cli}`, kind:item.kind,
-                group:ENVIRONMENT_GROUP, label:item.name, cli:item.cli, enabled:item.enabled, order }));
+                group:ENVIRONMENT_GROUP, label:item.name, cli:item.cli, enabled:item.enabled, inProject:item.inProject !== false, order }));
         return [...baseItems, ...environmentItems];
     }
 

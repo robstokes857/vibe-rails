@@ -74,7 +74,7 @@ export function mountBindings(root, initial, { project, eligible }) {
         add.disabled = !allowed;
         root.querySelector('[data-binding-hint]').textContent = allowed
             ? 'Changes apply when you save.'
-            : 'Quick Launches and disabled definitions cannot run automatically. Existing bindings remain saved but will not dispatch.';
+            : 'This definition cannot run automatically here. Check its prompt, Enabled setting and Projects selection. Existing bindings remain saved but will not dispatch.';
     }
     host.addEventListener(
         'input',

@@ -1036,6 +1036,26 @@ namespace VibeRails.DB
             await cmd.ExecuteNonQueryAsync();
         }
 
+        public async Task<IReadOnlyList<string>> GetKnownProjectPathsAsync(CancellationToken cancellationToken = default)
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT COALESCE(NULLIF(MAX(CASE WHEN Key='GitRootPath' THEN Value END),''),ProjectPath)
+                FROM ProjectCache WHERE ProjectPath<>'' GROUP BY ProjectPath
+                UNION
+                SELECT COALESCE(NULLIF(p.Value,''),s.WorkingDirectory) FROM Sessions s
+                LEFT JOIN ProjectCache p ON p.ProjectPath=s.WorkingDirectory AND p.Key='GitRootPath'
+                WHERE s.WorkingDirectory<>''
+                UNION SELECT ProjectPath FROM Sandboxes WHERE ProjectPath<>''
+                UNION SELECT Path FROM Sandboxes WHERE Path<>'';
+                """;
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            List<string> paths = [];
+            while (await reader.ReadAsync(cancellationToken)) paths.Add(reader.GetString(0));
+            return paths;
+        }
+
         public async Task<string> GetProjectDisplayNameAsync(string path, CancellationToken cancellationToken = default)
         {
             var normalizedPath = NormalizeWorkingDirectory(path);

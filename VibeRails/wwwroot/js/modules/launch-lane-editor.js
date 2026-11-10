@@ -104,7 +104,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                     null,
                     { signal: abort.signal }
                 ),
-                api.catalog({ signal: abort.signal })
+                api.catalog({ signal: abort.signal, includeAll: true })
             ]);
             if (!current()) return;
             selections = lane.selections.map((item) => ({ ...item }));

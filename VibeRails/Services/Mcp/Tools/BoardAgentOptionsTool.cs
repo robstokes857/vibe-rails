@@ -68,7 +68,7 @@ public sealed class BoardAgentOptionsTool
     private static string FormatOptions(LlmPickerPreferencesResponse preferences)
     {
         var builder = new StringBuilder("Enabled Board agents for the current VibeRails project:\n");
-        foreach (var item in preferences.Items.Where(item => item.Enabled && item.Kind != "quick-launch")
+        foreach (var item in preferences.Items.Where(item => item.Enabled && item.InProject && item.Kind != "quick-launch")
                      .OrderBy(item => item.Kind == "base" ? 0 : 1).ThenBy(item => item.Order))
         {
             if (!BoardSelection.TryParse(item.Key, out var selection) || selection is null

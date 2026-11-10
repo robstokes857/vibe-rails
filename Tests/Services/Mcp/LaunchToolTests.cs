@@ -44,6 +44,10 @@ public sealed class LaunchToolTests : IAsyncLifetime
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton<ILaunchStore>(store);
         builder.Services.AddSingleton(Mock.Of<IAutomationScriptService>());
+        var metadata = new Mock<VibeRails.DB.IRepository>();
+        metadata.Setup(x => x.GetKnownProjectPathsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([project, root]);
+        metadata.Setup(x => x.GetProjectDisplayNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("Project");
+        builder.Services.AddSingleton(metadata.Object);
         var projects = new Mock<IBoardProjectResolver>();
         projects.Setup(p => p.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(project);
         builder.Services.AddSingleton(projects.Object);
@@ -75,6 +79,27 @@ public sealed class LaunchToolTests : IAsyncLifetime
     {
         Assert.False(result.IsError == true, string.Join("\n", result.Content.OfType<TextContentBlock>().Select(t => t.Text)));
         return JsonDocument.Parse(Assert.Single(result.Content.OfType<TextContentBlock>()).Text).RootElement;
+    }
+
+    [Fact]
+    public async Task ProjectScopeRoundTripsThroughMcpAndRejectsOutOfScopeLaunches()
+    {
+        await using var client = await ConnectAsync();
+        var known = Json(await client.CallToolAsync("list_launch_projects", new Dictionary<string, object?>(), cancellationToken: Ct));
+        Assert.Equal(2, known.GetArrayLength());
+        var saved = Json(await client.CallToolAsync("save_launch_preset", new Dictionary<string, object?>
+        {
+            ["definition"] = new { name = "Scoped", cli = "codex", initialPrompt = "Work", projectPaths = new[] { root } }
+        }, cancellationToken: Ct));
+        var id = saved.GetProperty("preset").GetProperty("id").GetString()!;
+        Assert.Single(saved.GetProperty("preset").GetProperty("projectPaths").EnumerateArray());
+        var catalog = Json(await client.CallToolAsync("list_launch_catalog", new Dictionary<string, object?>(), cancellationToken: Ct));
+        Assert.Equal(0, catalog.GetProperty("items").GetArrayLength());
+        var management = Json(await client.CallToolAsync("list_launch_catalog", new Dictionary<string, object?> { ["includeAll"] = true }, cancellationToken: Ct));
+        Assert.False(management.GetProperty("items")[0].GetProperty("inProject").GetBoolean());
+        var rejected = await client.CallToolAsync("run_launch", new Dictionary<string, object?> { ["id"] = id }, cancellationToken: Ct);
+        Assert.True(rejected.IsError);
+        Assert.Empty((await store.ListRunsAsync(LaunchService.ProjectKey(project), ct: Ct)).Runs);
     }
 
     [Fact]

@@ -7,7 +7,9 @@ public interface ILaunchStore
     Task<IReadOnlyList<LaunchAction>> ListActionsAsync(CancellationToken ct = default);
     Task<LaunchPreset?> GetPresetAsync(string id, CancellationToken ct = default);
     Task<LaunchAction?> GetActionAsync(string id, CancellationToken ct = default);
+    /// <summary>Atomically saves fields and project mappings at the expected revision. Null ProjectPaths preserves scope; [] clears it.</summary>
     Task<LaunchPreset> SavePresetAsync(LaunchPreset preset, long expectedRevision, CancellationToken ct = default);
+    /// <summary>Atomically saves fields and project mappings at the expected revision. Null ProjectPaths preserves scope; [] clears it.</summary>
     Task<LaunchAction> SaveActionAsync(LaunchAction action, long expectedRevision, CancellationToken ct = default);
     Task<LaunchAction> SaveApprovedActionAsync(LaunchAction action, long expectedRevision, string project, string? hash, CancellationToken ct = default);
     Task<IReadOnlyList<LaunchTriggerBinding>> ListBindingsAsync(string? projectPath = null, string? definitionId = null, CancellationToken ct = default);

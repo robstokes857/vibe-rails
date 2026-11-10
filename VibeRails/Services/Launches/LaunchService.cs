@@ -15,33 +15,35 @@ namespace VibeRails.Services.Launches;
 public sealed class LaunchService(ILaunchStore store, IAutomationScriptService scripts, IBoardStore? boards = null)
 {
     /// <summary>Comparison and lease key. Upper-cased where paths compare case-insensitively; never a working directory.</summary>
-    public static string ProjectKey(string project) => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-        ? ProjectRoot(project).ToUpperInvariant()
-        : ProjectRoot(project);
+    public static string ProjectKey(string project) => LaunchProjectScope.Key(project);
 
     /// <summary>The full path with its original casing, for anything that touches the filesystem or the user.</summary>
-    public static string ProjectRoot(string project) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(project));
+    public static string ProjectRoot(string project) => LaunchProjectScope.Root(project);
 
-    public async Task<LaunchCatalog> CatalogAsync(string project, CancellationToken ct = default)
+    public async Task<LaunchCatalog> CatalogAsync(string project, CancellationToken ct = default, bool includeAll = false)
     {
         var presets = await store.ListPresetsAsync(ct);
         var actions = await store.ListActionsAsync(ct);
         var items = new List<LaunchCatalogItem>();
         foreach (var p in presets)
         {
-            string? reason = p.RetiredUtc is not null ? "Retired" : !p.Enabled ? "Disabled" : null;
+            var inProject = LaunchProjectScope.Includes(p.ProjectPaths, project);
+            if (!inProject && !includeAll) continue;
+            string? reason = !inProject ? LaunchProjectScope.UnavailableReason : p.RetiredUtc is not null ? "Retired" : !p.Enabled ? "Disabled" : null;
             try { _ = LaunchOptionBuilder.Normalize(p); }
             catch (LaunchValidationException ex) { reason ??= ex.Message; }
             items.Add(new(p.Id, "preset", p.Kind, p.Name, p.Description, p.Revision, p.Enabled, p.RetiredUtc is not null,
-                LlmParser.ToWireName(p.Cli), reason is null, reason is null && p.Kind == "agent", reason, true));
+                LlmParser.ToWireName(p.Cli), reason is null, reason is null && p.Kind == "agent", reason, true, inProject));
         }
         foreach (var a in actions)
         {
-            string? reason = a.RetiredUtc is not null ? "Retired" : !a.Enabled ? "Disabled" : null;
-            try { await ValidateActionForProjectAsync(a, project, false, ct); }
+            var inProject = LaunchProjectScope.Includes(a.ProjectPaths, project);
+            if (!inProject && !includeAll) continue;
+            string? reason = !inProject ? LaunchProjectScope.UnavailableReason : a.RetiredUtc is not null ? "Retired" : !a.Enabled ? "Disabled" : null;
+            try { if (inProject) await ValidateActionForProjectAsync(a, project, false, ct); }
             catch (Exception ex) when (ex is LaunchValidationException or AutomationScriptValidationException or ArgumentException) { reason ??= ex.Message; }
             items.Add(new(a.Id, "action", a.Kind, a.Name, a.Description, a.Revision, a.Enabled, a.RetiredUtc is not null,
-                null, reason is null, reason is null, reason, false));
+                null, reason is null, reason is null, reason, false, inProject));
         }
         return new(items);
     }
@@ -52,10 +54,11 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
         if (id is null && request.ExpectedRevision != 0) throw new LaunchConflictException("New presets require revision 0.");
         var preset = LaunchOptionBuilder.Normalize(new(id ?? "preset_" + Guid.NewGuid().ToString("N"), request.Name,
             request.Description ?? "", LlmParser.ParseValue(request.Cli), request.Options ?? new(), request.AdditionalArgv ?? [],
-            request.InitialPrompt, request.Enabled, 0, default, default, TimeoutMinutes: request.TimeoutMinutes, Purpose: request.Purpose));
+            request.InitialPrompt, request.Enabled, 0, default, default, TimeoutMinutes: request.TimeoutMinutes, Purpose: request.Purpose,
+            ProjectPaths: LaunchProjectScope.Normalize(request.ProjectPaths)));
         preset = await store.SavePresetAsync(preset, request.ExpectedRevision, ct);
-        var affected = preset.Kind == "quick-launch" || !preset.Enabled
-            ? await store.ListBindingsAsync(definitionId: preset.Id, ct: ct) : [];
+        var affected = (await store.ListBindingsAsync(definitionId: preset.Id, ct: ct))
+            .Where(b => preset.Kind == "quick-launch" || !preset.Enabled || !LaunchProjectScope.Includes(preset.ProjectPaths, b.ProjectPath)).ToArray();
         return new(preset, affected);
     }
 
@@ -64,15 +67,33 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
         if (id is not null && request.ExpectedRevision <= 0) throw new LaunchConflictException("Updates require the current positive revision.");
         if (id is null && request.ExpectedRevision != 0) throw new LaunchConflictException("New Actions require revision 0.");
         var action = new LaunchAction(id ?? "action_" + Guid.NewGuid().ToString("N"), request.Name?.Trim() ?? "",
-            request.Description ?? "", request.Kind, request.Script, request.Check, request.Enabled, 0, default, default);
+            request.Description ?? "", request.Kind, request.Script, request.Check, request.Enabled, 0, default, default,
+            ProjectPaths: LaunchProjectScope.Normalize(request.ProjectPaths));
         ValidateAction(action);
         // Saving explicitly approves these bytes only in the current authorized project.
         string? hash = null;
         if (action.Script is { } script)
         {
-            var normalized = await scripts.NormalizeAsync(project, new JobActionRequest(null, JobActionKind.Script,
-                ScriptPath: script.Path, ScriptRuntime: script.Runtime, Arguments: script.Arguments.ToList(),
-                WorkingDirectory: script.WorkingDirectory, TimeoutSeconds: script.TimeoutSeconds), ct);
+            var current = id is null ? null : await store.GetActionAsync(id, ct);
+            var unchanged = current?.Script is { } prior && prior.Path == script.Path && prior.Runtime == script.Runtime
+                && prior.WorkingDirectory == script.WorkingDirectory && prior.TimeoutSeconds == script.TimeoutSeconds
+                && prior.Arguments.SequenceEqual(script.Arguments);
+            // Management from another project must not require or approve the script's bytes here.
+            if (unchanged && !LaunchProjectScope.Includes(current!.ProjectPaths, project))
+                return await store.SaveActionAsync(action, request.ExpectedRevision, ct);
+            JobActionRequest normalized;
+            try
+            {
+                normalized = await scripts.NormalizeAsync(project, new JobActionRequest(null, JobActionKind.Script,
+                    ScriptPath: script.Path, ScriptRuntime: script.Runtime, Arguments: script.Arguments.ToList(),
+                    WorkingDirectory: script.WorkingDirectory, TimeoutSeconds: script.TimeoutSeconds), ct);
+            }
+            catch (AutomationScriptValidationException) when (unchanged)
+            {
+                // A global definition may reference a file that only exists in another project.
+                // Metadata/scope edits remain possible, without granting any content approval.
+                return await store.SaveActionAsync(action, request.ExpectedRevision, ct);
+            }
             hash = normalized.ApprovedHash;
             action = action with { Script = new(normalized.ScriptPath!, normalized.ScriptRuntime!.Value,
                 normalized.Arguments!.ToArray(), normalized.WorkingDirectory, normalized.TimeoutSeconds) };
@@ -188,12 +209,14 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
         {
             var p = await store.GetPresetAsync(id, ct) ?? throw new LaunchValidationException("Preset is unavailable. Replace the saved selection.");
             if (!p.Enabled || p.RetiredUtc is not null) throw new LaunchValidationException("This preset is disabled or retired.");
+            LaunchProjectScope.Require(p.ProjectPaths, context.ProjectPath);
             snapshot = new(context, LaunchOptionBuilder.Normalize(p), AttachmentIds: (await store.ListAttachmentsAsync(p.Id, ct)).Select(a => a.Id).ToArray());
         }
         else if (type == "action")
         {
             var a = await store.GetActionAsync(id, ct) ?? throw new LaunchValidationException("Action is unavailable. Replace the saved selection.");
             if (!a.Enabled || a.RetiredUtc is not null) throw new LaunchValidationException("This Action is disabled or retired.");
+            LaunchProjectScope.Require(a.ProjectPaths, context.ProjectPath);
             var hash = await ValidateActionForProjectAsync(a, context.Root, false, ct);
             snapshot = new(context, Action: a, ApprovedScriptHash: hash);
         }

@@ -112,6 +112,10 @@ public class LaunchRoutesTests
         var board = new BoardStore($"Data Source={Path.Combine(root, "board.db")};Pooling=False", $"Data Source={Path.Combine(root, "state.db")};Pooling=False");
         builder.Services.AddSingleton<IBoardStore>(board);
         builder.Services.AddSingleton(Mock.Of<IAutomationScriptService>());
+        var metadata = new Mock<VibeRails.DB.IRepository>();
+        metadata.Setup(x => x.GetKnownProjectPathsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([root]);
+        metadata.Setup(x => x.GetProjectDisplayNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("Project");
+        builder.Services.AddSingleton(metadata.Object);
         var projects = new Mock<IBoardProjectResolver>();
         projects.Setup(p => p.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(root);
         builder.Services.AddSingleton(projects.Object);
@@ -128,7 +132,7 @@ public class LaunchRoutesTests
         var ct = TestContext.Current.CancellationToken;
         try
         {
-            foreach (var path in new[] { "/launch-catalog", "/presets", "/actions", "/trigger-bindings", "/runs", "/presets/missing/attachments",
+            foreach (var path in new[] { "/launch-catalog", "/launch-projects", "/presets", "/actions", "/trigger-bindings", "/runs", "/presets/missing/attachments",
                 "/runs/missing/attachments/missing/content", "/board/cards/missing/launches/runs" })
             {
                 foreach (var credentials in new[] { 0, 1, 2 })
@@ -198,6 +202,19 @@ public class LaunchRoutesTests
             Assert.Equal(HttpStatusCode.BadRequest, badOffset.StatusCode);
             using var missing = await SendAsync(HttpMethod.Get, url + "/api/v1/board/cards/missing/launches/runs", null, ct);
             Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+
+            using var scopeSave = await SendAsync(HttpMethod.Put, url + "/api/v1/presets/" + saved.Preset.Id,
+                new SavePresetRequest("Scoped", "", "codex", InitialPrompt: "Work", ExpectedRevision: 1, ProjectPaths: [root + "-elsewhere"]), ct);
+            Assert.Equal(HttpStatusCode.OK, scopeSave.StatusCode);
+            using var catalog = await SendAsync(HttpMethod.Get, url + "/api/v1/launch-catalog", null, ct);
+            Assert.Empty((await catalog.Content.ReadFromJsonAsync<LaunchCatalog>(ct))!.Items);
+            using var management = await SendAsync(HttpMethod.Get, url + "/api/v1/launch-catalog?includeAll=true", null, ct);
+            Assert.False(Assert.Single((await management.Content.ReadFromJsonAsync<LaunchCatalog>(ct))!.Items).CanLaunch);
+            using var blocked = await SendAsync(HttpMethod.Post, url + "/api/v1/runs", new LaunchRequest(saved.Preset.Id), ct);
+            Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
+            Assert.Contains("not available in this project", (await blocked.Content.ReadFromJsonAsync<LaunchError>(ct))!.Error);
+            using var known = await SendAsync(HttpMethod.Get, url + "/api/v1/launch-projects", null, ct);
+            Assert.True(Assert.Single((await known.Content.ReadFromJsonAsync<LaunchProject[]>(ct))!).IsCurrent);
         }
         finally
         {

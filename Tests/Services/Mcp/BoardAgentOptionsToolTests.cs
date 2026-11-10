@@ -46,7 +46,8 @@ public sealed class BoardAgentOptionsToolTests
                     new("base:claude", "base", "Base CLIs", "Claude hidden", "claude", null, false, 1),
                     new("base:shell", "base", "Base CLIs", "Terminal", "shell", null, true, 2),
                     new("env:7:codex", "environment", "Custom Environments", "Astra worker (codex)", "codex", 7, true, 0),
-                    new("env:8:claude", "environment", "Custom Environments", "Hidden environment", "claude", 8, false, 1)
+                    new("env:8:claude", "environment", "Custom Environments", "Hidden environment", "claude", 8, false, 1),
+                    new("preset:elsewhere:codex", "agent", "AI Agents", "Other project agent", "codex", null, true, 2, InProject: false)
                 ]), AppJsonSerializerContext.Default.LlmPickerPreferencesResponse)
             });
         }));
@@ -58,6 +59,7 @@ public sealed class BoardAgentOptionsToolTests
         Assert.DoesNotContain("base:claude", result);
         Assert.DoesNotContain("base:shell", result);
         Assert.DoesNotContain("env:8", result);
+        Assert.DoesNotContain("Other project agent", result);
         Assert.DoesNotContain("secret", result);
         Assert.Contains("Effort: default, minimal, low, medium, high, xhigh, max, ultra", result);
         Assert.DoesNotContain("Start mode:", result);

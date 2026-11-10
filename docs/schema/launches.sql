@@ -26,6 +26,9 @@ CREATE TABLE Actions ( Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Description TEXT
 -- table DefinitionAttachments
 CREATE TABLE DefinitionAttachments ( Id TEXT PRIMARY KEY, DefinitionId TEXT NOT NULL REFERENCES LaunchPresets(Id), Name TEXT NOT NULL, MimeType TEXT NOT NULL, Size INTEGER NOT NULL, CreatedUTC TEXT NOT NULL, RemovedUTC TEXT, Content BLOB NOT NULL);
 
+-- table DefinitionProjects
+CREATE TABLE DefinitionProjects ( DefinitionType TEXT NOT NULL, DefinitionId TEXT NOT NULL, ProjectKey TEXT NOT NULL, PRIMARY KEY (DefinitionType, DefinitionId, ProjectKey));
+
 -- table LaunchPresets
 CREATE TABLE LaunchPresets ( Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Description TEXT NOT NULL, Cli INTEGER NOT NULL, InitialPrompt TEXT, Enabled INTEGER NOT NULL, Revision INTEGER NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, RetiredUTC TEXT, Payload TEXT NOT NULL);
 

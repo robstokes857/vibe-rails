@@ -1,9 +1,13 @@
 const { test, expect } = require('@playwright/test');
 
 async function setup(page) {
-    const state={presets:[],actions:[],bindings:[],runs:[],files:[],requests:[],conflict:false};
+    const state={presets:[],actions:[],bindings:[],runs:[],files:[],requests:[],conflict:false, projects:[
+        {id:'C:\\FIXTURES\\PROJECT',name:'Same name',path:'C:\\fixtures\\project',isCurrent:true},
+        {id:'C:\\FIXTURES\\OTHER',name:'Same name',path:'C:\\fixtures\\other',isCurrent:false}
+    ]};
     const base=[['codex','Codex'],['claude','Claude'],['copilot','Copilot'],['opencode','OpenCode']];
-    const items=()=>[...state.presets.map(p=>({id:p.id,name:p.name,description:p.description,definitionType:'preset',cli:p.cli,kind:p.initialPrompt?.trim()?'agent':'quick-launch',revision:p.revision,enabled:p.enabled,retired:false,canLaunch:p.enabled,canRunAutomatically:p.enabled && !!p.initialPrompt?.trim(),supportsAttachments:true})),...state.actions.map(p=>({...p,definitionType:'action',canLaunch:true,canRunAutomatically:true}))];
+    const scope = p => !p.projectPaths?.length || p.projectPaths.includes(state.projects[0].id);
+    const items=()=>[...state.presets.map(p=>({id:p.id,name:p.name,description:p.description,definitionType:'preset',cli:p.cli,kind:p.initialPrompt?.trim()?'agent':'quick-launch',revision:p.revision,enabled:p.enabled,retired:false,canLaunch:p.enabled && scope(p),canRunAutomatically:p.enabled && !!p.initialPrompt?.trim() && scope(p),inProject:scope(p),ineligibleReason:scope(p)?null:'This definition is not available in this project.',supportsAttachments:true})),...state.actions.map(p=>({...p,definitionType:'action',canLaunch:scope(p),canRunAutomatically:scope(p),inProject:scope(p)}))];
     await page.addInitScript(()=>sessionStorage.setItem('viberails_tab','fixture'));
     await page.routeWebSocket('**/api/v1/events/ws*',()=>{});
     await page.route('**/api/v1/**',async route=>{
@@ -11,8 +15,9 @@ async function setup(page) {
         state.requests.push({path,method,body});
         const ok=json=>route.fulfill({json});
         if(path==='/api/v1/context')return ok({isInGit:true,rootPath:'C:\\fixtures\\project',launchDirectory:'C:\\fixtures\\project',isActiveRootBackend:true});
-        if(path==='/api/v1/launch-catalog')return ok({items:items()});
-        if(path==='/api/v1/llm-picker/preferences')return ok({items:[...base.map(([cli,label],order)=>({key:`base:${cli}`,kind:'base',group:'Base CLIs',label,cli,enabled:true,order})),...items().filter(p=>p.definitionType==='preset').map((p,order)=>({key:`preset:${p.id}:${p.cli}`,kind:p.kind,group:'AI Agents',label:p.name,cli:p.cli,enabled:p.enabled,order}))]});
+        if(path==='/api/v1/launch-projects')return ok(state.projects);
+        if(path==='/api/v1/launch-catalog')return ok({items:items().filter(p=>new URL(req.url()).searchParams.get('includeAll')==='true'||p.inProject)});
+        if(path==='/api/v1/llm-picker/preferences')return ok({items:[...base.map(([cli,label],order)=>({key:`base:${cli}`,kind:'base',group:'Base CLIs',label,cli,enabled:true,order})),...items().filter(p=>p.definitionType==='preset').map((p,order)=>({key:`preset:${p.id}:${p.cli}`,kind:p.kind,group:'AI Agents',label:p.name,cli:p.cli,enabled:p.enabled,inProject:p.inProject,order}))]});
         if(path.includes('/launch-defaults'))return ok({model:'',effort:'',speed:'',mode:'',yolo:false});
         if(path==='/api/v1/trigger-bindings'){if(method==='GET')return ok(state.bindings);const result={...body,id:'binding_'+state.bindings.length,revision:1};state.bindings.push(result);return ok(result);}
         if(path==='/api/v1/runs'){if(method==='GET')return ok({runs:state.runs,nextCursor:null});const p=state.presets.find(p=>p.id===body.definitionId);const run={id:'run_'+state.runs.length,sequence:state.runs.length+1,definitionId:body.definitionId,status:'queued',queuedUtc:new Date().toISOString(),snapshot:{preset:p},verdict:null};state.runs.push(run);return ok(run);}
@@ -40,6 +45,99 @@ async function setup(page) {
     await expect(page.getByRole('heading',{name:'AI Agents',exact:true})).toBeVisible();
     return state;
 }
+
+for (const width of [375, 1024]) test(`project scope is searchable, retained and manageable at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const state = await setup(page);
+    await page.getByRole('button', { name: 'Create agent', exact: true }).first().click();
+    const editor = page.locator('[data-launch-editor]');
+    await editor.locator('[data-launch-field="name"]').fill('Scoped agent');
+    await editor.locator('[data-board-composer-input]').fill('Do work');
+    const control = editor.locator('#launch-projects + .ts-wrapper .ts-control');
+    await control.click();
+    const search = page.getByRole('textbox', { name: 'Search projects or paths…' });
+    await search.fill('other');
+    const option = page.locator('.ts-dropdown:visible [data-selectable]').filter({ hasText: 'C:\\fixtures\\other' });
+    await expect(option).toContainText('Same name');
+    await option.click();
+    await search.press('Escape');
+    await page.screenshot({ path: testInfo.outputPath(`projects-${width}.png`) });
+    await editor.locator('[data-launch-save]').click();
+    await expect.poll(() => state.presets[0]?.projectPaths).toEqual(['C:\\FIXTURES\\OTHER']);
+    await editor.locator('[data-launch-cancel]').click();
+    await expect(page.locator('[data-agent-edit]')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Manage all projects', exact: true }).click();
+    await expect(page.locator('[data-agent-run]')).toBeDisabled();
+    await page.getByRole('button', { name: 'Scoped agent', exact: true }).click();
+    await expect(editor.locator('#launch-projects + .ts-wrapper')).toContainText('C:\\fixtures\\other');
+    await control.click();
+    await control.press('ArrowDown');
+    await search.fill('project');
+    await page.locator('.ts-dropdown:visible [data-selectable]').filter({ hasText: 'C:\\fixtures\\project' }).click();
+    await search.press('Escape');
+    await editor.locator('[data-launch-save]').click();
+    await expect.poll(() => state.presets[0]?.projectPaths?.length).toBe(2);
+    await editor.locator('[data-launch-cancel]').click();
+    await page.getByRole('button', { name: 'Scoped agent', exact: true }).click();
+    await expect(editor.locator('#launch-projects option:checked')).toHaveCount(2);
+    // Remove each selected project using the shared Tom Select multi-select control.
+    const remove = editor.locator('#launch-projects + .ts-wrapper .remove');
+    await remove.first().click();
+    await remove.first().click();
+    await editor.locator('[data-launch-save]').click();
+    await expect.poll(() => state.presets[0]?.projectPaths).toEqual([]);
+});
+
+test('missing projects and stale saves keep the selected scope', async ({ page }) => {
+    const state = await setup(page);
+    state.presets.push({ id:'missing', name:'Missing project', cli:'codex', initialPrompt:'Work', enabled:true, revision:1, projectPaths:['C:\\UNAVAILABLE'] });
+    await page.getByRole('button', { name:'Manage all projects', exact:true }).click();
+    await page.getByRole('button', { name:'Missing project', exact:true }).click();
+    const editor = page.locator('[data-launch-editor]');
+    await expect(editor).toContainText('Previously selected project');
+    state.conflict = true;
+    await editor.locator('[data-launch-field="name"]').fill('Still scoped');
+    await editor.locator('[data-launch-save]').click();
+    await expect(editor.locator('[data-launch-error]')).toContainText('Your draft is kept');
+    await expect(editor.locator('#launch-projects')).toHaveValues(['C:\\UNAVAILABLE']);
+    state.conflict = false;
+    await editor.locator('[data-launch-save]').click();
+    await expect.poll(() => state.presets[0]?.name).toBe('Still scoped');
+    expect(state.presets[0].projectPaths).toEqual(['C:\\UNAVAILABLE']);
+});
+
+test('scope refresh excludes launch choices while preserving saved Board selections and management', async ({ page }) => {
+    const state = await setup(page);
+    state.presets.push({id:'local',name:'Local agent',cli:'codex',initialPrompt:'Work',enabled:true,revision:1},
+        {id:'elsewhere',name:'Elsewhere agent',cli:'codex',initialPrompt:'Work',enabled:true,revision:1,projectPaths:['C:\\FIXTURES\\OTHER']});
+    await page.locator('[data-agent-refresh]').click();
+    await expect(page.locator('[data-agent-edit="local"]')).toBeVisible();
+    const visibleKeys = await page.evaluate(() => ({
+        terminal: window.app.llmPickerController.getItems('terminal').map(x => x.key),
+        board: window.app.llmPickerController.getItems('assignee', {includeHidden:true}).map(x => x.key)
+    }));
+    expect(visibleKeys.terminal).toContain('preset:local:codex');
+    expect(visibleKeys.terminal).not.toContain('preset:elsewhere:codex');
+    expect(visibleKeys.board).not.toContain('preset:elsewhere:codex');
+    await page.getByRole('button', {name:'Launch an agent or automation',exact:true}).click();
+    await expect(page.locator('[data-launch-id="local"]')).toBeVisible();
+    await expect(page.locator('[data-launch-id="elsewhere"]')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', {name:'Manage all projects',exact:true}).click();
+    await expect(page.getByRole('button', {name:'Elsewhere agent',exact:true})).toBeVisible();
+    await page.evaluate(async () => {
+        const select = document.createElement('select');
+        select.id = 'scope-board-fixture';
+        document.querySelector('#app-content').append(select);
+        window.app.llmPickerController.mount(select, {context:'assignee',includeHidden:true,selectedValue:'preset:elsewhere:codex'});
+    });
+    await expect(page.locator('#scope-board-fixture option:checked')).toContainText('unavailable in this project');
+    // Simulate a saved scope change, then exercise the same refresh as the editor.
+    state.presets[1].projectPaths = [];
+    await page.locator('[data-agent-refresh]').click();
+    await expect.poll(() => page.evaluate(() => window.app.llmPickerController.getItems('assignee',{includeHidden:true}).map(x=>x.key)))
+        .toContain('preset:elsewhere:codex');
+});
 
 for (const surface of ['catalog', 'dropdown']) {
     for (const type of ['preset', 'action']) {

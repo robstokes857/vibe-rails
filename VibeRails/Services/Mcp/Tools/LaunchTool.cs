@@ -11,10 +11,14 @@ namespace VibeRails.Services.Mcp.Tools;
 
 /// <summary>Local-user definitions and project-scoped admission through the same boundary as HTTP.</summary>
 [McpServerToolType]
-public sealed class LaunchTool(LaunchService service, ILaunchStore store, IBoardProjectResolver projects)
+public sealed class LaunchTool(LaunchService service, ILaunchStore store, IBoardProjectResolver projects, VibeRails.DB.IRepository? repository = null)
 {
-    [McpServerTool, Description("List global AI Agents, Quick Launches and single Actions, with current-project eligibility. Definitions never grant access to another project.")]
-    public async Task<LaunchCatalog> ListLaunchCatalog(CancellationToken ct = default) => await service.CatalogAsync(await projects.ResolveAsync(ct), ct);
+    [McpServerTool, Description("List AI Agents, Quick Launches and single Actions available in this project. includeAll=true includes definitions scoped elsewhere for management, with eligibility reasons. Definitions never grant access to another project.")]
+    public async Task<LaunchCatalog> ListLaunchCatalog(CancellationToken ct = default, bool includeAll = false) => await service.CatalogAsync(await projects.ResolveAsync(ct), ct, includeAll);
+
+    [McpServerTool, Description("List known local projects, including closed windows, with stable path IDs and display names. Use these IDs in a definition's projectPaths. No repository scan is performed.")]
+    public async Task<IReadOnlyList<LaunchProject>> ListLaunchProjects(CancellationToken ct = default) =>
+        await LaunchProjects.ListAsync(repository ?? throw new LaunchValidationException("Project discovery is unavailable."), await projects.ResolveAsync(ct), ct);
 
     [McpServerTool, Description("Read one saved definition by stable ID. type is preset or action.")]
     public async Task<string> GetLaunchDefinition(string id, string type = "preset", CancellationToken ct = default) => type switch
@@ -24,10 +28,10 @@ public sealed class LaunchTool(LaunchService service, ILaunchStore store, IBoard
         _ => throw new LaunchValidationException("Use preset or action.")
     };
 
-    [McpServerTool, Description("Create or save a global Agent/Quick Launch. Omit id to create. expectedRevision prevents lost updates; blank initialPrompt means manual Quick Launch. Never copies CLI homes.")]
+    [McpServerTool, Description("Create or save an Agent/Quick Launch. Omit id to create. expectedRevision prevents lost updates; blank initialPrompt means manual Quick Launch. projectPaths selects local project IDs; [] means all projects, omission preserves scope on edit. Never copies CLI homes.")]
     public Task<SavedPreset> SaveLaunchPreset(SavePresetRequest definition, string? id = null, CancellationToken ct = default) => service.SavePresetAsync(id, definition, ct);
 
-    [McpServerTool, Description("Create or save exactly one script, VCA or code-quality Action. Script bytes are approved only for the current project. Omit id to create; use expectedRevision to edit.")]
+    [McpServerTool, Description("Create or save exactly one script, VCA or code-quality Action. Script bytes are approved only for the current project. Omit id to create; use expectedRevision to edit. projectPaths selects local project IDs; [] means all projects, omission preserves scope on edit.")]
     public async Task<LaunchAction> SaveLaunchAction(SaveActionRequest definition, string? id = null, CancellationToken ct = default) => await service.SaveActionAsync(await projects.ResolveAsync(ct), id, definition, ct);
 
     [McpServerTool, Description("Retire a definition by ID and expectedRevision, preserving history and attachments. type is preset or action.")]

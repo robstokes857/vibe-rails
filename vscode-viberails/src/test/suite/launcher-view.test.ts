@@ -20,6 +20,20 @@ function dependencies(overrides: Partial<RunLauncherDependencies> = {}) {
     return { deps, calls, errors, messages, refreshes: () => refreshes };
 }
 suite('Global launch catalog', () => {
+    test('refresh drops definitions removed by project scope and stale direct runs report server rejection', async () => {
+        let entries = [item('local'), item('elsewhere', { definitionType: 'action' })];
+        const provider = new LauncherTreeDataProvider({ isBackendReady: () => true, fetchItems: async () => ({ items: entries }) });
+        await provider.refresh();
+        assert.equal(provider.getItems().length, 2);
+        const stale = entries[1];
+        entries = [entries[0]];
+        await provider.refresh();
+        assert.deepEqual(provider.getItems().map(entry => entry.id), ['local']);
+        const state = dependencies({ request: async () => { throw new BackendRequestError(400, 'This definition is not available in this project.'); } });
+        await runLauncherItem(stale, state.deps);
+        assert.match(state.errors[0], /not available in this project/);
+        provider.dispose();
+    });
     test('retains stable identity and unavailable entries without accepting legacy jobs', () => {
         const entries = normalizeLauncherItems([item(), item('retired', { retired: true }),
             { key: 'job:1', jobId: 1, name: 'Legacy' }, null]);

@@ -530,7 +530,7 @@ export function enhanceSelectWithTomSelect(selectEl, options = {}) {
         placeholder,
         allowEmptyOption: true,
         maxOptions: null,
-        plugins: searchable ? ['dropdown_input'] : [],
+        plugins: [...(searchable ? ['dropdown_input'] : []), ...(selectEl.multiple ? ['remove_button'] : [])],
         // Escape clipping cards, but stay in a native dialog's top layer when present.
         // A body-mounted menu would be inert behind that modal.
         dropdownParent: selectEl.closest('dialog') || 'body',

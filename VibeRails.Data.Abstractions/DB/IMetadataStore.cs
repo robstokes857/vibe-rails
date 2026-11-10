@@ -4,6 +4,9 @@ namespace VibeRails.DB;
 
 public interface IMetadataStore
 {
+    /// <summary>Previously seen local roots from cached project detection, sessions and sandboxes; never scans disk.</summary>
+    Task<IReadOnlyList<string>> GetKnownProjectPathsAsync(CancellationToken cancellationToken = default);
+
     Task<string> GetProjectDisplayNameAsync(string path, CancellationToken cancellationToken = default);
 
     Task<bool> UpdateLatestProjectDisplayNameAsync(string path, string projectDisplayName, CancellationToken cancellationToken = default);

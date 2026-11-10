@@ -2,6 +2,15 @@
 
 ## Unified AI Agents and shared editor (VIBE-294)
 
+VIBE-307: the shared editor's Projects multi-select uses `launch-project-picker.js` and
+known local roots from `/launch-projects`. Empty means All projects; missing selected
+IDs must survive discovery failures/removal. AI Agents defaults to this project and
+offers **Manage all projects** for editing definitions scoped elsewhere. Catalogs and
+LLM picker preferences expose `inProject`; exclude false entries from launch choices,
+including Board's `includeHidden` lists, while retaining an unavailable saved selection.
+Scope edits refresh preferences, Quick actions and the VS Code launch tree. Shared
+admission enforces scope for direct requests and retries as well as picker launches.
+
 `ai-agents-controller.js` owns the one **AI Agents** view: global Agents, Quick Launches
 and individual Actions. `automations`/`jobs` URLs redirect to that controller; they do not
 mount the retired Environment or multi-step Job editors. The terminal picker includes

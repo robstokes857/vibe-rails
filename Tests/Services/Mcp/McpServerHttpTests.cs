@@ -53,7 +53,7 @@ public class McpServerHttpTests : IAsyncLifetime
         "save_pr_review_draft",
         "complete_pr_review",
         "retry_pr_review_publish",
-        "list_launch_catalog", "get_launch_definition", "save_launch_preset", "save_launch_action",
+        "list_launch_catalog", "list_launch_projects", "get_launch_definition", "save_launch_preset", "save_launch_action",
         "retire_launch_definition", "list_launch_bindings", "save_launch_binding", "run_launch",
         "get_launch_run", "list_launch_runs", "cancel_launch_run", "retry_launch_run", "resolve_uncertain_launch_run",
         "list_launch_attachments", "add_launch_attachment", "read_launch_attachment", "read_launch_run_attachment", "remove_launch_attachment",

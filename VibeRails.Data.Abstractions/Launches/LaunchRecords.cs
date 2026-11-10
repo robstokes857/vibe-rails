@@ -7,7 +7,7 @@ namespace VibeRails.Launches;
 public sealed record LaunchPreset(string Id, string Name, string Description, LLM Cli,
     LaunchOptions Options, string[] AdditionalArgv, string? InitialPrompt, bool Enabled,
     long Revision, DateTime CreatedUtc, DateTime UpdatedUtc, DateTime? RetiredUtc = null,
-    int? TimeoutMinutes = null, string Purpose = "work")
+    int? TimeoutMinutes = null, string Purpose = "work", string[]? ProjectPaths = null)
 {
     public string Kind => string.IsNullOrWhiteSpace(InitialPrompt) ? "quick-launch" : "agent";
 }
@@ -25,7 +25,7 @@ public sealed record OpenCodeLaunchOptions(bool DisablePlugins = false);
 /// <summary>Exactly one typed action, never an ordered array of actions.</summary>
 public sealed record LaunchAction(string Id, string Name, string Description, string Kind,
     ScriptAction? Script, CheckAction? Check, bool Enabled, long Revision,
-    DateTime CreatedUtc, DateTime UpdatedUtc, DateTime? RetiredUtc = null);
+    DateTime CreatedUtc, DateTime UpdatedUtc, DateTime? RetiredUtc = null, string[]? ProjectPaths = null);
 
 public sealed record ScriptAction(string Path, JobScriptRuntime Runtime, string[] Arguments,
     string? WorkingDirectory = null, int? TimeoutSeconds = null);

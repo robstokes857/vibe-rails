@@ -272,6 +272,7 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET, POST, PUT, PATCH, DELETE | `/api/v1/board/columns/{column}/automation/{**rest}` | [RetiredLaunchRoutes.cs](VibeRails/Routes/RetiredLaunchRoutes.cs); 410, no legacy data access |
 | GET, POST, PUT, PATCH, DELETE | `/api/v1/cli/launch/{cli}` | [RetiredLaunchRoutes.cs](VibeRails/Routes/RetiredLaunchRoutes.cs); 410, no legacy data access |
 | GET | `/api/v1/launch-catalog` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
+| GET | `/api/v1/launch-projects` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only, both credentials required |
 | GET, POST | `/api/v1/presets` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
 | GET, PUT | `/api/v1/presets/{id}` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
 | POST | `/api/v1/presets/{id}/retire` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
@@ -668,7 +669,14 @@ target `'*'`, and data goes over the transferred port
 
 ### MCP and agent launches
 
-Launch definitions are global in `launches.db`; execution remains project-scoped.
+Launch definitions are shared in `launches.db`, with optional local-project membership.
+Empty membership means all projects; names never determine membership. Catalogs filter
+to the current project by default; explicit management reads retain access to every
+definition. Shared admission and the transactional enqueue boundary enforce current
+membership for every new run, including retries. Scope grants no project access and
+does not replace per-project script approval. Already-admitted snapshots are retained.
+Known-project discovery reads saved local roots and includes the current root without
+scanning the machine. These routes and MCP tools add no listener or credential grants.
 HTTP derives scope from the root resolver, Board from its card/board, and schedules
 from their saved binding. Launch claims travel only from the authenticated root
 to its tab child; claim tokens are excluded from public run JSON. Child start

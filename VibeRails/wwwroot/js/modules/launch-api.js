@@ -10,8 +10,11 @@ export class LaunchApi {
             ...options
         });
     }
-    catalog(options) {
-        return this.call('launch-catalog', 'GET', null, options);
+    catalog({ includeAll = false, ...options } = {}) {
+        return this.call(`launch-catalog${includeAll ? '?includeAll=true' : ''}`, 'GET', null, options);
+    }
+    projects(options) {
+        return this.call('launch-projects', 'GET', null, options);
     }
     definition(type, id, options) {
         return this.call(

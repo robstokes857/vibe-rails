@@ -45,7 +45,7 @@ public sealed partial class LaunchStore
         // Validate the definition the run will actually execute: a retry's is the source run's, swapped
         // in above, never whatever the caller passed in (VIBE-296).
         await RequireAvailable(db, tx, snapshot.DefinitionType, snapshot.DefinitionId,
-            sourceRunId is null ? snapshot.Revision : null,
+            sourceRunId is null ? snapshot.Revision : null, snapshot.Context.ProjectPath,
             automatic: sourceRunId is null && snapshot.Context.TriggerKind != "manual", ct);
         var id = "run_" + Guid.NewGuid().ToString("N");
         using (var cmd = Command(db, """

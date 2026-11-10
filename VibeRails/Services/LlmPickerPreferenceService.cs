@@ -20,7 +20,8 @@ public interface ILlmPickerPreferenceService
 
 public sealed class LlmPickerPreferenceValidationException(string message) : Exception(message);
 
-public sealed partial class LlmPickerPreferenceService(IRepository repository, VibeRails.Launches.ILaunchStore? launches = null) : ILlmPickerPreferenceService
+public sealed partial class LlmPickerPreferenceService(IRepository repository, VibeRails.Launches.ILaunchStore? launches = null,
+    VibeRails.Services.Board.IBoardProjectResolver? projects = null) : ILlmPickerPreferenceService
 {
     public const string CacheKey = "ui.llm-picker.launches.v1";
     internal const int DocumentVersion = 1;
@@ -51,7 +52,7 @@ public sealed partial class LlmPickerPreferenceService(IRepository repository, V
         var environments = launches is null ? [] : await launches.ListPresetsAsync(cancellationToken);
         var documentJson = await _repository.GetGlobalCacheValueAsync(CacheKey, cancellationToken);
         var document = DeserializeDocument(documentJson);
-        return Resolve(environments, document);
+        return Resolve(environments, document, await CurrentProjectAsync(cancellationToken));
     }
 
     public async Task<LlmPickerPreferencesResponse> SaveAsync(
@@ -59,7 +60,7 @@ public sealed partial class LlmPickerPreferenceService(IRepository repository, V
         CancellationToken cancellationToken = default)
     {
         var environments = launches is null ? [] : await launches.ListPresetsAsync(cancellationToken);
-        var currentCatalog = Resolve(environments, document: null).Items;
+        var currentCatalog = Resolve(environments, null, await CurrentProjectAsync(cancellationToken)).Items;
         var normalized = ValidateAndNormalize(request.Items, currentCatalog);
 
         var baseItems = normalized
@@ -93,12 +94,15 @@ public sealed partial class LlmPickerPreferenceService(IRepository repository, V
         var environments = launches is null ? [] : await launches.ListPresetsAsync(cancellationToken);
         await _repository.SetGlobalCacheValueAsync(CacheKey, "", cancellationToken);
 
-        return Resolve(environments, document: null);
+        return Resolve(environments, null, await CurrentProjectAsync(cancellationToken));
     }
+
+    private async Task<string> CurrentProjectAsync(CancellationToken ct) =>
+        projects is null ? ParserConfigs.GetRootPath() : await projects.ResolveAsync(ct);
 
     private static LlmPickerPreferencesResponse Resolve(
         IReadOnlyCollection<VibeRails.Launches.LaunchPreset> environments,
-        LlmPickerPreferenceDocument? document)
+        LlmPickerPreferenceDocument? document, string project)
     {
         var baseCatalog = CanonicalBaseItems
             .Select(item => new LlmPickerPreferenceItem(
@@ -115,7 +119,9 @@ public sealed partial class LlmPickerPreferenceService(IRepository repository, V
         var environmentCatalog = environments.Where(p => p.RetiredUtc is null)
             .Select(p => new LlmPickerPreferenceItem(
                 $"preset:{p.Id}:{ToPickerCli(p.Cli)}", p.Kind, EnvironmentGroup, p.Name,
-                ToPickerCli(p.Cli), null, Enabled: p.Enabled, Order: 0)).ToList();
+                ToPickerCli(p.Cli), null, Enabled: p.Enabled, Order: 0,
+                InProject: p.ProjectPaths is not { Length: > 0 } || !string.IsNullOrWhiteSpace(project)
+                    && VibeRails.Launches.LaunchProjectScope.Includes(p.ProjectPaths, project))).ToList();
 
         var disabledBaseKeys = document?.Version == DocumentVersion
             ? document.DisabledBaseKeys.Select(CanonicalizeSavedKey).ToHashSet(StringComparer.Ordinal)
@@ -235,7 +241,7 @@ public sealed partial class LlmPickerPreferenceService(IRepository repository, V
             normalized.AddRange(submitted
                 .Where(item => item.Group == group)
                 .OrderBy(item => item.Order)
-                .Select((item, index) => item with { Order = index }));
+                .Select((item, index) => item with { Order = index, InProject = expectedByKey[item.Key].InProject }));
         }
 
         return normalized;

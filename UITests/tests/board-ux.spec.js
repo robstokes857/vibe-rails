@@ -4308,7 +4308,8 @@ async function installLaunchFixture(page, { conflict = false } = {}) {
         { id:'preset_quick',definitionType:'preset',kind:'quick-launch',name:'Quick',cli:'codex',enabled:true,canLaunch:true,canRunAutomatically:false }
     ];
     const state={items,conflict,writes:[],revision:3,selections:[{definitionId:'preset_review',definitionType:'preset',gate:'review'},{definitionId:'action_check',definitionType:'action',gate:'result'}],activity:[],runs:[],posts:0,skips:0,retries:0};
-    await page.route('**/api/v1/launch-catalog',route=>route.fulfill({json:{items}}));
+    await page.route('**/api/v1/launch-catalog*',route=>route.fulfill({json:{items}}));
+    await page.route('**/api/v1/launch-projects',route=>route.fulfill({json:[]}));
     await page.route('**/api/v1/board/columns/*/launches',async route=>{
         if(route.request().method()==='PUT'){
             const body=route.request().postDataJSON();state.writes.push(body);

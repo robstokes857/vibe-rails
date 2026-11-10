@@ -702,7 +702,8 @@ namespace VibeRails.DTOs
         string Cli,
         int? EnvironmentId,
         bool Enabled,
-        int Order
+        int Order,
+        bool InProject = true
     );
 
     public record LlmPickerPreferencesResponse(
@@ -2300,6 +2301,7 @@ namespace VibeRails.DTOs
 [JsonSerializable(typeof(ResolveUncertainLaunchRequest))]
 [JsonSerializable(typeof(LaunchError))]
 [JsonSerializable(typeof(LaunchCatalog))]
+[JsonSerializable(typeof(IReadOnlyList<LaunchProject>))]
 [JsonSerializable(typeof(IReadOnlyList<LaunchLaneEntry>))]
 [JsonSerializable(typeof(SavedPreset))]
 [JsonSerializable(typeof(LaunchAction))]

@@ -172,10 +172,11 @@ public sealed class AppJsonSerializerContextTests
             AppJsonSerializerContext.Default.UpdateLlmPickerPreferencesRequest);
 
         Assert.Equal(
-            """{"items":[{"key":"base:claude","kind":"base","group":"Base CLIs","label":"Claude","cli":"claude","environmentId":null,"enabled":true,"order":0}]}""",
+            """{"items":[{"key":"base:claude","kind":"base","group":"Base CLIs","label":"Claude","cli":"claude","environmentId":null,"enabled":true,"order":0,"inProject":true}]}""",
             json);
         Assert.NotNull(request);
         Assert.False(Assert.Single(request!.Items!).Enabled);
+        Assert.True(Assert.Single(request.Items!).InProject);
     }
 
     [Fact]

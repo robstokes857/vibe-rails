@@ -15,28 +15,66 @@ public sealed partial class LaunchStore
     private async Task<IReadOnlyList<T>> ListAsync<T>(string table, JsonTypeInfo<T> type, CancellationToken ct)
     {
         using var db = Open();
-        using var cmd = Command(db, $"SELECT Payload FROM {table} ORDER BY Name, Id;");
+        using var tx = db.BeginTransaction(deferred: true);
+        using var cmd = Command(db, $"SELECT Payload FROM {table} ORDER BY Name, Id;", tx);
         using var reader = await cmd.ExecuteReaderAsync(ct);
         List<T> results = [];
         while (await reader.ReadAsync(ct)) results.Add(JsonSerializer.Deserialize(reader.GetString(0), type)!);
+        reader.Close();
+        for (var i = 0; i < results.Count; i++) results[i] = await WithScope(db, tx, results[i], ct);
         return results;
     }
 
     public async Task<LaunchPreset?> GetPresetAsync(string id, CancellationToken ct = default)
     {
         using var db = Open();
-        return await ReadDefinition(db, null, "LaunchPresets", id, StorageJsonSerializerContext.Default.LaunchPreset, ct);
+        using var tx = db.BeginTransaction(deferred: true);
+        return await ReadDefinition(db, tx, "LaunchPresets", id, StorageJsonSerializerContext.Default.LaunchPreset, ct);
     }
     public async Task<LaunchAction?> GetActionAsync(string id, CancellationToken ct = default)
     {
         using var db = Open();
-        return await ReadDefinition(db, null, "Actions", id, StorageJsonSerializerContext.Default.LaunchAction, ct);
+        using var tx = db.BeginTransaction(deferred: true);
+        return await ReadDefinition(db, tx, "Actions", id, StorageJsonSerializerContext.Default.LaunchAction, ct);
     }
     private static async Task<T?> ReadDefinition<T>(SqliteConnection db, SqliteTransaction? tx, string table,
         string id, JsonTypeInfo<T> type, CancellationToken ct)
     {
         using var cmd = Command(db, $"SELECT Payload FROM {table} WHERE Id=$id;", tx, ("$id", id));
-        return await cmd.ExecuteScalarAsync(ct) is string json ? JsonSerializer.Deserialize(json, type) : default;
+        return await cmd.ExecuteScalarAsync(ct) is string json
+            ? await WithScope(db, tx, JsonSerializer.Deserialize(json, type)!, ct) : default;
+    }
+
+    private static async Task<T> WithScope<T>(SqliteConnection db, SqliteTransaction? tx, T value, CancellationToken ct)
+    {
+        return value switch
+        {
+            LaunchPreset p => (T)(object)(p with { ProjectPaths = await ReadScope(db, tx, "preset", p.Id, ct) }),
+            LaunchAction a => (T)(object)(a with { ProjectPaths = await ReadScope(db, tx, "action", a.Id, ct) }),
+            _ => value
+        };
+    }
+
+    private static async Task<string[]> ReadScope(SqliteConnection db, SqliteTransaction? tx, string type, string id, CancellationToken ct)
+    {
+        using var cmd = Command(db, "SELECT ProjectKey FROM DefinitionProjects WHERE DefinitionType=$type AND DefinitionId=$id ORDER BY ProjectKey;",
+            tx, ("$type", type), ("$id", id));
+        using var reader = await cmd.ExecuteReaderAsync(ct);
+        List<string> paths = [];
+        while (await reader.ReadAsync(ct)) paths.Add(reader.GetString(0));
+        return paths.ToArray();
+    }
+
+    private static async Task SaveScope(SqliteConnection db, SqliteTransaction tx, string type, string id, string[] paths, CancellationToken ct)
+    {
+        using var clear = Command(db, "DELETE FROM DefinitionProjects WHERE DefinitionType=$type AND DefinitionId=$id;", tx, ("$type", type), ("$id", id));
+        await clear.ExecuteNonQueryAsync(ct);
+        foreach (var path in paths)
+        {
+            using var insert = Command(db, "INSERT INTO DefinitionProjects(DefinitionType,DefinitionId,ProjectKey) VALUES($type,$id,$path);",
+                tx, ("$type", type), ("$id", id), ("$path", path));
+            await insert.ExecuteNonQueryAsync(ct);
+        }
     }
 
     public async Task<LaunchPreset> SavePresetAsync(LaunchPreset preset, long expectedRevision, CancellationToken ct = default)
@@ -47,7 +85,8 @@ public sealed partial class LaunchStore
         RequireRevision(current?.Revision, expectedRevision);
         if (current?.RetiredUtc is not null) throw new LaunchConflictException("This preset is retired. Create a new preset.", current.Revision);
         var now = DateTime.UtcNow;
-        preset = preset with { Revision = expectedRevision + 1, CreatedUtc = current?.CreatedUtc ?? now, UpdatedUtc = now };
+        preset = preset with { Revision = expectedRevision + 1, CreatedUtc = current?.CreatedUtc ?? now, UpdatedUtc = now,
+            ProjectPaths = LaunchProjectScope.Normalize(preset.ProjectPaths) ?? current?.ProjectPaths ?? [] };
         using var cmd = Command(db, """
             INSERT INTO LaunchPresets(Id,Name,Description,Cli,InitialPrompt,Enabled,Revision,CreatedUTC,UpdatedUTC,RetiredUTC,Payload)
             VALUES($id,$name,$description,$cli,$prompt,$enabled,$revision,$created,$updated,$retired,$payload)
@@ -58,8 +97,9 @@ public sealed partial class LaunchStore
             ("$cli", (int)preset.Cli), ("$prompt", preset.InitialPrompt), ("$enabled", preset.Enabled),
             ("$revision", preset.Revision), ("$created", Stamp(preset.CreatedUtc)), ("$updated", Stamp(now)),
             ("$retired", preset.RetiredUtc is { } retired ? Stamp(retired) : null),
-            ("$payload", JsonSerializer.Serialize(preset, StorageJsonSerializerContext.Default.LaunchPreset)));
+            ("$payload", JsonSerializer.Serialize(preset with { ProjectPaths = null }, StorageJsonSerializerContext.Default.LaunchPreset)));
         await cmd.ExecuteNonQueryAsync(ct);
+        await SaveScope(db, tx, "preset", preset.Id, preset.ProjectPaths, ct);
         tx.Commit();
         return preset;
     }
@@ -75,7 +115,8 @@ public sealed partial class LaunchStore
         RequireRevision(current?.Revision, expectedRevision);
         if (current?.RetiredUtc is not null) throw new LaunchConflictException("This Action is retired. Create a new Action.", current.Revision);
         var now = DateTime.UtcNow;
-        action = action with { Revision = expectedRevision + 1, CreatedUtc = current?.CreatedUtc ?? now, UpdatedUtc = now };
+        action = action with { Revision = expectedRevision + 1, CreatedUtc = current?.CreatedUtc ?? now, UpdatedUtc = now,
+            ProjectPaths = LaunchProjectScope.Normalize(action.ProjectPaths) ?? current?.ProjectPaths ?? [] };
         using var cmd = Command(db, """
             INSERT INTO Actions(Id,Name,Description,Kind,Enabled,Revision,CreatedUTC,UpdatedUTC,RetiredUTC,Payload)
             VALUES($id,$name,$description,$kind,$enabled,$revision,$created,$updated,$retired,$payload)
@@ -86,8 +127,9 @@ public sealed partial class LaunchStore
             ("$kind", action.Kind), ("$enabled", action.Enabled), ("$revision", action.Revision),
             ("$created", Stamp(action.CreatedUtc)), ("$updated", Stamp(now)),
             ("$retired", action.RetiredUtc is { } retired ? Stamp(retired) : null),
-            ("$payload", JsonSerializer.Serialize(action, StorageJsonSerializerContext.Default.LaunchAction)));
+            ("$payload", JsonSerializer.Serialize(action with { ProjectPaths = null }, StorageJsonSerializerContext.Default.LaunchAction)));
         await cmd.ExecuteNonQueryAsync(ct);
+        await SaveScope(db, tx, "action", action.Id, action.ProjectPaths, ct);
         if (hash is not null)
         {
             using var approval = Command(db, "INSERT OR IGNORE INTO ScriptApprovals VALUES($project,$id,$hash,$now);", tx,
@@ -129,7 +171,7 @@ public sealed partial class LaunchStore
         RequireRevision(current?.Revision, expectedRevision);
         if (current is not null && current.ProjectPath != binding.ProjectPath)
             throw new LaunchValidationException("A binding belongs to its original project.");
-        if (binding.Enabled) await RequireAvailable(db, tx, binding.DefinitionType, binding.DefinitionId, null, automatic: true, ct);
+        if (binding.Enabled) await RequireAvailable(db, tx, binding.DefinitionType, binding.DefinitionId, null, binding.ProjectPath, automatic: true, ct);
         var now = DateTime.UtcNow;
         binding = binding with { Revision = expectedRevision + 1, CreatedUtc = current?.CreatedUtc ?? now, UpdatedUtc = now };
         using var cmd = Command(db, """
@@ -155,7 +197,7 @@ public sealed partial class LaunchStore
     }
 
     private static async Task RequireAvailable(SqliteConnection db, SqliteTransaction tx, string type, string id,
-        long? revision, bool automatic, CancellationToken ct)
+        long? revision, string project, bool automatic, CancellationToken ct)
     {
         var table = type switch { "preset" => "LaunchPresets", "action" => "Actions", _ => throw new LaunchValidationException("Unknown definition type.") };
         using var cmd = Command(db, $"SELECT Revision,Enabled,RetiredUTC{(type == "preset" ? ",InitialPrompt" : "")} FROM {table} WHERE Id=$id;", tx, ("$id", id));
@@ -166,6 +208,8 @@ public sealed partial class LaunchStore
             throw new LaunchConflictException("This definition changed before enqueue. Run again to use its current revision.", reader.GetInt64(0));
         if (automatic && type == "preset" && (reader.IsDBNull(3) || string.IsNullOrWhiteSpace(reader.GetString(3))))
             throw new LaunchValidationException("A Quick Launch cannot run automatically. Add an initial prompt or choose an Agent.");
+        reader.Close();
+        LaunchProjectScope.Require(await ReadScope(db, tx, type, id, ct), project);
     }
 
     public async Task ApproveScriptAsync(string projectPath, string definitionId, string hash, CancellationToken ct = default)

@@ -21,6 +21,57 @@ approve its own script content. Check findings remain separate from a configured
 minimum-grade failure. Check evidence and terminal session references are saved;
 terminal transcripts stay in the existing recording store.
 
+## Project scope (VIBE-307)
+
+Agents, Quick Launches and Actions have optional `projectPaths`. An empty array
+means **All projects**. New definitions default to that behavior; omission or null
+on an update preserves the existing selection. A scope change uses the same
+`expectedRevision` as every other definition edit. `ILaunchStore` saves the definition,
+scope and any script approval in one transaction, so stale edits cannot partially apply.
+
+Membership uses `LaunchProjectScope.Key`: a full local root path without its trailing
+separator, upper-cased on Windows/macOS as with existing launch project keys. Editable
+display names and Git remotes never identify projects. Independently opened clones
+and worktrees are separate scopes. A Board-launched session retains its owning
+project through the existing project resolver, even when working in a managed worktree.
+Path aliases/symlinks are not resolved into a shared identity;
+use the known root offered by VibeRails. Case-sensitive volumes on Windows/macOS retain
+the existing platform-level path-comparison limitation.
+
+`GET /launch-projects` and MCP `list_launch_projects` return known cached roots,
+session projects and sandboxes, plus the current project, with `{id,name,path,isCurrent}`.
+Closed windows and temporarily absent directories are included; no repository scan
+is performed. Names use the same saved display-name reader as Settings. The editor
+keeps previously selected IDs even when discovery no longer returns them.
+
+The default catalog contains this project's definitions. `GET /launch-catalog?includeAll=true`
+(MCP `includeAll:true`) provides all definitions for management, with `inProject`,
+`canLaunch` and an ineligibility reason. Individual definition reads and list routes
+remain global. **Manage all projects** on AI Agents deliberately exposes this view.
+The terminal/Board preferences catalog retains all entries and their saved order,
+annotating `inProject`; launch pickers exclude out-of-project entries even when hidden
+items are otherwise included. Saved selections remain visible as unavailable.
+Quick actions and the VS Code launch tree use the same project catalog and eligibility.
+
+Scope is enforced for every new admission, including HTTP/MCP, Board, schedule and Git
+events. The store rechecks it under the enqueue writer transaction, including retries
+of original snapshots. Repeated delivery of an already-admitted occurrence still
+returns that run. Narrowing scope does not cancel or rewrite admitted runs or running
+processes, bindings, Board selections or history. Existing disable/retire and script
+content checks still apply at execution. Retrying a completed run requires current
+scope eligibility even though its original execution inputs remain immutable.
+
+All projects means availability, never new schedules, fan-out or script approval.
+An unchanged script definition can be managed from outside its scope, or when its
+file is unavailable here, without approving its bytes in that project; changed script payloads still require normal
+validation. A newly allowed project must explicitly approve its own script content.
+
+`launches/4` automatically creates the additive `DefinitionProjects` mapping table;
+zero mappings means global. Reads overlay it on the definition JSON. Older writers
+that omit unknown JSON fields cannot erase mappings. Older executables **do not enforce
+project scope**; additive storage compatibility cannot change their launch behavior.
+No schema generation bump, backfill, data conversion or manual migration is required.
+
 ## Frontend contract (VIBE-292 / VB-4OG9T-366)
 
 The source contracts are `LaunchContract.cs` and
@@ -32,7 +83,8 @@ the existing local-user project resolver.
 
 | Route | Contract |
 | --- | --- |
-| `GET /launch-catalog` | `{items}` with stable ID, definition type, derived kind, revision, capabilities and project eligibility/reason |
+| `GET /launch-catalog` | `{items}` with stable ID, definition type, derived kind, revision, capabilities and project eligibility/reason; `includeAll=true` for management |
+| `GET /launch-projects` | Known local project IDs, saved display names and paths, including the current project |
 | `GET /presets`, `GET /presets/{id}` | Global preset records |
 | `POST /presets`, `PUT /presets/{id}` | `SavePresetRequest`; returns `{preset,affectedBindings}` |
 | `GET /actions`, `GET /actions/{id}` | Global single Action records |

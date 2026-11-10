@@ -1,5 +1,6 @@
 import { escapeHtml, confirmDialog } from './utils.js';
 import { launchPresentation } from './launch-presentation.js';
+import { launchProjectField, mountLaunchProjects } from './launch-project-picker.js';
 import {
     LaunchApi,
     attachmentForEditor,
@@ -68,6 +69,19 @@ export class AiAgentsController {
         this.root
             .querySelector('[data-agent-refresh]')
             .addEventListener('click', () => void this.refresh());
+        const management = document.createElement('button');
+        management.className = 'btn btn-secondary';
+        management.dataset.agentManageAll = '';
+        management.textContent = 'Manage all projects';
+        management.setAttribute('aria-pressed', 'false');
+        this.root.querySelector('.vb-page-actions').append(management);
+        management.addEventListener('click', () => {
+            this.manageAll = !this.manageAll;
+            management.setAttribute('aria-pressed', String(this.manageAll));
+            management.textContent = this.manageAll ? 'Show this project' : 'Manage all projects';
+            void this.refresh();
+        });
+        this.manageAll = false;
         this.root
             .querySelector('[data-agent-catalog]')
             .addEventListener('click', (event) => {
@@ -94,7 +108,7 @@ export class AiAgentsController {
         this.loadAbort?.abort();
         const abort = (this.loadAbort = new AbortController());
         try {
-            const catalog = await this.api.catalog({ signal: abort.signal });
+            const catalog = await this.api.catalog({ signal: abort.signal, includeAll: this.manageAll });
             if (abort.signal.aborted) return;
             const signature = JSON.stringify(catalog.items);
             if (this.catalogSignature !== signature)
@@ -211,16 +225,17 @@ export class AiAgentsController {
     async openEditor(type = 'preset', id = null) {
         this.editorLoad?.abort();
         const abort = (this.editorLoad = new AbortController());
-        let saved, initialBindings, attachments;
+        let saved, initialBindings, attachments, projects;
         try {
-            [saved, initialBindings, attachments] = await Promise.all([
+            [saved, initialBindings, attachments, projects] = await Promise.all([
                 id
                     ? this.api.definition(type, id, { signal: abort.signal })
                     : null,
                 id ? this.api.bindings(id, { signal: abort.signal }) : [],
                 id && type === 'preset'
                     ? this.api.attachments(id, { signal: abort.signal })
-                    : []
+                    : [],
+                this.api.projects({ signal: abort.signal })
             ]);
         } catch (error) {
             if (!abort.signal.aborted)
@@ -300,7 +315,7 @@ export class AiAgentsController {
                         ? attachmentSection(attachments.length)
                         : '',
                     activity: runHistorySection(),
-                    sidebar: `<div class="board-side-fields">${isPreset ? `<label>Provider<select class="form-select" data-launch-provider aria-label="Provider"></select></label><div data-definition-launch-options></div>` : this.actionFields(saved)}<label class="card-editor-switch-row"><span>Enabled</span><input class="card-editor-switch" type="checkbox" role="switch" data-launch-enabled${saved?.enabled !== false ? ' checked' : ''}></label>${
+                    sidebar: `<div class="board-side-fields">${launchProjectField()}${isPreset ? `<label>Provider<select class="form-select" data-launch-provider aria-label="Provider"></select></label><div data-definition-launch-options></div>` : this.actionFields(saved)}<label class="card-editor-switch-row"><span>Enabled</span><input class="card-editor-switch" type="checkbox" role="switch" data-launch-enabled${saved?.enabled !== false ? ' checked' : ''}></label>${
                         isPreset
                             ? `<details><summary>Additional settings</summary>${area('Description (optional)', 'description', saved?.description || '')}${area('Additional arguments (one argument per line)', 'argv', (saved?.additionalArgv || []).join('\n'))}${field('Timeout (minutes, optional)', 'timeout', saved?.timeoutMinutes || '', 'number')}<div data-provider-extra></div></details>`
                             : ''
@@ -361,8 +376,10 @@ export class AiAgentsController {
         const current = () => !disposed && editor.isConnected;
         const enabled = () =>
             editor.querySelector('[data-launch-enabled]').checked;
+        const scope = mountLaunchProjects(editor, projects, saved?.projectPaths || []);
+        disposers.push(scope.dispose);
         const eligible = () =>
-            enabled() && (!isPreset || Boolean(prompt.value.trim()));
+            enabled() && scope.includesCurrent() && (!isPreset || Boolean(prompt.value.trim()));
         const binding = mountBindings(editor, initialBindings, {
             project,
             eligible
@@ -661,6 +678,7 @@ export class AiAgentsController {
                     name: get('name').value.trim(),
                     description: get('description')?.value || '',
                     enabled: enabled(),
+                    projectPaths: scope.read(),
                     expectedRevision: definition.revision || 0
                 };
                 if (isPreset)

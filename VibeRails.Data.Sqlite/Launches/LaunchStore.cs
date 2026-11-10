@@ -42,6 +42,17 @@ public sealed partial class LaunchStore : ILaunchStore
             command.CommandText = "CREATE TABLE ProjectRootPaths (ProjectKey TEXT PRIMARY KEY, ProjectRoot TEXT NOT NULL);";
             command.ExecuteNonQuery();
         });
+        SqliteMigrationRunner.Apply(db, "launches", 4, MigrationKind.Additive, (migration, tx) =>
+        {
+            using var command = migration.CreateCommand();
+            command.Transaction = tx;
+            command.CommandText = """
+                CREATE TABLE DefinitionProjects (
+                    DefinitionType TEXT NOT NULL, DefinitionId TEXT NOT NULL, ProjectKey TEXT NOT NULL,
+                    PRIMARY KEY (DefinitionType, DefinitionId, ProjectKey));
+                """;
+            command.ExecuteNonQuery();
+        });
         SqliteConnectionFactory.EnsureWalMode(db);
     }
 
