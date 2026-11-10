@@ -15,13 +15,14 @@ public sealed class BoardCodeQualityIgnoresTests : IDisposable
     private readonly BoardStore boards;
     private readonly CodeAnalyzerIgnoreStore legacy;
     private readonly BoardCodeAnalyzerIgnoreStore current;
+    private readonly ManualClock clock = new();
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     public BoardCodeQualityIgnoresTests()
     {
         Directory.CreateDirectory(root);
         state = $"Data Source={Path.Combine(root, "state.db")};Pooling=False";
-        boards = new($"Data Source={Path.Combine(root, "board.db")};Pooling=False", state);
+        boards = new($"Data Source={Path.Combine(root, "board.db")};Pooling=False", state) { LegacyIgnoreClock = clock };
         legacy = new(state);
         current = new(boards);
     }
@@ -77,14 +78,14 @@ public sealed class BoardCodeQualityIgnoresTests : IDisposable
         var file = new CodeAnalyzerIgnoredFile("a.cs", "file", "test", "Initial", DateTime.UtcNow);
         await legacy.UpsertAsync(repo, file, Ct);
         Assert.Single(await current.ListAsync(repo, Ct));
-        await legacy.UpsertAsync(repo, file with { ReasonText = "Old writer edit" }, Ct);
+        await OldWriter(() => legacy.UpsertAsync(repo, file with { ReasonText = "Old writer edit" }, Ct));
         Assert.Equal("Old writer edit", Assert.Single(await current.ListAsync(repo, Ct)).ReasonText);
-        Assert.True(await legacy.RemoveAsync(repo, file.Path, Ct));
+        await OldWriter(async () => Assert.True(await legacy.RemoveAsync(repo, file.Path, Ct)));
         Assert.Empty(await current.ListAsync(repo, Ct));
-        await legacy.UpsertAsync(repo, file, Ct);
+        await OldWriter(() => legacy.UpsertAsync(repo, file, Ct));
         Assert.Single(await current.ListAsync(repo, Ct));
         await current.RemoveAsync(repo, file.Path, Ct);
-        await legacy.UpsertAsync(repo, file with { ReasonText = "Conflicting old writer edit" }, Ct);
+        await OldWriter(() => legacy.UpsertAsync(repo, file with { ReasonText = "Conflicting old writer edit" }, Ct));
         Assert.Empty(await current.ListAsync(repo, Ct));
         var history = Rows(await Backup(), "BoardCodeQualityIgnoreHistory");
         Assert.Contains(history, row => row.GetProperty("Operation").GetString() == "legacy removed");
@@ -94,7 +95,8 @@ public sealed class BoardCodeQualityIgnoresTests : IDisposable
     /// <summary>
     /// VIBE-284 item 4: every Rules scan, Code quality check and pre-commit MintLint step reads the
     /// list. Once the old side is adopted, a read must not open a board.db write transaction, so it
-    /// neither waits behind nor blocks a concurrent Board write. A later old-side edit still lands.
+    /// neither waits behind nor blocks a concurrent Board write. A later old-side edit still lands
+    /// once the observation window (VIBE-276) has passed.
     /// </summary>
     [Fact]
     public async Task AdoptedLegacyRulesAreReadWithoutTheBoardWriteLock()
@@ -114,9 +116,75 @@ public sealed class BoardCodeQualityIgnoresTests : IDisposable
             Assert.Equal(["a.cs", "local.cs"], read.Select(rule => rule.Path).Order());
         }
 
-        await legacy.UpsertAsync(repo, file with { ReasonText = "Old writer edit" }, Ct);
+        await OldWriter(() => legacy.UpsertAsync(repo, file with { ReasonText = "Old writer edit" }, Ct));
         Assert.Equal("Old writer edit", (await current.ListAsync(repo, Ct)).Single(rule => rule.Path == "a.cs").ReasonText);
         Assert.Equal(3, Rows(await Backup(), "BoardCodeQualityIgnoreHistory").Count);
+    }
+
+    /// <summary>
+    /// VIBE-276: the list lives in board.db; state.db is read only to adopt an older version's
+    /// edits, at most once per repository per window. Inside the window an old-side edit waits;
+    /// after it, or in another repository, it lands. A backup always reads the old side.
+    /// </summary>
+    [Fact]
+    public async Task LegacyRowsAreReadAtMostOncePerWindowPerRepository()
+    {
+        var repo = Path.Combine(root, "throttled");
+        var other = Path.Combine(root, "other");
+        var file = new CodeAnalyzerIgnoredFile("a.cs", "file", "test", "Initial", DateTime.UtcNow);
+        await legacy.UpsertAsync(repo, file, Ct);
+        Assert.Equal("Initial", Assert.Single(await current.ListAsync(repo, Ct)).ReasonText);
+
+        await legacy.UpsertAsync(repo, file with { ReasonText = "Old writer edit" }, Ct);
+        await legacy.UpsertAsync(other, file, Ct);
+        clock.Advance(BoardStore.LegacyIgnoreObservationInterval - TimeSpan.FromSeconds(1));
+        Assert.Equal("Initial", Assert.Single(await current.ListAsync(repo, Ct)).ReasonText);
+        Assert.Single(await current.ListAsync(other, Ct));
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal("Old writer edit", Assert.Single(await current.ListAsync(repo, Ct)).ReasonText);
+
+        await legacy.UpsertAsync(repo, file with { ReasonText = "Edit before a backup" }, Ct);
+        Assert.Contains(Rows(await Backup(), "BoardCodeQualityIgnoreHistory"),
+            row => row.GetProperty("EntryJson").GetString()!.Contains("Edit before a backup"));
+        Assert.Equal("Edit before a backup", Assert.Single(await current.ListAsync(repo, Ct)).ReasonText);
+    }
+
+    /// <summary>
+    /// VIBE-276: inside the window, reads, saves and removals never open state.db. An unreadable
+    /// state.db proves it: the window's reads succeed, and the first read after it fails visibly
+    /// (an unreadable list never silently ignores files) and is retried on the next call.
+    /// </summary>
+    [Fact]
+    public async Task ReadsAndWritesInsideTheWindowDoNotOpenStateDb()
+    {
+        var repo = Path.Combine(root, "no-state");
+        await legacy.UpsertAsync(repo, new("legacy.cs", "file", "test", "Old", DateTime.UtcNow), Ct);
+        Assert.Single(await current.ListAsync(repo, Ct));
+
+        SqliteConnection.ClearAllPools();
+        await File.WriteAllTextAsync(Path.Combine(root, "state.db"), "not a database", Ct);
+        await current.UpsertAsync(repo, new("local.cs", "file", "test", "Local", DateTime.UtcNow, "Rob"), Ct);
+        Assert.True(await current.RemoveAsync(repo, "legacy.cs", Ct));
+        Assert.Equal("local.cs", Assert.Single(await current.ListAsync(repo, Ct)).Path);
+
+        clock.Advance(BoardStore.LegacyIgnoreObservationInterval);
+        await Assert.ThrowsAnyAsync<SqliteException>(() => current.ListAsync(repo, Ct));
+        await Assert.ThrowsAnyAsync<SqliteException>(() => current.ListAsync(repo, Ct));
+    }
+
+    /// <summary>An older version edits its own state.db list, then the window passes.</summary>
+    private async Task OldWriter(Func<Task> write)
+    {
+        await write();
+        clock.Advance(BoardStore.LegacyIgnoreObservationInterval);
+    }
+
+    private sealed class ManualClock : TimeProvider
+    {
+        private DateTimeOffset now = new(2026, 11, 9, 12, 0, 0, TimeSpan.Zero);
+        public override DateTimeOffset GetUtcNow() => now;
+        public void Advance(TimeSpan by) => now += by;
     }
 
     [Fact]

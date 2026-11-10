@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Globalization;
 using System.Text;
@@ -112,11 +113,37 @@ public sealed partial class BoardStore
         return true;
     }
 
+    /// <summary>
+    /// How long one process trusts its last look at a repository's legacy state.db ignore rows
+    /// (VIBE-276). Every Rules scan, Code quality check and pre-commit MintLint step reads the
+    /// list; only the first read in each window queries state.db. An older version's later edit
+    /// is adopted on the first read after the window.
+    /// </summary>
+    internal static readonly TimeSpan LegacyIgnoreObservationInterval = TimeSpan.FromMinutes(5);
+
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _legacyIgnoresObservedUtc =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Clock for <see cref="LegacyIgnoreObservationInterval"/>; tests replace it.</summary>
+    internal TimeProvider LegacyIgnoreClock { get; set; } = TimeProvider.System;
+
+    // A data backup (null repository) always reads every repository's legacy rows. A failed read
+    // records nothing, so the next call tries again.
+    private async Task RetainLegacyCodeQualityIgnoresAsync(string? repository, CancellationToken ct)
+    {
+        var started = LegacyIgnoreClock.GetUtcNow();
+        if (repository is not null && _legacyIgnoresObservedUtc.TryGetValue(repository, out var observed)
+            && started >= observed && started - observed < LegacyIgnoreObservationInterval)
+            return;
+        await AdoptLegacyCodeQualityIgnoresAsync(repository, ct);
+        if (repository is not null)
+            _legacyIgnoresObservedUtc[repository] = started;
+    }
+
     // Read-only adoption: old binaries retain their own list. Once edited here, the new-side
     // choice wins, but every distinct old-side value remains in the backup history as well.
-    // Every Rules scan, Code quality check and pre-commit MintLint step reads the list, so the
-    // board.db write transaction opens only when the old side differs from what is adopted.
-    private async Task RetainLegacyCodeQualityIgnoresAsync(string? repository, CancellationToken ct)
+    // The board.db write transaction opens only when the old side differs from what is adopted.
+    private async Task AdoptLegacyCodeQualityIgnoresAsync(string? repository, CancellationToken ct)
     {
         var legacy = new List<(string Repository, CodeAnalyzerIgnoredFile File)>();
         await using (var state = await OpenStateAsync(ct))

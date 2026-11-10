@@ -191,6 +191,25 @@ backups retain legacy observations without changing the old table. Untouched ado
 old-version edits/removals; a choice made by the current version wins over conflicting old-version
 writes, which are still archived. Removal retains the original exemption and its history.
 
+### Storage outside state.db (VIBE-276)
+
+Owner decision (2026-11-03): Code quality data goes in new board.db tables. Exemptions
+(`BoardCodeQualityExemptions`), the ignore list and its history (`BoardCodeQualityIgnores`,
+`BoardCodeQualityIgnoreHistory`) and check evidence (`BoardChecks`) are all there. The current
+version writes none of them to state.db. It reads the legacy `CodeAnalyzerIgnores` table only to
+adopt edits an older version made, and each process does that at most once per repository every
+`BoardStore.LegacyIgnoreObservationInterval` (five minutes). Rules scans, checks and pre-commit
+MintLint steps inside that window read board.db only. An older version's edit is adopted on the
+first read after the window. A data backup always reads the legacy table. If the read fails,
+nothing is recorded and the next read tries again. The empty legacy table is still created in
+state.db, so older binaries and fresh databases keep the same schema. That is schema only, with
+no runtime traffic.
+
+The fail-or-report setting (the `minimum A|B|C` pair above) stays in the Code quality action's
+arguments, part of the Automation definition in state.db's Jobs table. It is read with the Job,
+so it costs no extra query. Moving it would split one Automation across two databases, and older
+binaries would then run the check report-only (fail open) instead of rejecting the action (fail closed).
+
 Records include start/end times, engine version, actual scope file manifest, checkout, base/head,
 SHA-256 input and rule fingerprints, coverage/finding counts and explicit limitations. VCA keeps
 WARN/COMMIT/STOP and deferred findings. No applicable rules, unsupported/ignored files, missing

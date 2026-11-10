@@ -1246,7 +1246,7 @@ tools (security review 2026-07-02).
 - `TerminalSessionLogs` - Per-terminal-session structured log rows
 - `Jobs` / `JobActions` / `JobTriggers` - Automation definitions, ordered actions, and triggers
 - `JobRuns` / `JobRunActions` - Immutable per-run workflow snapshots and per-action outcomes/output
-- Additional tables: `AgentMetadata`, `ChatSummary`, `sessionOutPut`, `TokenSavings`, `CompressionCaptures` (retired 2026-09-17, schema-only), `CodeAnalyzerIgnores` (legacy, read-only adoption), `ProjectCache`, `GlobalCache`. Current Code quality exemptions and their attributed history live behind `IBoardStore` in `board.db`, alongside full-text `BoardChecks` evidence; all are covered by Board data backup (see `Services/Board/CHECKS.md`).
+- Additional tables: `AgentMetadata`, `ChatSummary`, `sessionOutPut`, `TokenSavings`, `CompressionCaptures` (retired 2026-09-17, schema-only), `CodeAnalyzerIgnores` (legacy, read-only adoption at most every five minutes per repository), `ProjectCache`, `GlobalCache`. Current Code quality exemptions and their attributed history live behind `IBoardStore` in `board.db`, alongside full-text `BoardChecks` evidence; all are covered by Board data backup (see `Services/Board/CHECKS.md`).
 
 **Configuration**:
 - WAL mode enabled for concurrent access

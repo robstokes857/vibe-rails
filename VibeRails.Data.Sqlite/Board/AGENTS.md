@@ -45,7 +45,8 @@ Older versions cannot mistake a per-card exemption for a repository ignore. See
 exemptions used by an attempt, separate from paged summaries. Completed evidence is immutable;
 older rows remain readable without source text. `board-code-quality-ignores/1` adds the current
 exemption/tombstone table and immutable history behind `IBoardStore`. Reads and data backups
-observe the legacy ignore table in state.db without changing it. Untouched adopted rules follow
+observe the legacy ignore table in state.db without changing it; per repository, a process reads
+it at most once every five minutes (VIBE-276), while a backup always reads it. Untouched adopted rules follow
 old-side changes; locally edited rules/tombstones win conflicts, with old-side values archived.
 New writes record the local OS account; never invent authors for legacy data. All these tables
 are covered by the existing all-table Board data backup. See the [check contract](../../VibeRails/Services/Board/CHECKS.md).

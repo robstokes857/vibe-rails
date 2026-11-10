@@ -865,8 +865,11 @@ CREATE TABLE IF NOT EXISTS CompressionCaptures (
 
 ### CodeAnalyzerIgnores
 
-Files the user excluded from Code quality (MintLint) scans, keyed per repository. `MatchKind` is
-`'file'` or `'directory'`; `ReasonKind` is `'test'`/`'config'`/`'other'` (or NULL).
+Legacy: older versions' Code quality (MintLint) ignore list, keyed per repository. The current
+list is `BoardCodeQualityIgnores` in board.db (VIBE-279); the current version never writes this
+table and reads it only to adopt older versions' edits, at most once per repository every five
+minutes per process (VIBE-276). The DDL stays so older binaries and fresh databases keep the same
+schema. `MatchKind` is `'file'` or `'directory'`; `ReasonKind` is `'test'`/`'config'`/`'other'` (or NULL).
 
 ```sql
 CREATE TABLE IF NOT EXISTS CodeAnalyzerIgnores (
