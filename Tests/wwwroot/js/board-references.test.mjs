@@ -105,12 +105,12 @@ function bindPopup(t, { files = [], truncated = false, cards = [], sessions = []
             if (saved[key] === undefined) delete globalThis[key]; else globalThis[key] = saved[key];
         }
     });
-    const type = async value => {
+    const type = async (value, caret = value.length) => {
         input.value = value;
-        input.selectionStart = input.selectionEnd = value.length;
+        input.selectionStart = input.selectionEnd = caret;
         input.fire('input');
         await delay(260); // past the popup's debounce
-        return host.children[0].innerHTML;
+        return host.children[0]?.innerHTML || '';
     };
     const pick = async (index = 0) => {
         for (let i = 0; i < index; i++) input.fire('keydown', { key: 'ArrowDown', preventDefault() {}, stopPropagation() {} });
@@ -180,6 +180,27 @@ test('a card with no sessions explains the empty list and can be referenced with
     assert.equal(popup.input.value, '![VB-12](card:card_12) ');
     assert.match(renderCommentHtml(popup.input.value), /data-board-ref-card="card_12"/);
     assert.deepEqual(popup.calls.links, []);
+});
+
+test('choosing a session before existing text finishes the reference and stops searching', async t => {
+    const id = '12345678-1234-1234-1234-123456789abc';
+    const popup = bindPopup(t, { cards: [card(12, 'Fix login form')], sessions: [
+        { id, displayName: 'Login investigation', cli: 'codex' }
+    ] });
+    await popup.type('See !fix login form for details.', 'See !fix login form'.length);
+    await popup.pick();
+    assert.equal(await popup.pick(), '');
+    assert.equal(popup.input.value, `See !${id} for details.`);
+    assert.equal(popup.input.selectionStart, `See !${id} `.length);
+    assert.deepEqual(popup.calls.history, [], 'a chosen session must not trigger a new lookup');
+    assert.deepEqual(popup.calls.projectCards, ['fix login form', 'VB-12']);
+    assert.equal(popup.calls.links.length, 1);
+
+    const caret = popup.input.selectionStart;
+    const value = popup.input.value.slice(0, caret) + 'more ' + popup.input.value.slice(caret);
+    assert.equal(await popup.type(value, caret + 5), '');
+    assert.deepEqual(popup.calls.projectCards, ['fix login form', 'VB-12']);
+    assert.deepEqual(popup.calls.history, []);
 });
 
 test('only an entire session GUID reads history and rejects a different project', async t => {

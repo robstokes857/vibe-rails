@@ -80,16 +80,17 @@ export function toProjectRelativePath(pickedPath, projectRoot) {
 
 /**
  * Splices a reference over the token range and returns the new value plus caret. A space
- * follows the reference unless the text already continues with whitespace, so the next
- * keystroke never glues itself onto the path.
+ * follows the reference unless the text already continues with whitespace. Park the
+ * caret after that separator so typing cannot extend the reference or reopen its search.
  */
 export function insertFileReference(value, start, end, reference) {
     const text = String(value ?? '');
     const before = text.slice(0, start);
     const after = text.slice(end);
-    const trailing = /^\s/.test(after) ? '' : ' ';
+    const separator = after.match(/^(?:\r\n|\s)/)?.[0] || '';
+    const trailing = separator ? '' : ' ';
     const next = `${before}${reference}${trailing}${after}`;
-    const caret = before.length + reference.length + trailing.length;
+    const caret = before.length + reference.length + (separator || trailing).length;
     return { value: next, caret };
 }
 

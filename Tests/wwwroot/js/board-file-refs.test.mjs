@@ -113,8 +113,11 @@ test('toProjectRelativePath strips the project root case-insensitively on Window
 
 test('insertFileReference replaces the token, adds one separating space and parks the caret after it', () => {
     assert.deepEqual(insertFileReference('see @Boa', 4, 8, '@a/b.cs'), { value: 'see @a/b.cs ', caret: 12 });
-    assert.deepEqual(insertFileReference('see @Boa then', 4, 8, '@a/b.cs'), { value: 'see @a/b.cs then', caret: 11 });
-    assert.deepEqual(insertFileReference('@x\nmore', 0, 2, '@a.md'), { value: '@a.md\nmore', caret: 5 });
+    assert.deepEqual(insertFileReference('see @Boa then', 4, 8, '@a/b.cs'), { value: 'see @a/b.cs then', caret: 12 });
+    assert.deepEqual(insertFileReference('@x\nmore', 0, 2, '@a.md'), { value: '@a.md\nmore', caret: 6 });
+    assert.deepEqual(insertFileReference('@x\r\nmore', 0, 2, '@a.md'), { value: '@a.md\r\nmore', caret: 7 });
+    assert.deepEqual(insertFileReference('@x\tmore', 0, 2, '@a.md'), { value: '@a.md\tmore', caret: 6 });
+    assert.deepEqual(insertFileReference('@x  more', 0, 2, '@a.md'), { value: '@a.md  more', caret: 6 });
 });
 
 test('changing a token immediately invalidates its in-flight suggestions', async t => {

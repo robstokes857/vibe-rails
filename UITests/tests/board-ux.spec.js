@@ -1395,6 +1395,55 @@ test('reference search routes GUIDs directly, finds card sessions and attaches c
     expect(await page.evaluate(() => window.__openedReferenceSession.id)).toBe(session.id);
 });
 
+for (const { width, mouse } of [{ width: 1280, mouse: false }, { width: 375, mouse: true }]) {
+    for (const choice of ['session', 'card']) test(`new-card ${choice} reference stops searching before existing text at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        await openBoard(page);
+        const session = { id: '12345678-1234-1234-1234-123456789abc', displayName: 'Earlier investigation', cli: 'codex' };
+        const searches = [];
+        await page.route('**/api/v1/board/cards/link-candidates?*', route => {
+            searches.push(new URL(route.request().url()).searchParams.get('q'));
+            return route.fulfill({ json: { cards: [{ id: 'other_card', key: 'VB-AAAAA-7', displayId: 'VIBE-7', title: 'Other card' }] } });
+        });
+        await page.route('**/api/v1/board/cards/other_card/sessions', route => route.fulfill({ json: [session] }));
+        await page.getByRole('button', { name: 'Create card', exact: true }).click();
+        const composer = page.locator('[data-board-composer="description"]');
+        const input = composer.locator('textarea');
+        const popup = composer.locator('[data-board-file-popup]');
+        await input.fill('See  for details.');
+        await input.press('Home');
+        for (let i = 0; i < 4; i++) await input.press('ArrowRight');
+        await input.pressSequentially('!Other card');
+        await expect(popup.getByRole('option')).toContainText(['Other card']);
+        if (mouse) await popup.getByRole('option').click();
+        else await input.press('Enter');
+        await expect(popup.getByRole('option')).toContainText(['Earlier investigation', 'Reference card VIBE-7']);
+        const searchCount = searches.length;
+        if (mouse) await popup.getByRole('option').nth(choice === 'card' ? 1 : 0).click();
+        else {
+            if (choice === 'card') await input.press('ArrowDown');
+            await input.press('Enter');
+        }
+        const reference = choice === 'card' ? '![VIBE-7](card:other_card)' : `!${session.id}`;
+        await expect(input).toHaveValue(`See ${reference} for details.`);
+        await expect(popup).toHaveCount(0);
+        await expect(input).toBeFocused();
+        await input.pressSequentially('more ');
+        await expect(input).toHaveValue(`See ${reference} more for details.`);
+        // Let the search debounce elapse to catch a popup reopened by continued typing.
+        await page.waitForTimeout(300);
+        await expect(popup).toHaveCount(0);
+        expect(searches).toHaveLength(searchCount);
+        await page.screenshot({ path: testInfo.outputPath(`selected-${choice}-${width}.png`) });
+
+        // Completing a reference must not disable future reference searches.
+        await input.press('End');
+        await input.pressSequentially(' !Other');
+        await expect(popup).toContainText('Other card');
+        expect(searches).toHaveLength(searchCount + 1);
+    });
+}
+
 for (const width of [320, 375, 768, 1024, 1280]) test(`Board descriptions share prompt highlighting and compact variables at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 950 });
     const requests = await openBoard(page);

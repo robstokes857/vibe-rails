@@ -846,7 +846,8 @@ saved cards and queue on drafts. References remain plain source: `!GUID`, `#SHA`
 `![display ID](card:row-id)` and `@path`. Previously saved `@[display ID](card:row-id)` still
 renders without rewriting stored text. Navigation uses existing replay/diff/unsaved-draft
 guards. Abort and generation checks prevent stale results or asynchronous selections from
-overwriting edited text.
+overwriting edited text. Completed picks leave the caret after the separating whitespace,
+including existing spaces or line breaks, so continued typing does not reopen the search.
 
 The card keeps the latest Checks summary and optional saved report under Advanced. Run checks and Earlier results
 are unmounted. Code reviews is a read-only sidebar section below Agent & Automation runs: it shows
