@@ -13,14 +13,14 @@ const variables = [
 ];
 
 /** Discoverable shortcuts for the supported launch-prompt placeholders. */
-export function promptVariableHelp() {
+export function promptVariableHelp({ id = 'launch-prompt-variable-help' } = {}) {
     return `<div class="prompt-variable-help">
-        <p id="launch-prompt-variable-help" class="form-text">Click a variable to insert it at the cursor. You can also type <code>{{</code> for suggestions.</p>
-        <div class="d-flex flex-wrap gap-2" role="group" aria-label="Insert a prompt variable">
+        <p id="${escapeHtml(id)}" class="form-text">Insert a variable, or type <code>{{</code> for suggestions.</p>
+        <div class="prompt-variable-buttons" role="group" aria-label="Insert a prompt variable">
             ${variables.map(([token, hint]) => `<button type="button" class="btn btn-sm btn-secondary" data-prompt-variable="${escapeHtml(token)}" title="${escapeHtml(hint)}" aria-label="Insert ${escapeHtml(token)}: ${escapeHtml(hint)}"><code>${escapeHtml(token)}</code></button>`).join('')}
         </div>
-        <p class="form-text">Replace <code>name</code> with your own variable name to ask for a value at launch; a default prefills the answer. Other values fill in automatically. <code>{{board_card}}</code> is empty without a triggering Board card.</p>
-        <details class="form-text"><summary>Worktree options</summary>
+        <details class="form-text"><summary>Variable help and worktree options</summary>
+            <p>Replace <code>name</code> with your own variable name to ask for a value at launch; a default prefills the answer. Other values fill in automatically. <code>{{board_card}}</code> is empty without a triggering Board card.</p>
             <p><code>{{worktree}}</code> creates a checkout from HEAD in your home folder and starts the agent there. Optional: <code>{{worktree path="../my-task" delete_after_days=14}}</code>. Use a new directory outside the source checkout. Retention defaults to 7 days; use 7 or more, or <code>never</code>. Expired worktrees, including uncommitted files, are removed while Vibe Rails is open; active sessions postpone removal. Git branches are kept.</p>
         </details>
     </div>`;

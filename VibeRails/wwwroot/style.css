@@ -19727,10 +19727,18 @@ body.performance-mode .brand-text-sm {
 .ai-agents-view { display: grid; gap: var(--space-5); min-width: 0; }
 .ai-agents-view .vb-page-header { margin-bottom: 0; }
 .ai-agents-view .vb-page-heading { flex: 1; }
-.prompt-variable-help { margin-top: var(--space-3); }
+.prompt-variable-help { display: grid; gap: var(--space-1); margin-top: var(--space-2); }
+.prompt-variable-help .form-text { margin: 0; font-size: var(--text-support); }
+.prompt-variable-buttons { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.prompt-variable-buttons .btn { min-height: var(--control-height-small, 32px); padding: var(--space-1) var(--space-2); }
 .prompt-variable-help .btn code { padding: 0; background: transparent; font-size: inherit; }
-.prompt-variable-help details { border-top: 1px solid var(--color-border); padding-top: var(--space-2); }
+.prompt-variable-help details p { margin: var(--space-2) 0 0; font-size: inherit; }
+.prompt-variable-help summary { width: fit-content; min-height: var(--control-height-small, 32px); align-content: center; cursor: pointer; }
+.prompt-variable-help summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .prompt-variable-help details code { overflow-wrap: anywhere; }
+@media (pointer: coarse), (max-width: 768px) {
+    .prompt-variable-buttons .btn, .prompt-variable-help summary { min-height: 44px; }
+}
 .prompt-reference-field { position: relative; min-width: 0; }
 .prompt-reference-overlay { position: absolute; overflow: hidden; pointer-events: none; }
 .prompt-reference-mirror { box-sizing: border-box; white-space: pre-wrap; overflow-wrap: break-word; }

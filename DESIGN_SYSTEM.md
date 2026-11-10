@@ -354,7 +354,7 @@ Board cards and AI Agent definitions share the desktop card-editor shell and con
 wide main content, narrow settings sidebar, a divider, one shared scroller and a separate
 persistent footer. Main content is the name/title, directly editable prompt/description,
 existing attachment controls, then Comments (Board) or Run history (definitions).
-Agent prompts stay as editable source without a duplicate live preview.
+Agent prompts and Board card descriptions stay as editable source without a duplicate live preview.
 Inside the native prompt field, file (`@`), card/session (`!`), commit (`#`) and
 `{{...}}` variable references use purple text, a subtle purple fill and an inset
 outline. Keep the exact source text and the field's font metrics so typing, caret
@@ -366,8 +366,10 @@ the prompt editor beneath the text. Clicking opens the existing attachment viewe
 Show pending uploads immediately, preserve previews after saving, and wrap thumbnails
 on narrow screens. Never repeat the message text or fetch arbitrary image URLs.
 Typed caret suggestions provide file, card, session and variable references; no
-Preview/Write/Edit mode switch is needed. Agent prompt help also lists supported
-`{{...}}` variables as small secondary buttons below the input, with descriptions.
+Preview/Write/Edit mode switch is needed. Agent prompts and Board card descriptions
+list supported `{{...}}` variables as compact secondary buttons below the input.
+Use 32px desktop buttons, 4px gaps and one short hint; keep 44px touch targets.
+Put longer variable and worktree explanations in a collapsed help disclosure.
 Clicking or keyboard-activating a variable inserts it at the cursor (replacing any
 selection) and returns focus to the prompt. The buttons wrap on narrow screens.
 Agents reuse the Board provider and launch-options controls. Actions use their

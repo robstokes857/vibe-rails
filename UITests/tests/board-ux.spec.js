@@ -1299,7 +1299,12 @@ test('remote image comments refresh their metadata and preserve composer drafts'
     const image = page.locator('[data-board-comments] [data-board-image="remote-image"]');
     await expect(image).toHaveAttribute('src', /^blob:/);
     await expect.poll(() => image.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
-    expect(reads).toBe(1);
+    const thumbnail = page.locator('[data-board-composer="description"] [data-board-image="remote-image"]');
+    await expect.poll(() => thumbnail.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
+    expect(reads).toBe(2); // One cached load for each of the two preview surfaces.
+    await page.evaluate(() => window.app.boardController.refreshSessionActivity());
+    await expect(thumbnail).toHaveAttribute('src', /^blob:/);
+    expect(reads).toBe(2);
     await expect(page.locator('[data-board-comments] [data-board-ref-commit]')).toHaveAttribute('title', 'Remote commit');
     await expect(page.locator('[data-board-attachments]')).toContainText('Remote.png');
     await expect(page.locator('[data-board-commits]')).toContainText('Remote commit');
@@ -1390,18 +1395,95 @@ test('reference search routes GUIDs directly, finds card sessions and attaches c
     expect(await page.evaluate(() => window.__openedReferenceSession.id)).toBe(session.id);
 });
 
-test('draft image attachments survive creation', async ({ page }) => {
-    await openBoard(page);
+for (const width of [320, 375, 768, 1024, 1280]) test(`Board descriptions share prompt highlighting and compact variables at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 950 });
+    const requests = await openBoard(page);
+    await page.getByRole('button', { name: 'Create card', exact: true }).click();
+    const editor = page.locator('[data-board-card-editor]');
+    const composer = editor.locator('[data-board-composer="description"]');
+    const input = composer.locator('textarea');
+    const help = editor.locator('.prompt-variable-help');
+    const variables = help.getByRole('group', { name: 'Insert a prompt variable' });
+    await editor.locator('#board-card-title').fill('Shared composer');
+    const source = 'Review @src/example.cs with !VIBE-123 and #abcdef0 at {{time}}.\n`@src/plain.cs` <img src=x onerror="window.__injected=true">';
+    await input.fill(source);
+    const mirror = composer.locator('.prompt-reference-mirror');
+    await expect(mirror.locator('[data-prompt-reference]')).toHaveText(['@src/example.cs', '!VIBE-123', '#abcdef0', '{{time}}']);
+    expect(await mirror.textContent()).toBe(source + '\u200b');
+    await expect(mirror.locator('img,script')).toHaveCount(0);
+    await expect(composer.locator('[data-board-composer-live]')).toHaveCount(0);
+    await expect(composer.locator('.prompt-reference-overlay')).toHaveAttribute('aria-hidden', 'true');
+    await expect(input).toHaveAttribute('aria-describedby', 'board-description-variable-help');
+    await expect(variables.getByRole('button')).toHaveCount(9);
+    await expect(help.locator('details')).not.toHaveAttribute('open', '');
+    const date = variables.locator('[data-prompt-variable="{{date}}"]');
+    expect((await date.boundingBox()).height).toBe(width <= 768 ? 44 : 32);
+    expect(await variables.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    expect(await editor.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await input.scrollIntoViewIfNeeded();
+    const point = await mirror.locator('[data-prompt-reference="file"]').evaluate(el => {
+        const rect = el.getBoundingClientRect(); return { x: rect.left + 3, y: rect.top + rect.height / 2 };
+    });
+    await page.mouse.click(point.x, point.y);
+    const caret = await input.evaluate(el => el.selectionStart);
+    expect(caret).toBeGreaterThanOrEqual(source.indexOf('@src'));
+    expect(caret).toBeLessThanOrEqual(source.indexOf('@src') + 2);
+    await input.evaluate(el => el.setSelectionRange(el.value.indexOf('{{time}}'), el.value.indexOf('{{time}}') + 8));
+    await date.click();
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue(source.replace('{{time}}', '{{date}}'));
+    await input.press('ControlOrMeta+z');
+    await expect(input).toHaveValue(source);
+    await date.focus();
+    await date.press('Enter');
+    await expect(input).toHaveValue(source.replace('{{time}}', '{{date}}'));
+    await expect(mirror.locator('[data-prompt-reference="variable"]')).toHaveText('{{date}}');
+    await help.locator('summary').click();
+    await expect(help.getByText('Replace', { exact: false })).toBeVisible();
+    await help.locator('summary').click();
+    await input.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`board-composer-${width}.png`) });
+    await editor.locator('[data-board-save-card]').click();
+    expect(requests.find(r => r.method === 'POST' && r.path === '/api/v1/board/cards').body.description).toBe(source.replace('{{time}}', '{{date}}'));
+    await page.getByText('Shared composer', { exact: true }).click();
+    await expect(input).toHaveValue(source.replace('{{time}}', '{{date}}'));
+    await expect(mirror.locator('[data-prompt-reference="variable"]')).toHaveText('{{date}}');
+});
+
+for (const width of [375, 1280]) test(`draft image previews survive creation at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 950 });
+    const requests = await openBoard(page, { inlineImages: false });
     await page.getByRole('button', { name: 'Create card', exact: true }).click();
     await page.locator('#board-card-title').fill('Draft image');
     const composer = page.locator('[data-board-composer="description"]');
+    await composer.locator('textarea').fill('Use this layout with @src/example.cs at {{date}}.');
     await composer.locator('[data-board-composer-file]').setInputFiles({ name: 'draft.png', mimeType: 'image/png', buffer: Buffer.from(IMAGE.split(',')[1], 'base64') });
+    const previews = composer.getByRole('group', { name: 'Attached image previews' });
+    const thumbnail = previews.getByRole('button', { name: 'Preview draft.png', exact: true });
+    await expect.poll(() => thumbnail.locator('img').evaluate(img => img.naturalWidth)).toBe(1);
+    expect(requests.filter(r => r.path.includes('/attachments/'))).toEqual([]);
+    await thumbnail.focus();
+    await thumbnail.press('Enter');
+    const viewer = page.getByRole('dialog', { name: 'Attachment preview', exact: true });
+    await expect.poll(() => viewer.locator('img').evaluate(img => img.naturalWidth)).toBe(1);
+    await viewer.getByRole('button', { name: 'Close attachment', exact: true }).click();
+    await expect(thumbnail).toBeFocused();
     await expect(page.locator('[data-board-attachments]')).toContainText('draft.png');
     await expect(composer.locator('textarea')).toHaveValue(/attachment:pending_/);
+    await page.screenshot({ path: testInfo.outputPath(`board-pending-image-${width}.png`) });
     await page.locator('[data-board-save-card]').click();
+    // Saved metadata omits inline data; the preview must use the Board-owned content loader.
     await page.getByText('Draft image', { exact: true }).click();
     await expect(composer.locator('textarea')).not.toHaveValue(/attachment:pending_/);
-    await expect(page.locator('[data-board-attachments] .board-attachment-thumb')).toBeVisible();
+    await expect.poll(() => thumbnail.locator('img').evaluate(img => img.naturalWidth)).toBe(1);
+    expect(requests.some(r => r.path === '/api/v1/board/cards/card_created/attachments/att_uploaded/content')).toBe(true);
+    await thumbnail.click();
+    await expect.poll(() => viewer.locator('img').evaluate(img => img.naturalWidth)).toBe(1);
+    await viewer.getByRole('button', { name: 'Close attachment', exact: true }).click();
+    expect(await previews.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await page.locator('[data-board-remove-attachment="att_uploaded"]').click();
+    await page.getByRole('button', { name: 'Delete', exact: true }).last().click();
+    await expect(thumbnail).toHaveCount(0);
 });
 
 test('large inline rasters use authenticated content and release Blob URLs on close', async ({ page }) => {
@@ -1449,7 +1531,9 @@ test('posted Comments load authenticated raster previews and release them on clo
     const image = page.locator('[data-board-comments] img[data-board-image]');
     await image.scrollIntoViewIfNeeded();
     await expect.poll(() => image.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
-    expect(reads).toBe(1);
+    const thumbnail = page.locator('[data-board-composer="description"] img[data-board-image]');
+    await expect.poll(() => thumbnail.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
+    expect(reads).toBe(2); // The description and Comments each own their cached preview.
     await page.evaluate(() => window.app.closeModal());
     expect(await page.evaluate(() => window.__blobUrls.length > 0 && window.__blobUrls.every(url => window.__revokedUrls.includes(url)))).toBe(true);
 });
@@ -1807,7 +1891,7 @@ const SUMMARY_FIELDS = ['id', 'key', 'columnId', 'position', 'title', 'descripti
     'hasActiveDesktopAgent', 'remoteProvider', 'remoteIssueKey', 'remoteIssueUrl', 'pinned', 'ghostReason', 'remoteCreated'];
 const cardSummary = card => Object.fromEntries(SUMMARY_FIELDS.filter(field => field in card).map(field => [field, card[field]]));
 
-async function openBoard(page, { active = false, assignee = null, relatedCards = false, empty = false,
+async function openBoard(page, { active = false, assignee = null, relatedCards = false, empty = false, inlineImages = true,
     onCard = () => {}, extraPickerItems = [], mainBoard = {}, appSettings = {},
     columns = [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }] } = {}) {
     if (process.env.VIBERAILS_BOARD_STATIC === '1') {
@@ -1900,7 +1984,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
         }
         if (path === `/api/v1/board/cards/${card.id}/attachments`) {
             const upload = route.request().postDataJSON();
-            const attachment = { id: 'att_uploaded', name: upload.name, url: upload.mimeType?.startsWith('image/') ? upload.dataUrl : '', mimeType: upload.mimeType, bytes: upload.bytes };
+            const attachment = { id: 'att_uploaded', name: upload.name, url: inlineImages && upload.mimeType?.startsWith('image/') ? upload.dataUrl : '', mimeType: upload.mimeType, bytes: upload.bytes };
             contents.set(attachment.id, Buffer.from(upload.dataUrl.split(',')[1], 'base64'));
             card.attachments.push(attachment);
             return route.fulfill({ json: attachment });
@@ -2033,7 +2117,7 @@ for (const width of [1440, 390]) {
         await editor.getByLabel('Name', { exact: true }).fill('Custom lane');
         await page.screenshot({ path: testInfo.outputPath(`lane-colour-${width}.png`) });
         expect(await editor.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
-        await editor.getByRole('button', { name: 'Save', exact: true }).click();
+        await editor.getByRole('button', { name: 'Create lane', exact: true }).click();
         await expect(editor).toHaveCount(0);
         expect(writes[0]).toEqual({ name: 'Custom lane', color: '#cf6c48', boardId: 'brd_main' });
 
@@ -2043,7 +2127,7 @@ for (const width of [1440, 390]) {
         await expect(picker).toHaveValue('#cf6c48');
         await expect(selectedPresets).toHaveCount(0);
         await picker.fill('#000000');
-        await editor.getByRole('button', { name: 'Save', exact: true }).click();
+        await editor.getByRole('button', { name: 'Save lane', exact: true }).click();
         await expect(editor).toHaveCount(0);
         expect(writes[1]).toEqual({ name: 'Custom lane', color: '#000000' });
         await expect(lane).toHaveCSS('--lane-color', '#000000');
@@ -2051,7 +2135,7 @@ for (const width of [1440, 390]) {
         await page.getByRole('button', { name: 'Settings for Custom lane', exact: true }).click();
         await expect(picker).toHaveValue('#000000');
         await editor.getByRole('button', { name: 'Lane colour #a855f7', exact: true }).click();
-        await editor.getByRole('button', { name: 'Save', exact: true }).click();
+        await editor.getByRole('button', { name: 'Save lane', exact: true }).click();
         await expect(editor).toHaveCount(0);
         await page.getByRole('button', { name: 'Settings for Custom lane', exact: true }).click();
         await expect(picker).toHaveValue('#a855f7');
@@ -4243,7 +4327,7 @@ async function installLaunchFixture(page, { conflict = false } = {}) {
         return route.fulfill({json:state.activity.map(row=>row.entry)});
     });
     await page.route('**/api/v1/board/cards/card_test/launches/*/skip',route=>{state.skips++;state.activity[0].entry.skipRequested=true;return route.fulfill({status:204});});
-    await page.route('**/api/v1/runs?*',route=>route.fulfill({json:{runs:state.runs,nextCursor:null}}));
+    await page.route('**/api/v1/board/cards/card_test/launches/runs',route=>route.fulfill({json:{runs:state.runs,nextCursor:null}}));
     await page.route('**/api/v1/runs/*/retry',route=>{state.retries++;state.activity[0].run.status='queued';return route.fulfill({json:state.activity[0].run});});
     return state;
 }

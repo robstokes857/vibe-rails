@@ -90,6 +90,8 @@ npx playwright test --config playwright.board.config.js
 
 Uses the real frontend with mocked board APIs to verify compact board controls, description
 image rendering/editing/upload/deletion, save/reopen, running-agent controls, and desktop/narrow layouts.
+Description coverage includes shared inline reference highlighting, compact variable shortcuts,
+caret placement and Undo, plus pending/saved image thumbnails and the attachment viewer.
 It starts a temporary static server and never touches the machine's board database.
 
 `board-picker.spec.js` holds a board-switch response and pauses the browser clock to cover

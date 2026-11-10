@@ -23,9 +23,10 @@ directly editable without a duplicate live message preview.
 inside the native prompt with the same font metrics. Its non-interactive mirror preserves
 literal source, selection, Undo and caret suggestions; composition and forced colors use
 native text. Mount highlighting before spelling, and dispose the wrappers in reverse order.
-`prompt-image-previews.js` shows only attached raster thumbnails beneath the prompt, inside
-the composer. Pending images use their local data; saved images use the Agent-owned content
-loader and existing Blob cleanup. Click or keyboard activation opens the attachment viewer.
+`prompt-image-previews.js` shows only attached raster thumbnails beneath Agent prompts and
+Board card descriptions, inside the composer. Pending images use their local data; saved
+images use the owner's content loader and existing Blob cleanup. Click or keyboard activation
+opens the attachment viewer.
 Attachment changes refresh thumbnails without repeating the message text.
 
 Board cards and definitions call `card-editor.js` for the two-column shell, one scroller
@@ -44,9 +45,11 @@ uploads. Provider drafts and editor text are independent of `launch-history.js` 
 close and navigation guards retain unsaved work. Typed references use the shared caret
 popup, including built-ins and existing custom variables; step syntax is rejected.
 Manual template values become a revision-checked run prompt override, never a preset edit.
-`prompt-variable-help.js` also lists the supported launch placeholders below the Agent
-prompt. Its native buttons insert at the caret or replace the selection, restore prompt
-focus and notify the composer so dirty tracking and Agent/Quick Launch status update.
+`prompt-variable-help.js` also lists the supported launch placeholders below Agent prompts
+and Board card descriptions. Its compact native buttons insert at the caret or replace the
+selection, restore prompt focus and notify the composer so dirty tracking and Agent/Quick
+Launch status update.
+Longer variable/worktree explanations live in a collapsed disclosure; touch targets stay 44px.
 Keep this list aligned with launch placeholder support; retired step tokens stay absent.
 
 `launch-lane-editor.js` keeps ordered definition IDs and process/result/review gates.
@@ -797,6 +800,8 @@ Dispose each field's binding with its editor; stale async checks cannot repaint 
 The same binding covers editable foreign cards. Other prose fields (Chat with agent and board
 context) retain native `spellcheck="true"`; commit SHAs, session IDs and other identifiers stay unchecked.
 Descriptions always open as editable source, with no preview pane or Edit/Preview controls.
+New and saved cards use the Agent prompt's shared reference highlighting, image-only
+attachment previews and compact variable shortcuts. Comments keep their Markdown preview.
 Markdown is always enabled for rendered comments; the retired browser preference is ignored.
 Previous work remains available as a collapsed sidebar section for saved handoffs and file entry
 points. Checks (Code quality and VCA) live inside the sidebar's collapsed Advanced section. The main column flows from

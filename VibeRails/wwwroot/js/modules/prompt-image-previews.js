@@ -4,15 +4,15 @@ import { getAttachmentPreviewKind, openEditorAttachment } from './board-attachme
 const RASTER_DATA = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=\s]+$/i;
 
 /** Image-only attachment previews inside the prompt, including files not saved yet. */
-export function bindPromptImagePreviews(app, composer, definition, loadContent) {
+export function bindPromptImagePreviews(app, composer, owner, loadContent) {
     const abort = new AbortController();
     const host = document.createElement('div');
     host.className = 'prompt-image-previews';
     host.setAttribute('role', 'group');
     host.setAttribute('aria-label', 'Attached image previews');
     composer.append(host);
-    const images = createBoardImagePreviews(() => definition, () => {}, loadContent);
-    const attachments = () => [...definition.attachments, ...definition.pendingAttachments]
+    const images = createBoardImagePreviews(() => owner, () => {}, loadContent);
+    const attachments = () => [...(owner.attachments || []), ...(owner.pendingAttachments || [])]
         .filter(attachment => getAttachmentPreviewKind(attachment) === 'image');
 
     function update() {
