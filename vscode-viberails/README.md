@@ -7,6 +7,7 @@ going off the rails</strong></p>
     <a href="https://marketplace.visualstudio.com/items?itemName=viberails.vscode-viberails"><img alt="Marketplace version" src="https://badgen.net/vs-marketplace/v/viberails.vscode-viberails?label=marketplace&color=0078D4" /></a>
     <a href="https://marketplace.visualstudio.com/items?itemName=viberails.vscode-viberails"><img alt="Installs" src="https://badgen.net/vs-marketplace/i/viberails.vscode-viberails?color=0078D4" /></a>
     <a href="https://code.visualstudio.com/"><img alt="VS Code" src="https://img.shields.io/badge/VS%20Code-1.125%2B-007ACC" /></a>
+    <a href="https://dotnet.microsoft.com/"><img alt=".NET 11" src="https://img.shields.io/badge/.NET-11.0-512BD4" /></a>
     <a href="https://github.com/robstokes857/vibe-rails/blob/main/vscode-viberails/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-blue.svg" /></a>
     <a href="https://viberails.ai/"><img alt="Website" src="https://img.shields.io/badge/web-viberails.ai-c084fc" /></a>
   </p>
@@ -120,8 +121,9 @@ Standalone installers for Windows, Linux, and macOS are also available at [viber
 ### Local operation and connected services
 
 The VSIX includes a platform-specific native backend and dashboard assets for `win32-x64`,
-`linux-x64`, or `darwin-arm64`. There is no separate VibeRails installation or backend download
-at runtime. It listens on a dynamic loopback port, authenticates dashboard/API access, and stores
+`linux-x64`, or `darwin-arm64`. The backend is built on .NET 11 and compiled with Native AOT,
+so there is no separate VibeRails installation, .NET runtime, or backend download at runtime.
+It listens on a dynamic loopback port, authenticates dashboard/API access, and stores
 configuration and session history under `~/.vibe_rails/`. Repository rules stay with your code.
 AI requests go to the configured provider or gateway.
 
@@ -168,4 +170,4 @@ are `- [LEVEL] rule text`, `- rule text (LEVEL)`, and `- rule text` (defaults to
 
 ---
 
-**Last updated** 2026-10-30
+**Last updated** 2026-11-10

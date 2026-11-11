@@ -3,6 +3,7 @@
 const { test, expect } = require('./fixtures');
 
 const VIEWPORTS = [
+    { width: 1600, height: 900 },
     { width: 1492, height: 900 },
     { width: 1210, height: 800 },
     { width: 1100, height: 800 },

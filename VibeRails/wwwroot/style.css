@@ -638,6 +638,38 @@ code {
     }
 }
 
+/* Roomier links on wide screens. The bar keeps its 44px height and 36px
+   targets; only the link text, icons, padding and gaps grow so the short
+   menu does not look lost in the extra width. */
+@media (min-width: 1501px) {
+    .app-subnav {
+        padding: 0 var(--space-3);
+        gap: var(--space-3);
+    }
+
+    .app-subnav-links {
+        gap: var(--space-2) !important;
+    }
+
+    .app-subnav .app-subnav-link {
+        padding-inline: var(--space-3);
+        font-size: 0.9rem;
+        letter-spacing: 0.01em;
+    }
+
+    .app-subnav .app-subnav-link svg,
+    .app-subnav .app-subnav-link .icon-light,
+    .app-subnav .app-subnav-link .menu-icon {
+        width: 1.05rem !important;
+        height: 1.05rem !important;
+        font-size: 1.05rem !important;
+    }
+
+    .app-subnav .automation-launch-btn {
+        padding: 0;
+    }
+}
+
 .brand-text-sm {
     background: linear-gradient(135deg, #a77bf3 0%, var(--color-accent) 100%, #a77bf3 200%);
     -webkit-background-clip: text;
@@ -16271,7 +16303,7 @@ body.vb-terminal-focus-active .app-subnav {
     gap: var(--space-2);
 }
 body.vb-terminal-focus-active .app-subnav .app-subnav-link {
-    padding: var(--space-1) var(--space-2);
+    padding-block: var(--space-1);
 }
 body.vb-terminal-focus-active .app-subnav .brand-logo-sm {
     height: 36px;

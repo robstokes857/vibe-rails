@@ -748,7 +748,9 @@ The desktop top bar is compact: 44px tall, a 36px mascot, 8px side gutters and g
 and sentence-case navigation with 8px horizontal link padding. Desktop links are 36px
 tall; touch/narrow layouts retain 44px targets. Hide labels at the existing compact
 breakpoints and allow the center links to scroll when crowded. The terminal workspace
-uses the same bar height and mascot size.
+uses the same bar height and mascot size. From 1501px wide the bar keeps its height
+while the links grow: 0.9rem text, 1.05rem icons, 12px horizontal link padding, 8px
+between links and 12px side gutters.
 
 Desktop aliases for values specified above (these add no new visual choices):
 
