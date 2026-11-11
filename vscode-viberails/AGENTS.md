@@ -55,6 +55,10 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 
 ## Architecture
 
+VIBE-309 temporarily hides built-in `code-quality` Actions from the native launcher,
+matching the browser's `isLaunchVisible` filter. Preserve their API records and existing
+workflows; ordinary review agents remain available.
+
 The extension consists of these components plus a shared constants module:
 
 1. **Extension** (`extension.ts`) - Main activation logic, command registration, bootstrap/health handshake, the Launch view's wiring (`registerLauncherView`)

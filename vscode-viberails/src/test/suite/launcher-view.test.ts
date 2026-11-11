@@ -47,10 +47,14 @@ suite('Global launch catalog', () => {
     });
     test('groups presets and actions and discards responses after backend shutdown', async () => {
         let ready = true;
-        let response: Promise<unknown> = Promise.resolve({ items: [item(), item('action_1', { definitionType: 'action', kind: 'vca' })] });
+        const quality = item('quality', { definitionType: 'action', kind: 'code-quality' });
+        let response: Promise<unknown> = Promise.resolve({ items: [item(), item('action_1', { definitionType: 'action', kind: 'vca' }), quality] });
         const provider = new LauncherTreeDataProvider({ isBackendReady: () => ready, fetchItems: () => response });
         await provider.refresh();
         assert.deepEqual(provider.getChildren().map(row => row.label), ['Agents and Quick Launches', 'Actions']);
+        assert.deepEqual(provider.getItems().map(row => row.id), ['preset_1', 'action_1']);
+        assert.equal(isLauncherItemRunnable(quality), false);
+        assert.equal(quality.enabled, true);
         let resolve!: (value: unknown) => void;
         response = new Promise(done => { resolve = done; });
         const pending = provider.refresh(); ready = false; resolve({ items: [item()] }); await pending;

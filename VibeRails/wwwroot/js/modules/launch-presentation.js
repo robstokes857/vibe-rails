@@ -8,6 +8,9 @@ const kinds = {
     'code-quality': { label: 'Code quality check', icon: 'list-check' }
 };
 
+/** VIBE-309: hide the built-in quality Action offering without changing saved workflows. */
+export const isLaunchVisible = item => item?.kind !== 'code-quality';
+
 /** Shared identity for an AI Agents catalog row and its Quick actions entry. */
 export function launchPresentation(item) {
     const brand = item.cli ? getCliBrand(item.cli) : null;

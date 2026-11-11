@@ -279,12 +279,12 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     }
 
     /// <inheritdoc />
-    public void RecordAgentSessionEnd(string sessionId)
+    public void RecordAgentSessionEnd(string sessionId, string reason = DTOs.AgentSessionClosedPayload.Reason)
     {
         lock (s_stateLock)
         {
             if (s_outputWriters.TryGetValue(sessionId, out var writer))
-                writer.SetCompletionMessage(DTOs.AgentSessionClosedPayload.Reason);
+                writer.SetCompletionMessage(reason);
         }
     }
 

@@ -668,6 +668,10 @@ public class TerminalRunner
                 _stateService.TrackRemoteConnection(sessionId, activeRemoteConn);
             }
 
+            // Both native and tab launches come through here. Quick Launches and ordinary
+            // interactive terminals stay open; only a snapshotted Agent owns an idle deadline.
+            // Attach after startup's synthetic output and before either caller starts the PTY reader.
+            AgentIdleConsumer.Attach(terminal, launch?.Run.Snapshot.Preset);
             return (terminal, sessionId, activeRemoteConn);
         }
         catch
@@ -972,7 +976,8 @@ public class TerminalRunner
             try { exitCode = terminal.ExitCode; } catch { }
         }
 
-        if (terminal.CompletedByAgent) _stateService.RecordAgentSessionEnd(sessionId);
+        if (terminal.AgentCompletionReason is { } completionReason)
+            _stateService.RecordAgentSessionEnd(sessionId, completionReason);
         await CompleteSessionAsync(sessionId, exitCode);
         return exitCode;
     }
@@ -1080,7 +1085,8 @@ public class TerminalRunner
             try { exitCode = terminal.ExitCode; } catch { }
         }
 
-        if (terminal.CompletedByAgent) _stateService.RecordAgentSessionEnd(sessionId);
+        if (terminal.AgentCompletionReason is { } completionReason)
+            _stateService.RecordAgentSessionEnd(sessionId, completionReason);
         await CompleteSessionAsync(sessionId, exitCode);
         return exitCode;
     }

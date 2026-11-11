@@ -63,12 +63,16 @@ public sealed class CompletedTerminalOutputTests
     }
 
     [Theory]
-    [InlineData(true, true)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(false, false)]
-    public async Task OwnedSessionFinalizesRecordingBeforeAnnouncingAgentClosure(bool byAgent, bool readReleasedByDisposal)
+    [InlineData(true, true, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, true)]
+    [InlineData(false, false, true)]
+    public async Task OwnedSessionFinalizesRecordingBeforeAnnouncingAgentClosure(bool byAgent, bool readReleasedByDisposal, bool byIdle)
     {
+        var automaticallyClosed = byAgent || byIdle;
+        var reason = byIdle ? AgentSessionClosedPayload.IdleReason : AgentSessionClosedPayload.Reason;
         var writes = new List<TerminalOutputWrite>();
         var completed = false;
         var disposed = false;
@@ -95,7 +99,7 @@ public sealed class CompletedTerminalOutputTests
         using var subscription = bus.Subscribe(e =>
         {
             Assert.True(completed);
-            Assert.Contains(writes, w => System.Text.Encoding.UTF8.GetString(w.Data).Contains(AgentSessionClosedPayload.Reason));
+            Assert.Contains(writes, w => System.Text.Encoding.UTF8.GetString(w.Data).Contains(reason));
             events.Add(e);
         });
         var runner = new TerminalRunner(state, Mock.Of<ICommandService>(), Mock.Of<ILocalToolApiContext>(),
@@ -124,6 +128,12 @@ public sealed class CompletedTerminalOutputTests
                 Assert.True(await service.CompleteAgentSessionAsync(sessionId));
                 pty.Verify(p => p.KillProcessTree(), Times.Once);
             }
+            else if (byIdle)
+            {
+                terminal.CompleteAfterIdle();
+                terminal.CompleteAfterIdle();
+                pty.Verify(p => p.KillProcessTree(), Times.Once);
+            }
             // A provider that ignores cancellation AND disposal must not hold the lifecycle gate.
             await service.StopSessionAsync().WaitAsync(TimeSpan.FromSeconds(8), TestContext.Current.CancellationToken);
             await service.StopSessionAsync();
@@ -135,10 +145,10 @@ public sealed class CompletedTerminalOutputTests
             Assert.Equal(readReleasedByDisposal ? "last output after pipe closure" : "", Encoding.UTF8.GetString(live.ToArray()));
             var raw = writes.Where(w => w.Kind == TerminalOutputKind.Legacy).ToArray();
             if (readReleasedByDisposal) Assert.Equal("last output after pipe closure", Encoding.UTF8.GetString(raw[0].Data));
-            Assert.Equal((byAgent ? 1 : 0) + (readReleasedByDisposal ? 1 : 0), raw.Length);
-            if (byAgent) Assert.Contains(AgentSessionClosedPayload.Reason, Encoding.UTF8.GetString(raw[^1].Data));
-            Assert.Equal(byAgent ? 1 : 0, events.Count);
-            if (byAgent) Assert.Equal("agent_session_closed", events[0].Type);
+            Assert.Equal((automaticallyClosed ? 1 : 0) + (readReleasedByDisposal ? 1 : 0), raw.Length);
+            if (automaticallyClosed) Assert.Contains(reason, Encoding.UTF8.GetString(raw[^1].Data));
+            Assert.Equal(automaticallyClosed ? 1 : 0, events.Count);
+            if (automaticallyClosed) Assert.Equal("agent_session_closed", events[0].Type);
             repository.Verify(r => r.CompleteSessionAsync(sessionId, 0), Times.Once);
             Assert.NotNull(await service.CaptureSnapshotAsync(TestContext.Current.CancellationToken)); // Recording/snapshot survives the live session.
         }

@@ -15,16 +15,20 @@ namespace Tests.Services.Terminal;
 public sealed class TerminalProcessExitTests
 {
     [Theory]
-    [InlineData(0)]
-    [InlineData(7)]
-    public async Task AgentCompletionDoesNotRelabelAnAlreadyExitedProcess(int exitCode)
+    [InlineData(0, false)]
+    [InlineData(7, false)]
+    [InlineData(0, true)]
+    [InlineData(7, true)]
+    public async Task AgentCompletionDoesNotRelabelAnAlreadyExitedProcess(int exitCode, bool idle)
     {
         using var output = new GatedReadStream();
         var pty = new ExitingPty(output);
         await using var terminal = new TerminalPty(pty, 80, 24);
         pty.MarkExited(exitCode);
-        terminal.CompleteByAgent();
+        if (idle) terminal.CompleteAfterIdle();
+        else terminal.CompleteByAgent();
         Assert.False(terminal.CompletedByAgent);
+        Assert.Null(terminal.AgentCompletionReason);
         Assert.Equal(exitCode, terminal.ExitCode);
         Assert.Equal(0, pty.TreeKills);
     }

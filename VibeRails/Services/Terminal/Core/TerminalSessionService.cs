@@ -752,11 +752,11 @@ public class TerminalSessionService : ITerminalSessionService
             }
 
             TerminalResizeCoordinator.ClearSession(teardown.SessionId);
-            if (teardown.TerminalToDispose?.CompletedByAgent == true)
-                _stateService.RecordAgentSessionEnd(teardown.SessionId);
+            if (teardown.TerminalToDispose?.AgentCompletionReason is { } completionReason)
+                _stateService.RecordAgentSessionEnd(teardown.SessionId, completionReason);
             await _stateService.CompleteSessionAsync(teardown.SessionId, exitCode);
             await VibeRails.Services.Launches.LaunchExecution.CompleteSessionAsync(teardown.SessionId, exitCode);
-            if (teardown.TerminalToDispose?.CompletedByAgent == true)
+            if (teardown.TerminalToDispose?.AgentCompletionReason is not null)
                 agentClosedSessionId = teardown.SessionId;
         }
         finally

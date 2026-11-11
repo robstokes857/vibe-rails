@@ -74,6 +74,12 @@ No schema generation bump, backfill, data conversion or manual migration is requ
 
 ## Frontend contract (VIBE-292 / VB-4OG9T-366)
 
+VIBE-309 temporarily hides built-in Code quality Actions from UI catalogs, Quick actions,
+Board add/run choices and the definition editor. Users can create ordinary review agents.
+This is a presentation filter: definitions, APIs, scheduling, existing lane selections,
+check evidence and history remain intact. Saved lane steps can still be removed. The separate
+repository Quality page remains available. No stored data is deleted or converted.
+
 The source contracts are `LaunchContract.cs` and
 `VibeRails.Data.Abstractions/Launches/LaunchRecords.cs`. Property names are camelCase
 on HTTP. All routes below are under `/api/v1`, on the existing authenticated root
@@ -198,7 +204,13 @@ without creating or finalizing a session. Dispatch validation failures and reque
 cancellation before handoff also release the owned claim, using cleanup independent
 of the cancelled request. Once handed off, the execution owner retains responsibility
 for termination and capacity release. CLI deadlines are watched by
-the owning child; script deadlines use the script runner. Root recovery compares
+the owning child; script deadlines use the script runner. Prompt-bearing Agent presets
+also finish after two minutes without PTY output, for native and in-app runs. This closes
+the specific CLI process tree, finalizes its recording and removes its agent tab; Quick
+Launches and ordinary interactive terminals remain open. Every nonempty PTY chunk restarts
+the idle window. Inactivity is recorded distinctly from an explicit `end_agent_session`
+call, and a successful idle close never supplies a missing review/check verdict.
+Root recovery compares
 session outcomes and PID creation times. Scripts also record child identity so
 a dead root cannot make a live script appear finished. A crash before durable
 spawn acknowledgment remains uncertain and reserves capacity until the user confirms recovery through `/resolve`. Unstarted sealed CLI claims are reconciled safely because spawn must follow the durable start. There is no blind

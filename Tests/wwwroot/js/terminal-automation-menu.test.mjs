@@ -236,7 +236,7 @@ test('agent closure removes only the calling tab, cancels undo, and uses a norma
     assert.equal(undoRefresh, 1);
     assert.deepEqual(history, ['recording']);
     assert.equal(notices.length, 1);
-    assert.match(notices[0][1], /Terminal closed because the agent called end_agent_session/);
+    assert.match(notices[0][1], /The agent terminal has closed/);
     assert.match(notices[0][1], /Replay.*Board/);
     assert.deepEqual(notices[0].slice(2), ['info']);
 });

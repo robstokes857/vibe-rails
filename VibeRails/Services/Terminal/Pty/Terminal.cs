@@ -41,7 +41,7 @@ public sealed class Terminal : IAsyncDisposable
     private bool _outputQuiesced;
     private bool _consumersClosed;
     private int _hasExited;
-    private int _completedByAgent;
+    private int _agentCompletion;
     private int _cols;
     private int _rows;
 
@@ -54,12 +54,18 @@ public sealed class Terminal : IAsyncDisposable
     internal static readonly TimeSpan DefaultExitDrainWindow = TimeSpan.FromSeconds(2);
 
     public int Pid => _pty.Pid;
-    public int ExitCode => Volatile.Read(ref _completedByAgent) == 1 ? 0 : _pty.ExitCode;
+    public int ExitCode => Volatile.Read(ref _agentCompletion) != 0 ? 0 : _pty.ExitCode;
     public int Cols => _cols;
     public int Rows => _rows;
     public bool HasExited => Volatile.Read(ref _hasExited) == 1;
     /// <summary>True only when this PTY accepted an explicit agent completion.</summary>
-    public bool CompletedByAgent => Volatile.Read(ref _completedByAgent) == 1;
+    public bool CompletedByAgent => Volatile.Read(ref _agentCompletion) == 1;
+    internal string? AgentCompletionReason => Volatile.Read(ref _agentCompletion) switch
+    {
+        1 => DTOs.AgentSessionClosedPayload.Reason,
+        2 => DTOs.AgentSessionClosedPayload.IdleReason,
+        _ => null
+    };
     public bool EncodeBareLineFeedAsWin32ShiftEnter { get; set; }
     public bool IsSyncOutputActive
     {
@@ -647,11 +653,16 @@ public sealed class Terminal : IAsyncDisposable
     internal void KillProcessTree() => _pty.KillProcessTree();
 
     /// <summary>The agent explicitly finished. Drain/finalize through the ordinary process-exit path.</summary>
-    internal void CompleteByAgent()
+    internal void CompleteByAgent() => CompleteAgent(1);
+
+    /// <summary>An idle Agent uses the same bounded process-tree teardown and recording finalization.</summary>
+    internal void CompleteAfterIdle() => CompleteAgent(2);
+
+    private void CompleteAgent(int reason)
     {
-        if (HasExited || HasPtyProcessExited() || Interlocked.CompareExchange(ref _completedByAgent, 1, 0) != 0) return;
+        if (_disposed || HasExited || HasPtyProcessExited() || Interlocked.CompareExchange(ref _agentCompletion, reason, 0) != 0) return;
         try { _pty.KillProcessTree(); }
-        catch { Volatile.Write(ref _completedByAgent, 0); throw; }
+        catch { Volatile.Write(ref _agentCompletion, 0); throw; }
     }
 
     public async ValueTask DisposeAsync()

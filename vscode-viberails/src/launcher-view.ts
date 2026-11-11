@@ -39,13 +39,17 @@ export function normalizeLauncherItems(raw: unknown): LauncherItem[] {
             ineligibleReason: typeof item.ineligibleReason === 'string' ? item.ineligibleReason : undefined }));
 }
 export function isLauncherItemRunnable(item: LauncherItem): boolean {
-    return item.enabled && !item.retired && item.canLaunch;
+    return item.kind !== 'code-quality' && item.enabled && !item.retired && item.canLaunch;
 }
-export function visibleLauncherItems(items: LauncherItem[]): LauncherItem[] { return items; }
+// VIBE-309: match the browser's isLaunchVisible without changing the stored catalog.
+export function visibleLauncherItems(items: LauncherItem[]): LauncherItem[] {
+    return items.filter(item => item.kind !== 'code-quality');
+}
 export function launcherEmptyMessage(items: LauncherItem[] | null): string | undefined {
     if (items === null) return LAUNCHER_LOAD_FAILED_MESSAGE;
-    if (!items.length) return LAUNCHER_EMPTY_MESSAGE;
-    return items.some(isLauncherItemRunnable) ? undefined : LAUNCHER_NONE_RUNNABLE_MESSAGE;
+    const visible = visibleLauncherItems(items);
+    if (!visible.length) return LAUNCHER_EMPTY_MESSAGE;
+    return visible.some(isLauncherItemRunnable) ? undefined : LAUNCHER_NONE_RUNNABLE_MESSAGE;
 }
 export function launcherItemDescription(item: LauncherItem): string {
     return isLauncherItemRunnable(item) ? item.kind : 'Unavailable';

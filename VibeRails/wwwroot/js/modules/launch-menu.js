@@ -1,6 +1,6 @@
 import { escapeHtml } from './utils.js';
 import { LaunchApi } from './launch-api.js';
-import { launchPresentation } from './launch-presentation.js';
+import { isLaunchVisible, launchPresentation } from './launch-presentation.js';
 
 const footer = '<div class="launch-menu-footer"><button type="button" class="btn btn-link launch-menu-manage" data-launch-manage>Manage AI Agents<i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></div>';
 
@@ -68,7 +68,7 @@ export class LaunchMenu {
                 signal: abort.signal
             });
             if (abort.signal.aborted) return;
-            const available = items.filter((item) => item.canLaunch);
+            const available = items.filter((item) => item.canLaunch && isLaunchVisible(item));
             panel.innerHTML = '<h2 class="launch-menu-heading">Quick actions</h2>' +
                 (available.length
                     ? `<ul class="launch-menu-list">${available.map(launchRow).join('')}</ul>`

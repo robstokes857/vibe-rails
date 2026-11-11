@@ -24,8 +24,14 @@ startup/failure from the run status; enqueue alone is not successful execution.
 Calls with `focusTerminal:true` retain the existing VibeRails terminal-tab flow.
 
 The catalog presents Agents, Quick Launches and Scripts with the shared surface and
-empty-state styles. **Create script** opens the script-only Action editor; existing checks
-remain editable under Board checks. Each catalog row exposes **Edit** and a confirmed **Delete**
+empty-state styles. **Create script** opens the script-only Action editor; existing VCA checks
+remain editable under Board checks. VIBE-309 temporarily hides built-in Code quality Actions
+from the catalog, Quick actions, Board add/run choices and the definition editor. Use normal
+AI agents for code-quality review. `isLaunchVisible` in `launch-presentation.js` owns this UI
+filter; it does not filter API responses, retire definitions or change existing lane execution.
+Saved lane steps stay visible/removable and retain their order, gates and history. The separate
+repository Quality page and saved check/report readers remain available.
+Each catalog row exposes **Edit** and a confirmed **Delete**
 action. Delete uses revision-checked retirement, hides the definition from the catalog and retains
 its history and attachments. The Agent editor hides Purpose, defaults new records to `work`,
 and preserves an existing record's purpose when saving. Initial prompts stay directly editable
@@ -65,9 +71,10 @@ Keep this list aligned with launch placeholder support; retired step tokens stay
 
 `launch-lane-editor.js` keeps ordered definition IDs and process/result/review gates.
 Its add picker uses the shared Tom Select helper, including search, viewport positioning,
-Escape and disposal. VCA and code-quality checks can be created from this picker; creating
+Escape and disposal. VCA checks can be created from this picker; creating
 a definition does not save the lane order or run it. The lane save remains revision-checked.
-New VCA checks use working-tree scope; new code-quality checks use card-linked commits.
+New VCA checks use working-tree scope. Previously saved Code quality selections remain
+manageable, but cannot be added again through this picker while the offering is hidden.
 `board-lane-agent-body.js` polls current per-card lane progress, with explicit verdicts,
 retry, skip and session links. `board-card-automations.js` queues definitions with the
 saved card context. Managers and ordinary Start work use their existing Board contracts.

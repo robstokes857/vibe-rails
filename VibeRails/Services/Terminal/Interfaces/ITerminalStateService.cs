@@ -28,5 +28,5 @@ public interface ITerminalStateService
     Task RequestRemoteViewerDisconnectAsync(string sessionId, string reason);
     Task CompleteSessionAsync(string sessionId, int exitCode);
     /// <summary>Set the recording-only footer after the PTY has closed and drained.</summary>
-    void RecordAgentSessionEnd(string sessionId);
+    void RecordAgentSessionEnd(string sessionId, string reason = DTOs.AgentSessionClosedPayload.Reason);
 }

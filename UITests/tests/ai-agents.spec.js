@@ -209,7 +209,8 @@ test('quick actions use explicit Run buttons and preserve launch and keyboard be
         { id: 'release', name: 'Release Vibe Rails Client App', cli: 'codex', initialPrompt: 'Release', enabled: true },
         { id: 'hidden', name: 'Disabled agent', cli: 'codex', initialPrompt: 'Hidden', enabled: false }
     );
-    state.actions.push({ id: 'script', name: 'Build <client> & test', kind: 'script' });
+    state.actions.push({ id: 'script', name: 'Build <client> & test', kind: 'script' },
+        { id: 'quality', name: 'Code quality check', kind: 'code-quality', enabled: true });
     await page.locator('[data-agent-refresh]').click();
     await expect(page.getByRole('button', { name: 'Release Vibe Rails Client App', exact: true })).toBeVisible();
     await page.evaluate(() => {
@@ -233,6 +234,7 @@ test('quick actions use explicit Run buttons and preserve launch and keyboard be
     await expect.poll(() => panel.locator('img.launch-provider-logo').evaluate(el => el.complete && el.naturalWidth > 0)).toBe(true);
     await expect(panel.locator('.fa-code')).toBeVisible();
     await expect(panel.getByText('Disabled agent')).toHaveCount(0);
+    await expect(panel.getByText('Code quality check', { exact: true })).toHaveCount(0);
     await expect(panel.getByText('Build <client> & test', { exact: true })).toBeVisible();
     await expect(panel.locator('client')).toHaveCount(0);
     const runAgent = panel.getByRole('button', { name: 'Run Release Vibe Rails Client App', exact: true });
@@ -576,13 +578,18 @@ for (const width of [320, 375, 768, 1024, 1440]) test(`catalog follows the share
     await page.screenshot({ path: testInfo.outputPath(`catalog-empty-${width}.png`), fullPage: true });
     state.presets.push({ id: 'reviewer', name: 'Review changes', cli: 'codex', initialPrompt: 'Review', enabled: true, revision: 1 },
         { id: 'quick', name: 'Everyday Claude', cli: 'claude', initialPrompt: '', enabled: true, revision: 1 });
-    state.actions.push({ id: 'test', name: 'Run project tests', kind: 'script', enabled: true, revision: 1 });
+    state.actions.push({ id: 'test', name: 'Run project tests', kind: 'script', enabled: true, revision: 1 },
+        { id: 'quality', name: 'Code quality check', kind: 'code-quality', enabled: true, revision: 1, check: { scope: 'card' } });
     await page.locator('[data-agent-refresh]').click();
     await expect(catalog.locator('.launch-catalog-row')).toHaveCount(3);
+    await expect(catalog.getByText('Code quality check', { exact: true })).toHaveCount(0);
     expect(await catalog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
     await expect(catalog.getByRole('button', { name: 'Edit Review changes', exact: true })).toBeVisible();
     await expect(catalog.getByRole('button', { name: 'Delete Review changes', exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`catalog-populated-${width}.png`), fullPage: true });
+    await page.evaluate(() => window.app.aiAgentsController.openEditor('action', 'quality'));
+    await expect(page.locator('[data-launch-editor]')).toHaveCount(0);
+    expect(state.actions.find(action => action.id === 'quality')).toMatchObject({ enabled: true, revision: 1 });
 });
 
 for (const type of ['presets', 'actions']) test(`catalog Delete confirms and retires ${type} with the displayed revision`, async ({ page }) => {
@@ -728,20 +735,24 @@ test('history polling preserves expanded configuration, evidence and focused con
 test('ordered lane selections preserve gates and lock editing during writes',async({page})=>{
     const state=await setup(page);
     state.presets.push({id:'p1',name:'Review',cli:'codex',initialPrompt:'Review',enabled:true,revision:1},{id:'p2',name:'Test',cli:'codex',initialPrompt:'Test',enabled:true,revision:1});
+    state.actions.push({id:'quality',name:'Existing quality check',kind:'code-quality',enabled:true,revision:1});
     let saved,release;const pending=new Promise(resolve=>{release=resolve;});
     await page.route('**/api/v1/board/columns/lane/launches',async route=>{
-        if(route.request().method()==='GET')return route.fulfill({json:{revision:4,selections:[{definitionId:'p1',definitionType:'preset',gate:'review'},{definitionId:'p2',definitionType:'preset',gate:'result'}]}});
+        if(route.request().method()==='GET')return route.fulfill({json:{revision:4,selections:[{definitionId:'p1',definitionType:'preset',gate:'review'},{definitionId:'p2',definitionType:'preset',gate:'result'},{definitionId:'quality',definitionType:'action',gate:'result'}]}});
         saved=route.request().postDataJSON();await pending;await route.fulfill({json:{...saved,revision:5}});
     });
     await page.evaluate(async()=>{const {mountLaunchLane}=await import('/js/modules/launch-lane-editor.js');const host=document.createElement('div');document.querySelector('#app-content').replaceChildren(host);mountLaunchLane(window.app,host,'lane');});
+    await expect(page.locator('[data-lane-selection-list] strong').last()).toHaveText('Existing quality check');
+    await expect(page.locator('[data-lane-add-choice] option[value="quality"]')).toHaveCount(0);
+    await expect(page.locator('[data-lane-add-choice] option[value="new:code-quality"]')).toHaveCount(0);
     await page.getByRole('button',{name:'Move Test up',exact:true}).click();
     await page.getByRole('button',{name:'Save lane settings',exact:true}).click();
     await expect(page.locator('[data-lane-gate]').first()).toBeDisabled();
-    expect(saved).toMatchObject({revision:4,selections:[{definitionId:'p2',gate:'result'},{definitionId:'p1',gate:'review'}]});release();
+    expect(saved).toMatchObject({revision:4,selections:[{definitionId:'p2',gate:'result'},{definitionId:'p1',gate:'review'},{definitionId:'quality',gate:'result'}]});release();
     await expect(page.locator('[data-lane-gate]').first()).toBeEnabled();
 });
 
-for (const [kind, name, scope] of [['vca', 'VCA check', 'working-tree'], ['code-quality', 'Code quality check', 'card']])
+for (const [kind, name, scope] of [['vca', 'VCA check', 'working-tree']])
 test(`lane picker adds ${kind} without running or saving the lane early`, async ({ page }) => {
     const state = await setup(page);
     let savedLane, release;
@@ -822,8 +833,18 @@ test('Action runs show saved check evidence without using a Board review route',
         resultJson: JSON.stringify({ details: { findings: ['Cyclomatic complexity'] } })
     } }));
     await page.locator('[data-agent-refresh]').click();
-    await page.getByRole('button', { name: 'Quality gate', exact: true }).click();
-    await page.getByRole('button', { name: 'Check result' }).click();
+    await expect(page.getByRole('button', { name: 'Quality gate', exact: true })).toHaveCount(0);
+    // Saved results remain readable independently of the hidden definition editor.
+    await page.evaluate(async () => {
+        const { mountLaunchEvidence } = await import('/js/modules/launch-evidence.js');
+        const { LaunchApi } = await import('/js/modules/launch-api.js');
+        const host = document.createElement('div');
+        host.setAttribute('data-run-result', 'check_run');
+        document.querySelector('#app-content').replaceChildren(host);
+        mountLaunchEvidence(window.app, host, new LaunchApi(window.app), {
+            id: 'check_run', evidenceId: 'check_result', snapshot: { action: { kind: 'code-quality' } }
+        }, new AbortController().signal);
+    });
     await expect(page.locator('[data-run-result]')).toContainText('Two findings require attention');
     await page.getByText('Full recorded output', { exact: true }).click();
     await expect(page.locator('[data-run-result]')).toContainText('Cyclomatic complexity');

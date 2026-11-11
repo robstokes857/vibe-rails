@@ -65,6 +65,16 @@ Ordinary exits keep their tabs. Native Workers record the footer without closing
 Automation workflow. Tests: `CompletedTerminalOutputTests`, `SessionOutputWriterTests`,
 `AutomationTabCapacityTests`, `terminal-automation-menu.test.mjs`.
 
+Prompt-bearing launch presets also close after two minutes without PTY output.
+`AgentIdleConsumer` attaches in `TerminalRunner.CreateSessionAsync` for both tab and native
+launches, after startup output and before the read loop. Every nonempty output chunk resets
+the deadline; Quick Launches, plain CLI sessions and Actions have no such monitor. The timer
+captures only that PTY, is disposed with it, and never cancels another run or the root host.
+Idle completion uses the same process-tree kill, bounded drain, recording finalization and
+tab-close event as explicit completion, with its own recording footer. Natural failures keep
+their exit code, and neither kind of completion supplies a review verdict.
+Tests: `AgentIdleConsumerTests`, `CompletedTerminalOutputTests`, `TerminalProcessExitTests`.
+
 CommandService supplies process-local `VIBERAILS_AGENT_CONTROL_*` contact credentials after
 custom Environment fields, independently of proxy settings and inherited root tool API routing.
 Codex forwards their names to its MCP subprocess; credential values never enter launch argv.

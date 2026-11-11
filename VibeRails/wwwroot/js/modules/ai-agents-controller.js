@@ -1,5 +1,5 @@
 import { escapeHtml, confirmDialog } from './utils.js';
-import { launchPresentation } from './launch-presentation.js';
+import { isLaunchVisible, launchPresentation } from './launch-presentation.js';
 import { launchProjectField, mountLaunchProjects } from './launch-project-picker.js';
 import {
     LaunchApi,
@@ -117,7 +117,7 @@ export class AiAgentsController {
             if (this.catalogSignature !== signature)
                 window.__viberails_launcherChanged__?.();
             this.catalogSignature = signature;
-            this.items = catalog.items.filter((item) => !item.retired);
+            this.items = catalog.items.filter((item) => !item.retired && isLaunchVisible(item));
             this.app.data.launchCatalog = this.items;
             await this.app.llmPickerController.loadPreferences({ force: true });
             if (!this.root || abort.signal.aborted) return;
@@ -266,6 +266,10 @@ export class AiAgentsController {
             return;
         }
         if (abort.signal.aborted) return;
+        if (saved && !isLaunchVisible(saved)) {
+            this.app.showToast('AI Agents', 'Create an agent to review code quality.', 'info');
+            return;
+        }
         const definition = {
             ...(saved || {}),
             id,
