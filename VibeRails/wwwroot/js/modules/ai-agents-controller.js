@@ -1,5 +1,5 @@
 import { escapeHtml, confirmDialog } from './utils.js';
-import { isLaunchVisible, launchPresentation } from './launch-presentation.js';
+import { launchPresentation, libraryScripts } from './launch-presentation.js';
 import { launchProjectField, mountLaunchProjects } from './launch-project-picker.js';
 import {
     LaunchApi,
@@ -44,6 +44,8 @@ const lines = (value) =>
     String(value || '')
         .split('\n')
         .filter((line) => line.length);
+/** One wording for Delete, on a catalog row and in the editor: both retire the definition. */
+const DELETE_DEFINITION_MESSAGE = 'It will be removed from AI Agents and become unavailable for future runs in all projects, including Board lanes and schedules. Its history and attachments are retained.';
 
 export class AiAgentsController {
     constructor(app) {
@@ -57,11 +59,19 @@ export class AiAgentsController {
     unload() {
         this.loadAbort?.abort();
         this.editorLoad?.abort();
+        this.unfollowScripts?.();
+        this.unfollowScripts = null;
+        this.catalogLoaded = false;
         this.root = null;
     }
     async loadView(data = {}) {
         this.unload();
         this.root = document.getElementById('app-content');
+        // Signing, renaming or removing a library script (here, in its workbench or from
+        // VS Code) repaints the Scripts section without another catalog request.
+        this.unfollowScripts = this.pythonScripts.onStateChange(() => {
+            if (this.root && this.catalogLoaded) this.renderCatalog();
+        });
         this.root.innerHTML = `<div class="ai-agents-view"><header class="vb-page-header"><span class="launch-section-icon" aria-hidden="true"><i class="fa-solid fa-robot"></i></span><div class="vb-page-heading"><h1 class="vb-page-title">AI Agents</h1><p class="vb-page-description">Save AI setups and scripts to run on demand or from Board lanes.</p></div><div class="vb-page-actions"><button class="btn btn-primary" data-agent-new="preset"><i class="fa-solid fa-plus" aria-hidden="true"></i> Create agent</button><button class="btn btn-secondary" data-agent-new="action"><i class="fa-solid fa-code" aria-hidden="true"></i> Create script</button><button class="btn btn-secondary" data-agent-refresh><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Refresh</button></div></header><div class="launch-catalog" data-agent-catalog></div><p class="launch-save-error" data-agent-page-error role="alert"></p></div>`;
         this.root.querySelector('.ai-agents-view').addEventListener('click', (event) => {
             const button = event.target.closest('[data-agent-new]');
@@ -86,6 +96,20 @@ export class AiAgentsController {
         this.root
             .querySelector('[data-agent-catalog]')
             .addEventListener('click', (event) => {
+                const script = event.target.closest('[data-library-script] button[data-script-action]');
+                if (script) {
+                    const id = script.closest('[data-library-script]').dataset.libraryScript;
+                    const action = script.dataset.scriptAction;
+                    // The library's own flows: workbench, private script terminal, PIN prompt
+                    // and the confirmed removal that leaves the file on disk.
+                    if (action === 'open') this.pythonScripts.openScript(id);
+                    else if (action === 'run')
+                        void this.pythonScripts.run(id).catch((error) =>
+                            this.app.showToast('AI Agents', error?.message || 'Could not run that script.', 'error'));
+                    else if (action === 'sign') void this.pythonScripts.approve(id);
+                    else if (action === 'remove') void this.pythonScripts.deleteScript(id);
+                    return;
+                }
                 const button = event.target.closest(
                     '[data-agent-edit], [data-agent-run], [data-agent-delete]'
                 );
@@ -111,40 +135,23 @@ export class AiAgentsController {
         this.loadAbort?.abort();
         const abort = (this.loadAbort = new AbortController());
         try {
-            const catalog = await this.api.catalog({ signal: abort.signal, includeAll: this.manageAll });
+            // The signed script library is a separate store; its controller reports a failed
+            // read as an empty list, so it can never blank the catalog.
+            const [catalog] = await Promise.all([
+                this.api.catalog({ signal: abort.signal, includeAll: this.manageAll }),
+                this.pythonScripts.refresh({ quiet: true })
+            ]);
             if (abort.signal.aborted) return;
             const signature = JSON.stringify(catalog.items);
             if (this.catalogSignature !== signature)
                 window.__viberails_launcherChanged__?.();
             this.catalogSignature = signature;
-            this.items = catalog.items.filter((item) => !item.retired && isLaunchVisible(item));
+            this.items = catalog.items.filter((item) => !item.retired);
             this.app.data.launchCatalog = this.items;
             await this.app.llmPickerController.loadPreferences({ force: true });
             if (!this.root || abort.signal.aborted) return;
-            const groups = [
-                ['Agents', 'robot', 'Save a prompt and AI settings for a repeatable task.', 'Create agent', 'preset', (item) => item.kind === 'agent'],
-                ['Quick Launches', 'bolt', 'Save AI settings without a prompt for a ready-to-use terminal.', 'Create quick launch', 'preset', (item) => item.kind === 'quick-launch'],
-                ['Scripts', 'code', 'Run a script yourself or when a card enters a Board lane.', 'Create script', 'action', (item) => item.kind === 'script']
-            ];
-            // Existing checks remain editable; new checks are added from a Board lane.
-            if (this.items.some((item) => item.definitionType === 'action' && item.kind !== 'script'))
-                groups.push(['Board checks', 'list-check', 'Checks available to add to Board lanes.', '', '', (item) => item.definitionType === 'action' && item.kind !== 'script']);
-            this.root.querySelector('[data-agent-catalog]').innerHTML = groups
-                .map(
-                    ([title, icon, description, action, type, filter], index) => {
-                        const entries = this.items.filter(filter);
-                        return `<section class="launch-catalog-section" aria-labelledby="launch-section-${index}"><header class="launch-section-heading"><span class="launch-section-icon" aria-hidden="true"><i class="fa-solid fa-${icon}"></i></span><div><h2 id="launch-section-${index}">${title} <span class="launch-section-count">${entries.length}</span></h2><p>${description}</p></div></header>${
-                            entries
-                                .map((item) => {
-                                    const presentation = launchPresentation(item);
-                                    return `<article class="launch-catalog-row">${presentation.logoHtml}<div class="launch-catalog-copy"><button class="btn btn-link" data-agent-edit="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button><p>${escapeHtml(presentation.subtitle)}</p>${item.ineligibleReason ? `<p class="text-warning">Unavailable: ${escapeHtml(item.ineligibleReason)}</p>` : ''}</div><div class="launch-catalog-actions"><button type="button" class="btn btn-link" data-agent-edit="${escapeHtml(item.id)}" aria-label="Edit ${escapeHtml(item.name)}"><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit</button><button class="btn btn-secondary" data-agent-run="${escapeHtml(item.id)}" aria-label="Run ${escapeHtml(item.name)}"${item.canLaunch ? '' : ' disabled'}><i class="fa-solid fa-play" aria-hidden="true"></i> Run</button><button type="button" class="btn btn-danger" data-agent-delete="${escapeHtml(item.id)}" aria-label="Delete ${escapeHtml(item.name)}"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete</button></div></article>`;
-                                })
-                                .join('') ||
-                            `<div class="launch-catalog-empty"><i class="fa-solid fa-${icon}" aria-hidden="true"></i><h3>No ${title.toLowerCase()} yet</h3><button class="btn btn-secondary" data-agent-new="${type}"><i class="fa-solid fa-plus" aria-hidden="true"></i> ${action}</button></div>`
-                        }</section>`;
-                    }
-                )
-                .join('');
+            this.catalogLoaded = true;
+            this.renderCatalog();
             this.root.querySelector('[data-agent-page-error]').textContent = '';
         } catch (error) {
             if (this.root && !abort.signal.aborted)
@@ -152,13 +159,57 @@ export class AiAgentsController {
                     error.message;
         }
     }
+    /** Draws the sections from the loaded catalog and the script library's current state. */
+    renderCatalog() {
+        const groups = [
+            ['Agents', 'robot', 'Save a prompt and AI settings for a repeatable task.', 'Create agent', 'preset', (item) => item.kind === 'agent'],
+            ['Quick Launches', 'bolt', 'Save AI settings without a prompt for a ready-to-use terminal.', 'Create quick launch', 'preset', (item) => item.kind === 'quick-launch'],
+            ['Scripts', 'code', 'Run a script yourself or when a card enters a Board lane.', 'Create script', 'action', (item) => item.kind === 'script', libraryScripts(this.pythonScripts.state)]
+        ];
+        // Existing checks remain editable; new checks are added from a Board lane.
+        if (this.items.some((item) => item.definitionType === 'action' && item.kind !== 'script'))
+            groups.push(['Board checks', 'list-check', 'Checks available to add to Board lanes.', '', '', (item) => item.definitionType === 'action' && item.kind !== 'script']);
+        this.root.querySelector('[data-agent-catalog]').innerHTML = groups
+            .map(
+                ([title, icon, description, action, type, filter, scripts = []], index) => {
+                    const entries = this.items.filter(filter);
+                    return `<section class="launch-catalog-section" aria-labelledby="launch-section-${index}"><header class="launch-section-heading"><span class="launch-section-icon" aria-hidden="true"><i class="fa-solid fa-${icon}"></i></span><div><h2 id="launch-section-${index}">${title} <span class="launch-section-count">${entries.length + scripts.length}</span></h2><p>${description}</p></div></header>${
+                        entries
+                            .map((item) => {
+                                const presentation = launchPresentation(item);
+                                return `<article class="launch-catalog-row">${presentation.logoHtml}<div class="launch-catalog-copy"><button class="btn btn-link" data-agent-edit="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button><p>${escapeHtml(presentation.subtitle)}</p>${item.ineligibleReason ? `<p class="text-warning">Unavailable: ${escapeHtml(item.ineligibleReason)}</p>` : ''}</div><div class="launch-catalog-actions"><button type="button" class="btn btn-link" data-agent-edit="${escapeHtml(item.id)}" aria-label="Edit ${escapeHtml(item.name)}"><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit</button><button class="btn btn-secondary" data-agent-run="${escapeHtml(item.id)}" aria-label="Run ${escapeHtml(item.name)}"${item.canLaunch ? '' : ' disabled'}><i class="fa-solid fa-play" aria-hidden="true"></i> Run</button><button type="button" class="btn btn-danger" data-agent-delete="${escapeHtml(item.id)}" aria-label="Delete ${escapeHtml(item.name)}"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete</button></div></article>`;
+                            })
+                            .concat(scripts.map((script) => this.libraryScriptRow(script)))
+                            .join('') ||
+                        `<div class="launch-catalog-empty"><i class="fa-solid fa-${icon}" aria-hidden="true"></i><h3>No ${title.toLowerCase()} yet</h3><button class="btn btn-secondary" data-agent-new="${type}"><i class="fa-solid fa-plus" aria-hidden="true"></i> ${action}</button></div>`
+                    }</section>`;
+                }
+            )
+            .join('');
+    }
+    /**
+     * A script from the signed library (added in VS Code with "Add to VibeRails Scripts…"), beside
+     * the script Actions. It keeps the library's own rules: only a signed version runs, in the
+     * private script terminal, and removing the entry leaves the file on disk.
+     */
+    libraryScriptRow(script) {
+        const name = escapeHtml(script.name);
+        const unsigned = script.status === 'modified'
+            ? 'Changed since signing. Sign it again before it can run.'
+            : 'Not signed. Sign it before it can run.';
+        return `<article class="launch-catalog-row" data-library-script="${escapeHtml(script.id)}">${script.logoHtml}<div class="launch-catalog-copy"><button class="btn btn-link" data-script-action="open">${name}</button><p>${escapeHtml(script.subtitle)}</p>${script.canRun ? '' : `<p class="text-warning">${unsigned}</p>`}</div><div class="launch-catalog-actions"><button type="button" class="btn btn-link" data-script-action="open" aria-label="Edit ${name}"><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit</button>${
+            script.canRun
+                ? `<button type="button" class="btn btn-secondary" data-script-action="run" aria-label="Run ${name}"><i class="fa-solid fa-play" aria-hidden="true"></i> Run</button>`
+                : `<button type="button" class="btn btn-secondary" data-script-action="sign" aria-label="Sign ${name}"><i class="fa-solid fa-signature" aria-hidden="true"></i> Sign</button>`
+        }<button type="button" class="btn btn-danger" data-script-action="remove" aria-label="Remove ${name} from the script library"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Remove</button></div></article>`;
+    }
     async deleteDefinition(item, button) {
         if (this.deleting.has(item.id)) return;
         this.deleting.add(item.id);
         try {
             if (!(await confirmDialog({
                 title: `Delete "${item.name}"?`,
-                message: 'It will be removed from AI Agents and become unavailable for future runs in all projects, including Board lanes and schedules. Its history and attachments are retained.',
+                message: DELETE_DEFINITION_MESSAGE,
                 confirmLabel: 'Delete',
                 danger: true
             }))) return;
@@ -266,10 +317,6 @@ export class AiAgentsController {
             return;
         }
         if (abort.signal.aborted) return;
-        if (saved && !isLaunchVisible(saved)) {
-            this.app.showToast('AI Agents', 'Create an agent to review code quality.', 'info');
-            return;
-        }
         const definition = {
             ...(saved || {}),
             id,
@@ -347,7 +394,7 @@ export class AiAgentsController {
                             ? `<details><summary>Additional settings</summary>${area('Description (optional)', 'description', saved?.description || '')}${area('Additional arguments (one argument per line)', 'argv', (saved?.additionalArgv || []).join('\n'))}${field('Timeout (minutes, optional)', 'timeout', saved?.timeoutMinutes || '', 'number')}<div data-provider-extra></div></details>`
                             : ''
                     }</div>${bindingSection(project)}`,
-                    footer: `${id ? '<button class="btn btn-sm btn-outline-danger" data-launch-retire>Retire</button>' : '<span></span>'}<div class="board-editor-actions-main"><button class="btn btn-sm btn-outline-secondary" data-launch-cancel>Cancel</button><button class="btn btn-sm btn-primary" data-launch-save>${id ? 'Save' : isPreset ? 'Create agent' : 'Create script'}</button><button class="btn btn-sm btn-outline-secondary" data-launch-run${id ? '' : ' hidden'}>Save and run</button></div><p class="launch-save-error" data-launch-error role="alert"></p>`
+                    footer: `${id ? '<button class="btn btn-sm btn-outline-danger" data-launch-retire>Delete</button>' : '<span></span>'}<div class="board-editor-actions-main"><button class="btn btn-sm btn-outline-secondary" data-launch-cancel>Cancel</button><button class="btn btn-sm btn-primary" data-launch-save>${id ? 'Save' : isPreset ? 'Create agent' : 'Create script'}</button><button class="btn btn-sm btn-outline-secondary" data-launch-run${id ? '' : ' hidden'}>Save and run</button></div><p class="launch-save-error" data-launch-error role="alert"></p>`
                 }
             )}</div>`,
             {
@@ -805,12 +852,12 @@ export class AiAgentsController {
             .querySelector('[data-launch-retire]')
             ?.addEventListener('click', async () => {
                 if (busy) return;
+                // The same confirmed, revision-checked retirement as the catalog row's Delete.
                 if (
                     !(await confirmDialog({
-                        title: 'Retire definition?',
-                        message:
-                            'It becomes unavailable for future runs. Its history and attachments are retained.',
-                        confirmLabel: 'Retire',
+                        title: `Delete "${definition.name || saved?.name || 'this definition'}"?`,
+                        message: DELETE_DEFINITION_MESSAGE,
+                        confirmLabel: 'Delete',
                         danger: true
                     }))
                 )

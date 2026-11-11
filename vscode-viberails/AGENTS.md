@@ -7,7 +7,7 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 - **Embedded Dashboard**: Opens the VibeRails dashboard directly inside VS Code as a webview panel
 - **Backend Management**: Starts the VibeRails .NET backend quietly after VS Code opens a trusted workspace (disable with `viberails.autoStart`). The root backend belongs to that VS Code window; closing the dashboard tab leaves it running, while Stop, the dashboard Exit button, and extension shutdown stop it
 - **Status Bar Integration**: A `$(terminal) VibeRails` button in the bottom left opens the dashboard; a `$(close)` Stop item appears beside it while the backend is running
-- **Activity Bar launcher**: A play icon in the Activity Bar opens the **Launch** view, the side-bar twin of the dashboard's nav Play button. It groups the project's entries under **Agents & automations** and **Scripts**, with counts, runtime labels and theme-colored icons; each group follows the nav launcher's saved order; clicking a row runs it, and the view title offers Refresh, Customize list… and Manage automations. It works without an open dashboard tab once the backend is ready. When the backend is stopped the view shows an Open Dashboard button
+- **Activity Bar launcher**: A play icon in the Activity Bar opens the **Launch** view, the side-bar twin of the dashboard's nav Play button. It groups the project's entries under **Agents and Quick Launches**, **Actions** and **Scripts** (the signed script library, VIBE-311), with counts and runtime labels; clicking a row runs it, and the view title offers Refresh, Customize list… and Manage automations. Deleted definitions are never listed. It works without an open dashboard tab once the backend is ready. When the backend is stopped the view shows an Open Dashboard button
 - **Reviews requested of you**: a second view in the same container (VB-50 slice D) lists the review requests viberails.ai holds for the signed-in account, from the backend's cache (`GET /api/v1/review-inbox`). A row opens the dashboard's page; the inline Approve asks the backend to open the signing popup on its machine (the popup shows the request, rebuilds the tree from the repository and signs it there); the inline Reject asks for a comment here and posts it; the row's context menu offers Read on viberails.ai. Nothing in the extension signs or sees a key
 - **Local Context**: Runs in the context of your current workspace folder for project-specific configurations
 
@@ -29,11 +29,12 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
   stays in its current project; external files offer Global scope and explain how to use Repo.
   Existing visible registrations open by ID. Adding never signs or runs a script.
 - `VibeRails: Run now` (`viberails.launcher.run`) — tree-row click and inline play icon in the
-  Launch view; hidden from the palette because it needs the row as its argument. Automations are
-  queued straight from the extension host (`POST /api/v1/jobs/{id}/run`, the same call as the
-  dashboard's "Run now"; a status-bar message confirms "Automation queued." and the dashboard, when
-  open, shows its usual toast). Scripts are handed to the dashboard (`runScript` bridge message)
-  because their run window collects arguments, stdin and a PIN; the panel is revealed for that.
+  Launch view; hidden from the palette because it needs the row as its argument. Actions are
+  queued straight from the extension host (`POST /api/v1/runs` with the definition's stable ID; a
+  status-bar message confirms "Queued." and the dashboard, when open, shows its usual toast).
+  Agents and Quick Launches go to the dashboard (`launchDefinition`) for its template prompt.
+  Library scripts are handed to the dashboard too (`runScript` with the registration ID), because
+  it owns the private script terminal and any run PIN prompt; the panel is revealed for that.
 - `VibeRails: Refresh Launcher` (`viberails.launcher.refresh`), `VibeRails: Customize Launcher List…`
   (`viberails.launcher.customize`) and `VibeRails: Manage Automations` (`viberails.launcher.manage`) —
   Launch view title actions. Customize and Manage open the dashboard when needed and hand it the
@@ -55,16 +56,22 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 
 ## Architecture
 
-VIBE-309 temporarily hides built-in `code-quality` Actions from the native launcher,
-matching the browser's `isLaunchVisible` filter. Preserve their API records and existing
-workflows; ordinary review agents remain available.
+The Launch view reads two sources and must keep reading both (VIBE-311). Saved definitions
+come from `GET /api/v1/launch-catalog`. Scripts added with **Add to VibeRails Scripts…** live in
+the separate signed script library, `GET /api/v1/python-scripts`; a view that reads only the
+catalog shows none of them. Only signed scripts are listed, as in the dashboard's Quick
+actions; an unsigned one is signed from the AI Agents page or its workbench first. A library
+that cannot be read leaves the definitions listed. The catalog also returns deleted (retired)
+definitions for their history: `visibleLauncherItems` drops them, as the browser does, or they
+appear as "Unavailable" rows. `code-quality` Actions are listed and runnable like any other
+Action (VIBE-311 undid the VIBE-309 hide).
 
 The extension consists of these components plus a shared constants module:
 
 1. **Extension** (`extension.ts`) - Main activation logic, command registration, bootstrap/health handshake, the Launch view's wiring (`registerLauncherView`)
 2. **Backend Manager** (`backend-manager.ts`) - Manages the .NET backend server lifecycle
 3. **Webview Panel Manager** (`webview-panel.ts`) - Handles the VS Code webview panel and content; `postWhenReady` holds host → dashboard messages until the page's bridge is installed
-4. **Launcher view** (`launcher-view.ts`) - `LauncherTreeDataProvider` plus the pure catalog rules (`normalizeLauncherItems`, `isLauncherItemRunnable`, `launcherEmptyMessage`: ports of `wwwroot/js/modules/automation-launcher.js`, keep them in step) and `runLauncherItem`, all driven through injected dependencies so they are unit-tested without a backend
+4. **Launcher view** (`launcher-view.ts`) - `LauncherTreeDataProvider` plus the pure catalog rules (`normalizeLauncherItems`, `normalizeLibraryScripts`, `visibleLauncherItems`, `isLauncherItemRunnable`, `launcherEmptyMessage`: they mirror `launch-menu.js` and `libraryScripts` in `wwwroot/js/modules/launch-presentation.js`, keep them in step) and `runLauncherItem`, all driven through injected dependencies so they are unit-tested without a backend
 4b. **Review inbox view** (`review-inbox-view.ts`) - `ReviewInboxTreeDataProvider`, the pure rules (`normalizeReviewInbox`, `reviewInboxMessage`, `canAnswerReviewRequest`, `isReviewRequestPageUrl`; wording kept in step with `wwwroot/js/modules/review-inbox-view.js`) and the `approveReviewRequest` / `rejectReviewRequest` / `readReviewRequest` actions, all through injected dependencies and unit-tested in `review-inbox-view.test.ts`
 5. **Backend API** (`backend-api.ts`) - `requestJson` for authenticated host → backend calls (session + tab headers, `ErrorResponse { error }` surfaced as `BackendRequestError`). Must not import `vscode`. The shutdown ladder keeps its own never-throwing `postShutdown`
 6. **Constants** (`constants.ts`) - Command ids, token header names, backend paths, timeouts. Must not import `vscode`.

@@ -1,6 +1,5 @@
 import { escapeHtml, confirmDialog, enhanceSelectWithTomSelect } from './utils.js';
 import { LaunchApi } from './launch-api.js';
-import { isLaunchVisible } from './launch-presentation.js';
 
 /** Ordered definitions and explicit gates, shared by lane settings and the lane popup. */
 export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
@@ -14,7 +13,8 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
         confirming = false;
     let picker = null;
     const builtInChecks = [
-        { id: 'new:vca', name: 'VCA check', kind: 'vca' }
+        { id: 'new:vca', name: 'VCA check', kind: 'vca' },
+        { id: 'new:code-quality', name: 'Code quality check', kind: 'code-quality' }
     ];
     const labelForKind = { agent: 'Agent', script: 'Script', vca: 'VCA check', 'code-quality': 'Code quality check' };
     const current = () => !abort.signal.aborted && host.isConnected;
@@ -49,7 +49,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
         picker?.destroy();
         picker = null;
         host.classList.add('launch-lane-editor');
-        const choices = items.filter(item => item.canRunAutomatically && isLaunchVisible(item) && !selections.some(selection => selection.definitionId === item.id));
+        const choices = items.filter(item => item.canRunAutomatically && !selections.some(selection => selection.definitionId === item.id));
         const checks = builtInChecks.filter(check => !items.some(item => item.kind === check.kind && item.canRunAutomatically));
         host.innerHTML = `<h3>Run order</h3><div class="launch-lane-list" data-lane-selection-list>${selections
             .map((selection, index) => {

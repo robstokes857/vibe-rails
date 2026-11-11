@@ -778,6 +778,16 @@ Keep a separate secondary **Run** button matching the catalog's dark fill, borde
 text color and play icon. Icons are
 decorative; shared presentation logic keeps the catalog and dropdown aligned.
 
+Signed scripts from the script library follow the saved launches in the same list, with
+the same row: the `code` icon, the script's display name and a muted "{runtime} script"
+subtitle (adding the file name when the display name differs). Scripts that are unsigned
+or changed since signing are omitted here. The AI Agents catalog lists every library
+script in its Scripts section after the script Actions; there a signed row offers **Run**,
+and an unsigned or changed row states that in the Warning tone and offers a secondary
+**Sign** in Run's place. **Remove** takes the destructive variant and leaves the file on
+disk; **Delete** is reserved for saved definitions, in the catalog row and in the
+definition editor's footer alike (never "Retire").
+
 Use the Menu panel surface, 16px padding and 8px gaps. Rows use the base surface,
 a quiet border and 12px padding. Keep Run visible beside long names, including on
 narrow screens. Place **Manage AI Agents** in a quieter footer after a separator.
@@ -785,6 +795,7 @@ The trigger references the popover with `aria-controls` and `aria-haspopup="dial
 ordinary buttons support Tab, and Escape closes it and returns focus to the trigger.
 Run from the catalog or Quick actions starts the saved definition in a native OS
 terminal and leaves the current page open. It does not open the definition editor.
+Run on a library script opens its private, minimizable script terminal on the current page.
 Show launch progress and failures explicitly; queued work must not be reported as
 already running. Terminal-picker launches retain their in-app terminal behavior.
 

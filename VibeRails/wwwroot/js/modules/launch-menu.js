@@ -1,18 +1,18 @@
 import { escapeHtml } from './utils.js';
 import { LaunchApi } from './launch-api.js';
-import { isLaunchVisible, launchPresentation } from './launch-presentation.js';
+import { launchPresentation, libraryScripts } from './launch-presentation.js';
 
 const footer = '<div class="launch-menu-footer"><button type="button" class="btn btn-link launch-menu-manage" data-launch-manage>Manage AI Agents<i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></div>';
 
-function launchRow(item) {
-    const presentation = launchPresentation(item);
+/** One row for a saved launch (`data-launch-id`) or a signed library script (`data-script-id`). */
+function menuRow(name, presentation, target) {
     return `<li class="launch-menu-row">
         <span class="launch-menu-icon">${presentation.logoHtml}</span>
         <div class="launch-menu-details">
-            <span class="launch-menu-name">${escapeHtml(item.name)}</span>
+            <span class="launch-menu-name">${escapeHtml(name)}</span>
             <span class="launch-menu-subtitle">${escapeHtml(presentation.subtitle)}</span>
         </div>
-        <button type="button" class="btn btn-secondary launch-menu-run" data-launch-id="${escapeHtml(item.id)}" aria-label="Run ${escapeHtml(item.name)}"><i class="fa-solid fa-play" aria-hidden="true"></i><span>Run</span></button>
+        <button type="button" class="btn btn-secondary launch-menu-run" ${target} aria-label="Run ${escapeHtml(name)}"><i class="fa-solid fa-play" aria-hidden="true"></i><span>Run</span></button>
     </li>`;
 }
 
@@ -64,14 +64,24 @@ export class LaunchMenu {
             { signal: abort.signal }
         );
         try {
-            const { items } = await new LaunchApi(this.app).catalog({
-                signal: abort.signal
-            });
+            // Signed library scripts follow the saved launches (VIBE-311). The scripts
+            // controller reports its own load failure as an empty list, so a library that
+            // cannot be read never hides the agents.
+            const library = this.app.aiAgentsController?.pythonScripts;
+            const [{ items }] = await Promise.all([
+                new LaunchApi(this.app).catalog({ signal: abort.signal }),
+                library?.refresh({ quiet: true })
+            ]);
             if (abort.signal.aborted) return;
-            const available = items.filter((item) => item.canLaunch && isLaunchVisible(item));
+            const available = items.filter((item) => item.canLaunch);
+            const scripts = libraryScripts(library?.state).filter((script) => script.canRun);
+            const rows = [
+                ...available.map((item) => menuRow(item.name, launchPresentation(item), `data-launch-id="${escapeHtml(item.id)}"`)),
+                ...scripts.map((script) => menuRow(script.name, script, `data-script-id="${escapeHtml(script.id)}"`))
+            ];
             panel.innerHTML = '<h2 class="launch-menu-heading">Quick actions</h2>' +
-                (available.length
-                    ? `<ul class="launch-menu-list">${available.map(launchRow).join('')}</ul>`
+                (rows.length
+                    ? `<ul class="launch-menu-list">${rows.join('')}</ul>`
                     : '<p class="launch-menu-empty" role="status">No quick actions available. Manage AI Agents to add one.</p>') +
                 footer;
             panel.addEventListener(
@@ -82,12 +92,19 @@ export class LaunchMenu {
                     const item = items.find(
                         (item) => item.id === button.dataset.launchId
                     );
+                    const script = scripts.find(
+                        (script) => script.id === button.dataset.scriptId
+                    );
                     this.closeFlyout();
                     if (item)
                         void this.app.aiAgentsController.launch(
                             item.id,
                             item.definitionType
                         );
+                    // The private script terminal, exactly as Run on the script's own page.
+                    else if (script)
+                        void library.run(script.id).catch((error) =>
+                            this.app.showError(error?.message || 'Could not run that script.'));
                     else if (button.hasAttribute('data-launch-manage')) this.app.navigate('ai-agents');
                 },
                 { signal: abort.signal }

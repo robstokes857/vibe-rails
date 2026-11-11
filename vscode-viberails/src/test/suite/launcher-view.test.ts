@@ -1,7 +1,8 @@
 import * as assert from 'assert/strict';
 import { BackendRequestError } from '../../backend-api';
 import { LauncherItem, LauncherTreeDataProvider, RunLauncherDependencies, normalizeLauncherItems,
-    runLauncherItem, isLauncherItemRunnable, LAUNCHER_LOAD_FAILED_MESSAGE } from '../../launcher-view';
+    normalizeLibraryScripts, runLauncherItem, isLauncherItemRunnable, launcherEmptyMessage,
+    LAUNCHER_EMPTY_MESSAGE, LAUNCHER_LOAD_FAILED_MESSAGE } from '../../launcher-view';
 
 const item = (id = 'preset_1', extra: Partial<LauncherItem> = {}): LauncherItem => ({
     id, key: `preset:${id}`, definitionType: 'preset', kind: 'agent', name: 'Reviewer', label: 'Reviewer',
@@ -35,14 +36,31 @@ suite('Global launch catalog', () => {
         provider.dispose();
     });
     test('retains stable identity and unavailable entries without accepting legacy jobs', () => {
-        const entries = normalizeLauncherItems([item(), item('retired', { retired: true }),
+        const entries = normalizeLauncherItems([item(), item('disabled', { enabled: false, canLaunch: false }),
             { key: 'job:1', jobId: 1, name: 'Legacy' }, null]);
         assert.equal(entries.length, 2);
         assert.equal(entries[0].id, 'preset_1');
         assert.equal(isLauncherItemRunnable(entries[1]), false);
         const provider = new LauncherTreeDataProvider({ isBackendReady: () => true, fetchItems: async () => ({ items: entries }) });
         assert.equal(provider.getTreeItem(entries[1]).command, undefined);
+        assert.equal(provider.getTreeItem(entries[1]).description, 'Unavailable');
         assert.equal(provider.getTreeItem(entries[0]).command?.command, 'viberails.launcher.run');
+        provider.dispose();
+    });
+    test('deleted definitions never list, and a catalog holding only deleted ones reads as empty', async () => {
+        // Delete retires a definition: the catalog keeps returning it for its history (VIBE-311).
+        const deleted = item('deleted', { definitionType: 'action', kind: 'script', retired: true, enabled: false, canLaunch: false });
+        let entries: LauncherItem[] = [item(), deleted];
+        const provider = new LauncherTreeDataProvider({ isBackendReady: () => true, fetchItems: async () => ({ items: entries }) });
+        await provider.refresh();
+        assert.deepEqual(provider.getItems().map(row => row.id), ['preset_1']);
+        assert.deepEqual(provider.getChildren().map(row => row.label), ['Agents and Quick Launches']);
+        assert.equal(provider.getMessage(), undefined);
+        entries = [deleted];
+        await provider.refresh();
+        assert.deepEqual(provider.getChildren(), []);
+        assert.equal(provider.getMessage(), LAUNCHER_EMPTY_MESSAGE);
+        assert.equal(launcherEmptyMessage([deleted]), LAUNCHER_EMPTY_MESSAGE);
         provider.dispose();
     });
     test('groups presets and actions and discards responses after backend shutdown', async () => {
@@ -52,9 +70,10 @@ suite('Global launch catalog', () => {
         const provider = new LauncherTreeDataProvider({ isBackendReady: () => ready, fetchItems: () => response });
         await provider.refresh();
         assert.deepEqual(provider.getChildren().map(row => row.label), ['Agents and Quick Launches', 'Actions']);
-        assert.deepEqual(provider.getItems().map(row => row.id), ['preset_1', 'action_1']);
-        assert.equal(isLauncherItemRunnable(quality), false);
-        assert.equal(quality.enabled, true);
+        // Code quality checks are offered again (VIBE-311 undid the VIBE-309 hide).
+        assert.deepEqual(provider.getItems().map(row => row.id), ['preset_1', 'action_1', 'quality']);
+        assert.equal(isLauncherItemRunnable(quality), true);
+        assert.equal(provider.getTreeItem(quality).command?.command, 'viberails.launcher.run');
         let resolve!: (value: unknown) => void;
         response = new Promise(done => { resolve = done; });
         const pending = provider.refresh(); ready = false; resolve({ items: [item()] }); await pending;
@@ -71,6 +90,83 @@ suite('Global launch catalog', () => {
         assert.equal(next, same); resolve({ items: [] }); await first; await tick();
         assert.equal(calls, 2); resolve({ items: [item()] }); await next;
         assert.equal(provider.getItems().length, 1); provider.dispose();
+    });
+});
+suite('Signed library scripts', () => {
+    const library = { scripts: [
+        { id: 'reg_run', name: 'run.ps1', displayName: 'Start CP210', status: 'approved' },
+        { id: 'reg_draft', name: 'draft.py', status: 'unapproved' },
+        { id: 'reg_edited', name: 'edited.sh', status: 'modified' },
+        { name: 'legacy.sh', status: 'approved' },
+        { id: 'reg_bad', status: 'approved' }, null
+    ] };
+    test('only signed scripts list, keyed by registration ID and labelled by display name', () => {
+        const scripts = normalizeLibraryScripts(library.scripts);
+        assert.deepEqual(scripts.map(row => [row.key, row.id, row.label, row.scriptFileName]), [
+            ['script:reg_run', 'reg_run', 'Start CP210', 'run.ps1'],
+            ['script:legacy.sh', 'legacy.sh', 'legacy.sh', 'legacy.sh']
+        ]);
+        assert.ok(scripts.every(isLauncherItemRunnable));
+        assert.deepEqual(normalizeLibraryScripts(null), []);
+        assert.deepEqual(normalizeLibraryScripts({ scripts: [] }), []);
+    });
+    test('scripts follow the definitions in their own group and run by clicking', async () => {
+        const provider = new LauncherTreeDataProvider({ isBackendReady: () => true,
+            fetchItems: async () => ({ items: [item(), item('action_1', { definitionType: 'action', kind: 'script' })] }),
+            fetchScripts: async () => library });
+        await provider.refresh();
+        const groups = provider.getChildren();
+        assert.deepEqual(groups.map(row => row.label), ['Agents and Quick Launches', 'Actions', 'Scripts']);
+        const rows = provider.getChildren(groups[2]) as LauncherItem[];
+        assert.deepEqual(rows.map(row => row.label), ['Start CP210', 'legacy.sh']);
+        assert.equal(provider.getTreeItem(groups[2]).description, '2');
+        const node = provider.getTreeItem(rows[0]);
+        assert.equal(node.description, 'PowerShell');
+        assert.equal(provider.getTreeItem(rows[1]).description, 'Bash');
+        assert.equal(node.command?.command, 'viberails.launcher.run');
+        assert.deepEqual(node.command?.arguments, [rows[0]]);
+        assert.match(String(node.tooltip), /Signed/);
+        assert.equal(provider.getMessage(), undefined);
+        provider.dispose();
+    });
+    test('a library that cannot be read keeps the definitions; signed scripts alone are enough to list', async () => {
+        let scripts: () => Promise<unknown> = () => { throw new Error('VibeRails is stopped.'); };
+        let items: unknown[] = [item()];
+        const provider = new LauncherTreeDataProvider({ isBackendReady: () => true,
+            fetchItems: async () => ({ items }), fetchScripts: () => scripts() });
+        await provider.refresh();
+        assert.deepEqual(provider.getItems().map(row => row.key), ['preset:preset_1']);
+        assert.equal(provider.getMessage(), undefined);
+        scripts = async () => { throw new Error('offline'); };
+        await provider.refresh();
+        assert.deepEqual(provider.getItems().map(row => row.key), ['preset:preset_1']);
+        scripts = async () => library; items = [];
+        await provider.refresh();
+        assert.deepEqual(provider.getChildren().map(row => row.label), ['Scripts']);
+        assert.equal(provider.getMessage(), undefined);
+        provider.dispose();
+    });
+    test('a failed catalog is still the load failure, whatever the library answered', async () => {
+        const provider = new LauncherTreeDataProvider({ isBackendReady: () => true,
+            fetchItems: () => { throw new Error('VibeRails is stopped.'); }, fetchScripts: async () => library });
+        await provider.refresh();
+        assert.deepEqual(provider.getItems(), []);
+        assert.equal(provider.getMessage(), LAUNCHER_LOAD_FAILED_MESSAGE);
+        provider.dispose();
+    });
+    test('running a script opens the dashboard and hands it the registration ID, never a run request', async () => {
+        const [script] = normalizeLibraryScripts(library.scripts);
+        let opened = 0, revealed = 0;
+        const state = dependencies({ openDashboard: async () => { opened++; }, reveal: () => { revealed++; } });
+        await runLauncherItem(script, state.deps);
+        assert.equal(state.calls.length, 0);
+        assert.deepEqual([opened, revealed], [1, 1]);
+        assert.deepEqual(state.messages, [{ command: 'runScript', name: 'reg_run' }]);
+        assert.deepEqual(state.errors, []);
+        const failed = dependencies({ post: async () => false });
+        await runLauncherItem(script, failed.deps);
+        assert.match(failed.errors[0], /Start CP210: The dashboard could not receive this script/);
+        await tick();
     });
 });
 suite('Typed launch dispatch', () => {

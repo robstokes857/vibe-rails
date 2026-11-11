@@ -24,18 +24,37 @@ startup/failure from the run status; enqueue alone is not successful execution.
 Calls with `focusTerminal:true` retain the existing VibeRails terminal-tab flow.
 
 The catalog presents Agents, Quick Launches and Scripts with the shared surface and
-empty-state styles. **Create script** opens the script-only Action editor; existing VCA checks
-remain editable under Board checks. VIBE-309 temporarily hides built-in Code quality Actions
-from the catalog, Quick actions, Board add/run choices and the definition editor. Use normal
-AI agents for code-quality review. `isLaunchVisible` in `launch-presentation.js` owns this UI
-filter; it does not filter API responses, retire definitions or change existing lane execution.
-Saved lane steps stay visible/removable and retain their order, gates and history. The separate
-repository Quality page and saved check/report readers remain available.
-Each catalog row exposes **Edit** and a confirmed **Delete**
+empty-state styles. **Create script** opens the script-only Action editor; existing checks
+remain editable under Board checks. Code quality checks are offered everywhere again: VIBE-311
+removed the VIBE-309 presentation filter (`isLaunchVisible`), and `launch-presentation.test.mjs`
+fails if one comes back without a decision. Each catalog row exposes **Edit** and a confirmed **Delete**
 action. Delete uses revision-checked retirement, hides the definition from the catalog and retains
-its history and attachments. The Agent editor hides Purpose, defaults new records to `work`,
+its history and attachments. The editor footer offers the same **Delete**, with the same
+confirmation wording (`DELETE_DEFINITION_MESSAGE`); do not call it Retire in the UI. The Agent editor hides Purpose, defaults new records to `work`,
 and preserves an existing record's purpose when saving. Initial prompts stay directly editable
 without a duplicate live message preview.
+
+**Signed library scripts (VIBE-311).** The signed script library
+([guide](../Services/PythonScripts/AGENTS.md)) is a separate store from the launch catalog:
+`GET /api/v1/python-scripts`, read through the one `PythonScriptsController`
+(`app.aiAgentsController.pythonScripts`, also `app.jobController.pythonScripts`). VS Code's
+**Add to VibeRails Scripts…** registers a file there, so every surface that lists launches also
+lists the library, or an added script is invisible:
+
+- The **Scripts** section appends library rows (`[data-library-script]`) after script Actions,
+  counted together. A signed row offers **Run** (the private script terminal); an unsigned or
+  changed one says so and offers **Sign** (the PIN prompt) instead. **Edit** and the name open
+  the workbench; **Remove** is the library's confirmed removal, which leaves the file on disk.
+- **Quick actions** lists signed scripts after the saved launches. Unsigned scripts are omitted.
+- `libraryScripts(state)` in `launch-presentation.js` is the shared shape (registration ID,
+  label, `canRun`, the `code` icon, "{runtime} script" subtitle). The VS Code Launch view ports
+  the signed filter in `normalizeLibraryScripts`; keep the two in step.
+
+Both lists call `pythonScripts.refresh({ quiet: true })` beside the catalog request. That call
+reports a failed read as an empty list, so an unreadable library never hides agents. The AI
+Agents view follows `onStateChange`, so signing, renaming or removing a script repaints the
+section without another catalog request. Library scripts are not launch definitions: they have
+no run history, project scope or Board lane binding, and are never posted to `/runs`.
 `prompt-reference-highlights.js` paints file, variable, card/session and commit references
 inside the native prompt with the same font metrics. Its non-interactive mirror preserves
 literal source, selection, Undo and caret suggestions; composition and forced colors use
@@ -71,10 +90,9 @@ Keep this list aligned with launch placeholder support; retired step tokens stay
 
 `launch-lane-editor.js` keeps ordered definition IDs and process/result/review gates.
 Its add picker uses the shared Tom Select helper, including search, viewport positioning,
-Escape and disposal. VCA checks can be created from this picker; creating
+Escape and disposal. VCA and code-quality checks can be created from this picker; creating
 a definition does not save the lane order or run it. The lane save remains revision-checked.
-New VCA checks use working-tree scope. Previously saved Code quality selections remain
-manageable, but cannot be added again through this picker while the offering is hidden.
+New VCA checks use working-tree scope; new code-quality checks use card-linked commits.
 `board-lane-agent-body.js` polls current per-card lane progress, with explicit verdicts,
 retry, skip and session links. `board-card-automations.js` queues definitions with the
 saved card context. Managers and ordinary Start work use their existing Board contracts.

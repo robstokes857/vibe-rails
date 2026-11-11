@@ -29,7 +29,7 @@ interface UserInputRecord {
 
 interface LauncherViewSnapshot {
     backendReady: boolean;
-    items: Array<{ key: string; kind: string; label: string }>;
+    items: Array<{ key: string; kind: string; label: string; enabled: boolean; canLaunch: boolean }>;
     message: string | null;
 }
 
@@ -295,7 +295,7 @@ suite('VibeRails VS Code Smoke', function () {
         const warm = { ...connectionInfo };
         const sidebar = await vscode.commands.executeCommand<LauncherViewSnapshot>('viberails._test.getLauncherItems');
         assert.equal(sidebar?.backendReady, true);
-        const catalog = await requestJson(connectionInfo, 'GET', '/api/v1/automation-nav/preferences');
+        const catalog = await requestJson(connectionInfo, 'GET', '/api/v1/launch-catalog');
         assert.ok(Array.isArray(catalog.items), 'The hidden backend must already accept authenticated sidebar calls.');
 
         await Promise.all([
@@ -599,19 +599,23 @@ suite('VibeRails VS Code Smoke', function () {
         assert.ok(shown, 'The launcher test command returned nothing.');
         assert.equal(shown.backendReady, true);
 
-        // Read-only on purpose: the suite runs against the user's real state.db, so the
-        // catalog is compared with what the view shows, never run, customized or reset.
-        const catalog = await requestJson<JsonObject>(connectionInfo, 'GET', '/api/v1/automation-nav/preferences');
-        const expected = ((catalog.items ?? []) as JsonObject[])
-            .filter((item) => item.enabled === true && (item.kind !== 'script' || item.status === 'approved'))
-            .sort((a, b) => Number(a.order) - Number(b.order))
-            .map((item) => `${String(item.kind)}|${String(item.key)}|${String(item.label)}`);
-        assert.deepEqual(shown.items.map((item) => `${item.kind}|${item.key}|${item.label}`), expected);
-        if (expected.length === 0) {
-            assert.ok(shown.message, 'An empty launcher view must explain itself.');
-        } else {
-            assert.equal(shown.message, null);
-        }
+        // Read-only on purpose: the suite runs against the user's real data, so both sources
+        // are compared with what the view shows, never run, edited or signed. The view lists
+        // the saved definitions that were not deleted, then the signed library scripts.
+        const catalog = await requestJson<JsonObject>(connectionInfo, 'GET', '/api/v1/launch-catalog');
+        const library = await requestJson<JsonObject>(connectionInfo, 'GET', '/api/v1/python-scripts');
+        const expected = [
+            ...((catalog.items ?? []) as JsonObject[])
+                .filter((item) => item.retired !== true)
+                .map((item) => `${String(item.definitionType)}:${String(item.id)}|${String(item.name)}`),
+            ...((library.scripts ?? []) as JsonObject[])
+                .filter((script) => script.status === 'approved')
+                .map((script) => `script:${String(script.id ?? script.name)}|${String(script.displayName ?? script.name)}`)
+        ];
+        assert.deepEqual(shown.items.map((item) => `${item.key}|${item.label}`), expected);
+        // The view explains itself whenever no row can be run (nothing listed, or all unavailable).
+        const runnable = shown.items.some((item) => item.enabled && item.canLaunch);
+        assert.equal(shown.message === null, runnable, `Unexpected launcher message: ${String(shown.message)}`);
 
         await vscode.commands.executeCommand('viberails.stop');
         connectionInfo = null;

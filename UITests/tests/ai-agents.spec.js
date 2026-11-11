@@ -44,6 +44,18 @@ async function setup(page) {
         }
         const match=path.match(/^\/api\/v1\/(presets|actions)(?:\/([^/]+))?$/);
         if(match){const list=match[1]==='presets'?state.presets:state.actions;if(method==='GET')return ok(list.find(p=>p.id===match[2]));if(state.conflict)return route.fulfill({status:409,json:{error:'Changed elsewhere. Reopen the latest version before saving.',code:'revision_conflict',currentRevision:9}});const index=list.findIndex(p=>p.id===match[2]);const value={...body,id:match[2]||'preset_'+list.length,revision:(list[index]?.revision||0)+1};if(index<0)list.push(value);else list[index]=value;return ok(match[1]==='presets'?{preset:value,affectedBindings:[]}:value);}
+        // The signed script library (VIBE-311): its own store, listed beside the launch catalog.
+        if(path==='/api/v1/python-scripts'||path.startsWith('/api/v1/python-scripts/')){
+            const library=()=>ok({pinConfigured:true,scriptsDirectory:'C:\\fixtures\\scripts',scripts:state.scripts||[]});
+            if(state.failScripts)return route.fulfill({status:400,json:{error:'The script library could not be read.'}});
+            if(path.endsWith('/approve')){
+                if(body.pin!=='1234')return route.fulfill({status:400,json:{error:'That PIN is not correct.'}});
+                state.scripts.find(script=>script.id===body.name).status='approved';
+                return library();
+            }
+            if(method==='DELETE'){const id=new URL(req.url()).searchParams.get('name');state.scripts=state.scripts.filter(script=>script.id!==id);return library();}
+            return library();
+        }
         if(path==='/api/v1/board/files')return ok({files:['src/example.cs']});
         if(path==='/api/v1/agents')return ok({agents:[]});
         if(path==='/api/v1/rules/details')return ok({rules:[]});
@@ -209,8 +221,7 @@ test('quick actions use explicit Run buttons and preserve launch and keyboard be
         { id: 'release', name: 'Release Vibe Rails Client App', cli: 'codex', initialPrompt: 'Release', enabled: true },
         { id: 'hidden', name: 'Disabled agent', cli: 'codex', initialPrompt: 'Hidden', enabled: false }
     );
-    state.actions.push({ id: 'script', name: 'Build <client> & test', kind: 'script' },
-        { id: 'quality', name: 'Code quality check', kind: 'code-quality', enabled: true });
+    state.actions.push({ id: 'script', name: 'Build <client> & test', kind: 'script' });
     await page.locator('[data-agent-refresh]').click();
     await expect(page.getByRole('button', { name: 'Release Vibe Rails Client App', exact: true })).toBeVisible();
     await page.evaluate(() => {
@@ -234,7 +245,6 @@ test('quick actions use explicit Run buttons and preserve launch and keyboard be
     await expect.poll(() => panel.locator('img.launch-provider-logo').evaluate(el => el.complete && el.naturalWidth > 0)).toBe(true);
     await expect(panel.locator('.fa-code')).toBeVisible();
     await expect(panel.getByText('Disabled agent')).toHaveCount(0);
-    await expect(panel.getByText('Code quality check', { exact: true })).toHaveCount(0);
     await expect(panel.getByText('Build <client> & test', { exact: true })).toBeVisible();
     await expect(panel.locator('client')).toHaveCount(0);
     const runAgent = panel.getByRole('button', { name: 'Run Release Vibe Rails Client App', exact: true });
@@ -578,18 +588,13 @@ for (const width of [320, 375, 768, 1024, 1440]) test(`catalog follows the share
     await page.screenshot({ path: testInfo.outputPath(`catalog-empty-${width}.png`), fullPage: true });
     state.presets.push({ id: 'reviewer', name: 'Review changes', cli: 'codex', initialPrompt: 'Review', enabled: true, revision: 1 },
         { id: 'quick', name: 'Everyday Claude', cli: 'claude', initialPrompt: '', enabled: true, revision: 1 });
-    state.actions.push({ id: 'test', name: 'Run project tests', kind: 'script', enabled: true, revision: 1 },
-        { id: 'quality', name: 'Code quality check', kind: 'code-quality', enabled: true, revision: 1, check: { scope: 'card' } });
+    state.actions.push({ id: 'test', name: 'Run project tests', kind: 'script', enabled: true, revision: 1 });
     await page.locator('[data-agent-refresh]').click();
     await expect(catalog.locator('.launch-catalog-row')).toHaveCount(3);
-    await expect(catalog.getByText('Code quality check', { exact: true })).toHaveCount(0);
     expect(await catalog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
     await expect(catalog.getByRole('button', { name: 'Edit Review changes', exact: true })).toBeVisible();
     await expect(catalog.getByRole('button', { name: 'Delete Review changes', exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`catalog-populated-${width}.png`), fullPage: true });
-    await page.evaluate(() => window.app.aiAgentsController.openEditor('action', 'quality'));
-    await expect(page.locator('[data-launch-editor]')).toHaveCount(0);
-    expect(state.actions.find(action => action.id === 'quality')).toMatchObject({ enabled: true, revision: 1 });
 });
 
 for (const type of ['presets', 'actions']) test(`catalog Delete confirms and retires ${type} with the displayed revision`, async ({ page }) => {
@@ -735,24 +740,20 @@ test('history polling preserves expanded configuration, evidence and focused con
 test('ordered lane selections preserve gates and lock editing during writes',async({page})=>{
     const state=await setup(page);
     state.presets.push({id:'p1',name:'Review',cli:'codex',initialPrompt:'Review',enabled:true,revision:1},{id:'p2',name:'Test',cli:'codex',initialPrompt:'Test',enabled:true,revision:1});
-    state.actions.push({id:'quality',name:'Existing quality check',kind:'code-quality',enabled:true,revision:1});
     let saved,release;const pending=new Promise(resolve=>{release=resolve;});
     await page.route('**/api/v1/board/columns/lane/launches',async route=>{
-        if(route.request().method()==='GET')return route.fulfill({json:{revision:4,selections:[{definitionId:'p1',definitionType:'preset',gate:'review'},{definitionId:'p2',definitionType:'preset',gate:'result'},{definitionId:'quality',definitionType:'action',gate:'result'}]}});
+        if(route.request().method()==='GET')return route.fulfill({json:{revision:4,selections:[{definitionId:'p1',definitionType:'preset',gate:'review'},{definitionId:'p2',definitionType:'preset',gate:'result'}]}});
         saved=route.request().postDataJSON();await pending;await route.fulfill({json:{...saved,revision:5}});
     });
     await page.evaluate(async()=>{const {mountLaunchLane}=await import('/js/modules/launch-lane-editor.js');const host=document.createElement('div');document.querySelector('#app-content').replaceChildren(host);mountLaunchLane(window.app,host,'lane');});
-    await expect(page.locator('[data-lane-selection-list] strong').last()).toHaveText('Existing quality check');
-    await expect(page.locator('[data-lane-add-choice] option[value="quality"]')).toHaveCount(0);
-    await expect(page.locator('[data-lane-add-choice] option[value="new:code-quality"]')).toHaveCount(0);
     await page.getByRole('button',{name:'Move Test up',exact:true}).click();
     await page.getByRole('button',{name:'Save lane settings',exact:true}).click();
     await expect(page.locator('[data-lane-gate]').first()).toBeDisabled();
-    expect(saved).toMatchObject({revision:4,selections:[{definitionId:'p2',gate:'result'},{definitionId:'p1',gate:'review'},{definitionId:'quality',gate:'result'}]});release();
+    expect(saved).toMatchObject({revision:4,selections:[{definitionId:'p2',gate:'result'},{definitionId:'p1',gate:'review'}]});release();
     await expect(page.locator('[data-lane-gate]').first()).toBeEnabled();
 });
 
-for (const [kind, name, scope] of [['vca', 'VCA check', 'working-tree']])
+for (const [kind, name, scope] of [['vca', 'VCA check', 'working-tree'], ['code-quality', 'Code quality check', 'card']])
 test(`lane picker adds ${kind} without running or saving the lane early`, async ({ page }) => {
     const state = await setup(page);
     let savedLane, release;
@@ -833,18 +834,8 @@ test('Action runs show saved check evidence without using a Board review route',
         resultJson: JSON.stringify({ details: { findings: ['Cyclomatic complexity'] } })
     } }));
     await page.locator('[data-agent-refresh]').click();
-    await expect(page.getByRole('button', { name: 'Quality gate', exact: true })).toHaveCount(0);
-    // Saved results remain readable independently of the hidden definition editor.
-    await page.evaluate(async () => {
-        const { mountLaunchEvidence } = await import('/js/modules/launch-evidence.js');
-        const { LaunchApi } = await import('/js/modules/launch-api.js');
-        const host = document.createElement('div');
-        host.setAttribute('data-run-result', 'check_run');
-        document.querySelector('#app-content').replaceChildren(host);
-        mountLaunchEvidence(window.app, host, new LaunchApi(window.app), {
-            id: 'check_run', evidenceId: 'check_result', snapshot: { action: { kind: 'code-quality' } }
-        }, new AbortController().signal);
-    });
+    await page.getByRole('button', { name: 'Quality gate', exact: true }).click();
+    await page.getByRole('button', { name: 'Check result' }).click();
     await expect(page.locator('[data-run-result]')).toContainText('Two findings require attention');
     await page.getByText('Full recorded output', { exact: true }).click();
     await expect(page.locator('[data-run-result]')).toContainText('Cyclomatic complexity');
@@ -909,4 +900,155 @@ test('save locks the enhanced provider and a failed run preserves disabled contr
     await expect(provider).toBeEnabled();
     expect(await provider.evaluate(node => node.tomselect.isDisabled)).toBe(false);
     await expect(editor.locator('[data-binding-add]')).toBeDisabled();
+});
+
+// VIBE-311: scripts added in VS Code live in the signed script library, not the launch catalog.
+const libraryFixture = () => [
+    { id: 'reg_run', name: 'run.ps1', displayName: 'Start <CP210>', status: 'approved', path: 'C:\\fixtures\\project\\run.ps1', scope: 'repo', sizeBytes: 10 },
+    { id: 'reg_draft', name: 'draft.py', status: 'unapproved', path: 'C:\\fixtures\\project\\draft.py', scope: 'repo', sizeBytes: 10 },
+    { id: 'reg_edit', name: 'edited.sh', status: 'modified', path: 'C:\\fixtures\\project\\edited.sh', scope: 'global', sizeBytes: 10 }
+];
+
+for (const width of [375, 1280]) test(`library scripts list with script Actions and run from Quick actions under the agents at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const state = await setup(page);
+    state.presets.push({ id: 'release', name: 'Release', cli: 'codex', initialPrompt: 'Release', enabled: true, revision: 1 });
+    state.actions.push({ id: 'build', name: 'Build', kind: 'script', enabled: true, revision: 1 });
+    state.scripts = libraryFixture();
+    await page.locator('[data-agent-refresh]').click();
+    const section = page.locator('.launch-catalog-section').filter({ has: page.getByRole('heading', { name: /^Scripts/ }) });
+    await expect(section.locator('.launch-section-count')).toHaveText('4');
+    await expect(section.locator('.launch-catalog-row')).toHaveCount(4);
+    await expect(section.locator('.launch-catalog-empty')).toHaveCount(0);
+    const signed = section.locator('[data-library-script="reg_run"]');
+    await expect(signed.locator('.launch-catalog-copy p')).toHaveText(['PowerShell script · run.ps1']);
+    await expect(section.locator('cp210')).toHaveCount(0);
+    const draft = section.locator('[data-library-script="reg_draft"]');
+    await expect(draft.locator('.launch-catalog-copy p')).toHaveText(['Python script', 'Not signed. Sign it before it can run.']);
+    await expect(draft.getByRole('button', { name: 'Sign draft.py', exact: true })).toBeVisible();
+    await expect(draft.getByRole('button', { name: /^Run / })).toHaveCount(0);
+    await expect(section.locator('[data-library-script="reg_edit"]')).toContainText('Changed since signing. Sign it again before it can run.');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await section.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`library-scripts-${width}.png`) });
+
+    await page.evaluate(() => {
+        window.scriptCalls = [];
+        const library = window.app.aiAgentsController.pythonScripts;
+        library.run = async id => { window.scriptCalls.push(['run', id]); };
+        library.openScript = id => { window.scriptCalls.push(['open', id]); };
+    });
+    await signed.getByRole('button', { name: 'Run Start <CP210>', exact: true }).click();
+    await signed.getByRole('button', { name: 'Edit Start <CP210>', exact: true }).click();
+    await draft.getByRole('button', { name: 'draft.py', exact: true }).click();
+    expect(await page.evaluate(() => window.scriptCalls)).toEqual([['run', 'reg_run'], ['open', 'reg_run'], ['open', 'reg_draft']]);
+
+    // Quick actions: the agents and Actions first, then only the signed scripts.
+    const trigger = page.getByRole('button', { name: 'Launch an agent or automation', exact: true });
+    const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
+    await trigger.click();
+    await expect(panel.locator('.launch-menu-name')).toHaveText(['Release', 'Build', 'Start <CP210>']);
+    await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['Codex', 'Script', 'PowerShell script · run.ps1']);
+    const menuRow = panel.locator('.launch-menu-row').filter({ has: page.locator('[data-script-id="reg_run"]') });
+    expect(await menuRow.locator('.launch-provider-logo').evaluate(el => el.outerHTML))
+        .toBe(await signed.locator('.launch-provider-logo').evaluate(el => el.outerHTML));
+    await page.screenshot({ path: testInfo.outputPath(`library-quick-actions-${width}.png`) });
+    await panel.getByRole('button', { name: 'Run Start <CP210>', exact: true }).click();
+    await expect(panel).toHaveCount(0);
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(await page.evaluate(() => window.scriptCalls.at(-1))).toEqual(['run', 'reg_run']);
+    expect(await page.evaluate(() => window.scriptCalls.length)).toBe(4);
+    expect(state.requests.filter(request => request.path === '/api/v1/runs' && request.method === 'POST')).toHaveLength(0);
+
+    // Signed scripts alone are enough for the menu; an unreadable library never hides the agents.
+    state.presets = []; state.actions = [];
+    await trigger.click();
+    await expect(panel.locator('.launch-menu-name')).toHaveText(['Start <CP210>']);
+    await page.keyboard.press('Escape');
+    state.presets.push({ id: 'release', name: 'Release', cli: 'codex', initialPrompt: 'Release', enabled: true, revision: 1 });
+    state.failScripts = true;
+    await trigger.click();
+    await expect(panel.locator('.launch-menu-name')).toHaveText(['Release']);
+    await page.keyboard.press('Escape');
+    await page.locator('[data-agent-refresh]').click();
+    await expect(page.getByRole('button', { name: 'Release', exact: true })).toBeVisible();
+    await expect(page.locator('[data-library-script]')).toHaveCount(0);
+    await expect(page.locator('[data-agent-page-error]')).toBeEmpty();
+});
+
+test('a library script is signed and removed from its catalog row without reloading the catalog', async ({ page }) => {
+    const state = await setup(page);
+    state.scripts = libraryFixture();
+    await page.locator('[data-agent-refresh]').click();
+    const draft = page.locator('[data-library-script="reg_draft"]');
+    await expect(draft).toBeVisible();
+    const catalogReads = () => state.requests.filter(request => request.path === '/api/v1/launch-catalog').length;
+    const before = catalogReads();
+
+    await draft.getByRole('button', { name: 'Sign draft.py', exact: true }).click();
+    const pin = page.locator('.python-scripts-pin-modal');
+    await expect(pin).toContainText('Sign draft.py');
+    await pin.locator('[data-pin-field="pin"]').fill('1234');
+    await pin.getByRole('button', { name: 'Sign script', exact: true }).click();
+    await expect(draft.getByRole('button', { name: 'Run draft.py', exact: true })).toBeVisible();
+    await expect(draft).not.toContainText('Not signed');
+    expect(state.requests.find(request => request.path.endsWith('/approve')).body).toEqual({ name: 'reg_draft', pin: '1234' });
+
+    const remove = page.locator('[data-library-script="reg_edit"]').getByRole('button', { name: 'Remove edited.sh from the script library', exact: true });
+    await expect(remove).toHaveClass(/btn-danger/);
+    await remove.click();
+    const confirmation = page.getByRole('alertdialog');
+    await expect(confirmation).toContainText('Remove edited.sh?');
+    await expect(confirmation).toContainText('The script file stays on disk.');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-library-script]')).toHaveCount(3);
+    await page.locator('[data-library-script="reg_edit"]').getByRole('button', { name: 'Remove edited.sh from the script library', exact: true }).click();
+    await confirmation.getByRole('button', { name: 'Remove script', exact: true }).click();
+    await expect(page.locator('[data-library-script="reg_edit"]')).toHaveCount(0);
+    await expect(page.locator('[data-library-script]')).toHaveCount(2);
+    const section = page.locator('.launch-catalog-section').filter({ has: page.getByRole('heading', { name: /^Scripts/ }) });
+    await expect(section.locator('.launch-section-count')).toHaveText('2');
+    expect(catalogReads()).toBe(before);
+});
+
+test('the editor deletes a definition with the catalog confirmation instead of Retire', async ({ page }) => {
+    const state = await setup(page);
+    state.presets.push({ id: 'reviewer', name: 'Review changes', cli: 'codex', initialPrompt: 'Review', enabled: true, revision: 2 });
+    await page.locator('[data-agent-refresh]').click();
+    await page.getByRole('button', { name: 'Review changes', exact: true }).click();
+    const editor = page.locator('[data-launch-editor]');
+    await expect(editor.getByRole('button', { name: 'Retire', exact: true })).toHaveCount(0);
+    const remove = editor.getByRole('button', { name: 'Delete', exact: true });
+    await expect(remove).toBeVisible();
+    await remove.click();
+    const confirmation = page.getByRole('alertdialog');
+    await expect(confirmation).toContainText('Delete "Review changes"?');
+    await expect(confirmation).toContainText('history and attachments are retained');
+    await expect(confirmation).not.toContainText('Retire');
+    await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(editor).toBeVisible();
+    expect(state.requests.filter(request => request.path.endsWith('/retire'))).toHaveLength(0);
+    await remove.click();
+    await confirmation.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(editor).toHaveCount(0);
+    expect(state.requests.filter(request => request.path.endsWith('/retire')).map(request => [request.path, request.body]))
+        .toEqual([['/api/v1/presets/reviewer/retire', { expectedRevision: 2 }]]);
+    await expect(page.getByRole('button', { name: 'Review changes', exact: true })).toHaveCount(0);
+});
+
+test('code quality checks are offered again in the catalog, Quick actions and the editor', async ({ page }) => {
+    const state = await setup(page);
+    state.actions.push({ id: 'quality', name: 'Quality gate', kind: 'code-quality', enabled: true, revision: 1, check: { scope: 'card', failGrade: 'B' } });
+    await page.locator('[data-agent-refresh]').click();
+    const checks = page.locator('.launch-catalog-section').filter({ has: page.getByRole('heading', { name: /^Board checks/ }) });
+    await expect(checks.getByRole('button', { name: 'Quality gate', exact: true })).toBeVisible();
+    await expect(checks.locator('.launch-catalog-copy p')).toHaveText(['Code quality check']);
+    await page.getByRole('button', { name: 'Launch an agent or automation', exact: true }).click();
+    const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
+    await expect(panel.getByRole('button', { name: 'Run Quality gate', exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await checks.getByRole('button', { name: 'Edit Quality gate', exact: true }).click();
+    const editor = page.locator('[data-launch-editor]');
+    await expect(editor.locator('[data-launch-field="grade"]')).toHaveValue('B');
+    await expect(editor.locator('[data-launch-field="grade"]')).toBeVisible();
 });

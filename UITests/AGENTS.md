@@ -124,6 +124,9 @@ click/keyboard insertion, selection replacement, undo and saved literal placehol
 Inline reference tests cover native caret alignment, source preservation, escaping, spelling,
 composition and forced colors. Image previews cover pending files, saving/reopening and
 the owner-specific attachment viewer on desktop and narrow screens.
+Library-script tests (VIBE-311) serve `/api/v1/python-scripts` from `state.scripts`: catalog
+rows beside script Actions, Sign and Remove, signed scripts under the agents in Quick actions,
+and an unreadable library (`state.failScripts`) leaving the agents listed.
 The Board harness also covers
 the new ordered lane and manual-card adapters alongside existing comments, attachment,
 manager and navigation behavior. The older `playwright.agents-editor.config.js` fixtures

@@ -4422,11 +4422,7 @@ test('unified lane conflicts preserve edits and retired selections remain explic
 
 test('lane Tom Select supports search, pointer selection, Escape and cleanup', async ({ page }, testInfo) => {
     await openBoard(page);
-    const state = await installLaunchFixture(page);
-    state.items.push(
-        { id: 'quality', definitionType: 'action', kind: 'code-quality', name: 'Code quality check', canLaunch: true, canRunAutomatically: true },
-        { id: 'script', definitionType: 'action', kind: 'script', name: 'Run tests', canLaunch: true, canRunAutomatically: true }
-    );
+    await installLaunchFixture(page);
     const trigger = page.getByRole('button', { name: 'Agents and Actions on entry to Ready', exact: true });
     await trigger.click();
     const panel = page.locator('.board-lane-agents-panel');
@@ -4435,18 +4431,14 @@ test('lane Tom Select supports search, pointer selection, Escape and cleanup', a
     await picker.click();
     const search = page.getByRole('textbox', { name: 'Search agents, scripts and checks…', exact: true });
     await search.fill('quality');
-    await expect(page.locator('.launch-lane-dropdown .option:visible')).toHaveCount(0);
-    await expect(panel.locator('[data-lane-add-choice] option[value="new:code-quality"]')).toHaveCount(0);
-    await expect(panel.locator('[data-lane-add-choice] option[value="quality"]')).toHaveCount(0);
-    await search.fill('tests');
-    await expect(page.locator('.launch-lane-dropdown .option:visible')).toHaveText(['Run tests · Script']);
+    await expect(page.locator('.launch-lane-dropdown .option:visible')).toHaveText(['Code quality check']);
     await page.screenshot({ path: testInfo.outputPath('lane-picker-search.png') });
     await search.press('Escape');
     await expect(panel).toBeVisible();
     await expect(page.locator('.ts-dropdown:visible')).toHaveCount(0);
     await picker.click();
-    await search.fill('tests');
-    await page.locator('.launch-lane-dropdown').getByRole('option', { name: 'Run tests · Script', exact: true }).click();
+    await search.fill('quality');
+    await page.locator('.launch-lane-dropdown').getByRole('option', { name: 'Code quality check', exact: true }).click();
     await expect(panel).toBeVisible();
     await expect(panel.locator('[data-lane-add]')).toBeEnabled();
     await panel.getByRole('button', { name: 'Close lane panel', exact: true }).click();
@@ -4468,12 +4460,9 @@ test('unified lane progress distinguishes process and review, retries and skips 
 
 test('unified manual card launch preserves title and comment drafts and prevents duplicate starts',async({page})=>{
     await openBoard(page);const state=await installLaunchFixture(page);
-    state.items.push({id:'quality',definitionType:'action',kind:'code-quality',name:'Code quality check',canLaunch:true,canRunAutomatically:true});
     let release;state.hold=new Promise(resolve=>{release=resolve;});
     await page.getByText('Description images',{exact:true}).click();
     const editor=page.locator('[data-board-card-editor]');
-    await expect(editor.locator('[data-board-automation-choice] option[value="preset_review"]')).toHaveCount(1);
-    await expect(editor.locator('[data-board-automation-choice] option[value="quality"]')).toHaveCount(0);
     await editor.locator('#board-card-title').fill('Draft title');await editor.locator('[data-board-composer="comment"] textarea').fill('Draft comment');
     await editor.locator('[data-board-automation-choice]').selectOption('preset_review');
     const run=editor.locator('[data-board-run-automation]');await run.click();await run.evaluate(el=>el.click());expect(state.posts).toBe(1);release();

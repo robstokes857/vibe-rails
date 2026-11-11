@@ -75,6 +75,8 @@ export const SHUTDOWN_PATH = '/api/v1/shutdown';
 /** Shared global definitions and project-scoped execution. */
 export const LAUNCH_CATALOG_PATH = '/api/v1/launch-catalog';
 export const LAUNCH_RUNS_PATH = '/api/v1/runs';
+/** The signed script library's list; the Launch view shows its signed entries under Scripts. */
+export const SCRIPT_LIBRARY_PATH = '/api/v1/python-scripts';
 /** The cached list of review requests addressed to the signed-in account (root backend only). */
 export const REVIEW_INBOX_PATH = '/api/v1/review-inbox';
 /** Approve opens the signing popup on the backend's machine; reject posts the comment to viberails.ai. */

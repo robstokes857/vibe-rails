@@ -1,6 +1,5 @@
 import { escapeHtml } from './utils.js';
 import { LaunchApi } from './launch-api.js';
-import { isLaunchVisible } from './launch-presentation.js';
 import { showReplayModal } from './session-viewer.js';
 
 export function cardAutomationControls(saved) {
@@ -23,7 +22,7 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
             // The card's own runs (VIBE-296): never page every project run and filter here.
             const [catalog,entries,page]=await Promise.all([api.catalog({signal:abort.signal}),api.call(`board/cards/${encodeURIComponent(card.id)}/launches`,'GET',null,{signal:abort.signal}),api.call(`board/cards/${encodeURIComponent(card.id)}/launches/runs`,'GET',null,{signal:abort.signal})]);
             if(!current())return;
-            items=catalog.items.filter(item=>item.canLaunch && isLaunchVisible(item));
+            items=catalog.items.filter(item=>item.canLaunch);
             const markup='<option value="">Choose…</option>'+items.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} (${escapeHtml(item.kind)})</option>`).join('');
             if(markup!==rendered){const selected=select.value;select.innerHTML=rendered=markup;if(items.some(item=>item.id===selected))select.value=selected;}
             const runs=page?.runs||[];

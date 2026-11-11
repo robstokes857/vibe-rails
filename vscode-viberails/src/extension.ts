@@ -51,6 +51,7 @@ import {
     REVIEW_INBOX_VIEW_ID,
     REVIEW_REQUESTS_PATH,
     REVIEW_REQUESTS_VIEW_ID,
+    SCRIPT_LIBRARY_PATH,
     SESSION_COOKIE_NAME,
     SMOKE_WORKSPACE_ENV,
     TAB_TOKEN_HEADER,
@@ -350,7 +351,8 @@ function registerLauncherView(context: vscode.ExtensionContext, registeredComman
 
     const provider = new LauncherTreeDataProvider({
         isBackendReady,
-        fetchItems: () => requestJson(getBackendConnection(), 'GET', LAUNCH_CATALOG_PATH)
+        fetchItems: () => requestJson(getBackendConnection(), 'GET', LAUNCH_CATALOG_PATH),
+        fetchScripts: () => requestJson(getBackendConnection(), 'GET', SCRIPT_LIBRARY_PATH)
     });
     launcherProvider = provider;
 

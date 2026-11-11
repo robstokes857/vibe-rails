@@ -74,11 +74,9 @@ No schema generation bump, backfill, data conversion or manual migration is requ
 
 ## Frontend contract (VIBE-292 / VB-4OG9T-366)
 
-VIBE-309 temporarily hides built-in Code quality Actions from UI catalogs, Quick actions,
-Board add/run choices and the definition editor. Users can create ordinary review agents.
-This is a presentation filter: definitions, APIs, scheduling, existing lane selections,
-check evidence and history remain intact. Saved lane steps can still be removed. The separate
-repository Quality page remains available. No stored data is deleted or converted.
+Code quality Actions are offered in every UI catalog, Quick actions, Board add/run choices
+and the definition editor. VIBE-309 briefly hid them with a presentation filter; VIBE-311
+removed it. No stored data was changed by either.
 
 The source contracts are `LaunchContract.cs` and
 `VibeRails.Data.Abstractions/Launches/LaunchRecords.cs`. Property names are camelCase
@@ -255,6 +253,19 @@ preparation owns TokenSaver, MCP registration, credentials and sanitization.
 The AI Agents view and native VS Code launch tree use the same global catalog.
 VS Code preset launches enter the dashboard prompt resolver so custom template values
 use the same UI; Actions can be queued directly by the extension.
+
+The catalog returns retired definitions (`retired: true`, never launchable) so saved
+selections and history can still name them. Every launch list hides them: the AI Agents
+page, Quick actions (through `canLaunch`) and the VS Code launch tree. A list that shows
+them presents deleted definitions as "Unavailable" (VIBE-311).
+
+The signed script library is not part of this catalog or of `launches.db`. Scripts
+registered there (VS Code's **Add to VibeRails Scripts…**) are listed beside the catalog by
+the AI Agents page, and their signed entries by Quick actions and the VS Code launch tree,
+from `GET /api/v1/python-scripts`. They run in the library's private script terminal with
+its own signing rules, never through `/runs`; see the
+[script library guide](../PythonScripts/AGENTS.md). A script Action is the definition to
+use for run history, project scope, schedules or Board lanes.
 `POST /runs` optionally accepts `promptPrefix` (for a Quality/Rules task), `initialPrompt`
 (filled template values) and `expectedRevision`. The immutable context retains the
 one-run override; the saved preset is unchanged. Both prompt fields reject retired step

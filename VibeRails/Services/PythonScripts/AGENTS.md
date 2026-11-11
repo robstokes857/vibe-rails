@@ -6,14 +6,22 @@ classes, `/api/v1/python-scripts`, `--run-python-script`), but since VIBE-56 a s
 
 ## User workflow
 
-1. On the Automations page, choose **New › Script** or **Import › Script from disk** to create or
-   register a `.ps1`, `.sh` or `.py` file; scripts share the page's one list with workflows.
-   New script selects a runtime and a destination (UI default `~/.vibe_rails/scripts/UserScripts/{project_name}/`,
+**Where the library is listed (VIBE-311).** The library is its own store, not the launch catalog
+that the AI Agents page, Quick actions and the VS Code Launch view were rebuilt on (VIBE-292/294).
+Those three read it as well: AI Agents lists every visible registration in its **Scripts**
+section (Run when signed, Sign otherwise, Edit, Remove), and Quick actions and the VS Code
+Launch view list the signed ones. When one of them stops reading `GET /api/v1/python-scripts`,
+adding a script still succeeds and reports "Script added", but the script appears nowhere.
+The retired Automations page's New › Script and Import › Script from disk entries are gone;
+the dashboard's own script button, **Create script**, makes a launch script Action instead.
+
+1. In VS Code, right-click a local `.ps1`, `.sh` or `.py` file and choose
+   **Add to VibeRails Scripts…** to register it. The form offers a display name, Global/Repo
+   scope and PIN on every run, and registers the original path without copying. The service's
+   create path (a runtime and a destination, UI default `~/.vibe_rails/scripts/UserScripts/{project_name}/`,
    using the current repository folder name,
-   or a folder inside the current repository selected with the shared file picker). Add from disk registers the original
-   path without copying. Both forms offer a display name, Global/Repo scope and PIN on every run.
-   In VS Code, right-click a local script and choose **Add to VibeRails Scripts…** to open this
-   same form with its path already selected. Existing visible registrations open instead of
+   or a folder inside the current repository) remains for Duplicate and missing-file restore.
+   Existing visible registrations open instead of
    being added twice. Repo scope is offered for files in the dashboard's project or managed
    UserScripts folder; other files offer Global scope.
 2. Sign the exact script version with the user's Python signing PIN.
