@@ -4420,16 +4420,40 @@ test('unified lane conflicts preserve edits and retired selections remain explic
     await expect(panel.locator('[data-lane-selection-list] strong')).toHaveText(['Review','Check','Unavailable / retired selection']);
 });
 
-test('lane Tom Select supports search, pointer selection, Escape and cleanup', async ({ page }, testInfo) => {
+for (const width of [320, 1024]) test(`lane Tom Select shows icons with search, selection, Escape and cleanup at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
     await openBoard(page);
-    await installLaunchFixture(page);
+    const state = await installLaunchFixture(page);
+    state.selections = [];
+    const scriptName = 'Build <script> & verify a release with a long descriptive name';
+    state.items.push(
+        { id: 'script', definitionType: 'action', kind: 'script', name: scriptName, canRunAutomatically: true },
+        { id: 'unknown', definitionType: 'preset', kind: 'agent', name: 'Other provider', cli: 'unknown', canRunAutomatically: true }
+    );
     const trigger = page.getByRole('button', { name: 'Agents and Actions on entry to Ready', exact: true });
     await trigger.click();
     const panel = page.locator('.board-lane-agents-panel');
     const picker = panel.locator('.ts-control');
     await expect(picker).toBeVisible();
     await picker.click();
+    const menu = page.locator('.launch-lane-dropdown');
+    const review = menu.getByRole('option', { name: 'Review · Agent', exact: true });
+    await expect(review.locator('img')).toHaveAttribute('src', 'assets/img/openai.svg');
+    await expect(menu.getByRole('option', { name: 'Check · VCA check', exact: true }).locator('img')).toHaveAttribute('src', 'assets/img/logo.png');
+    await expect(menu.getByRole('option', { name: 'Code quality check', exact: true }).locator('img')).toHaveAttribute('src', 'assets/img/logo.png');
+    await expect(menu.getByRole('option', { name: `${scriptName} · Script`, exact: true }).locator('.fa-code')).toBeVisible();
+    await expect(menu.getByRole('option', { name: 'Other provider · Agent', exact: true }).locator('.fa-robot')).toBeVisible();
+    await expect(menu.locator('[data-value=""] .launch-lane-choice-icon')).toHaveCount(0);
+    await expect.poll(() => menu.locator('img').evaluateAll(images => images.every(img => img.complete && img.naturalWidth > 0))).toBe(true);
+    expect(await menu.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('lane-picker-icons.png') });
     const search = page.getByRole('textbox', { name: 'Search agents, scripts and checks…', exact: true });
+    await search.fill('Review');
+    await expect(menu.locator('.option:visible')).toHaveText(['Review · Agent']);
+    await search.press('Enter');
+    await expect(panel.locator('[data-lane-add-choice]')).toHaveValue('preset_review');
+    await expect(picker.locator('img')).toHaveAttribute('src', 'assets/img/openai.svg');
+    await picker.click();
     await search.fill('quality');
     await expect(page.locator('.launch-lane-dropdown .option:visible')).toHaveText(['Code quality check']);
     await page.screenshot({ path: testInfo.outputPath('lane-picker-search.png') });
@@ -4439,6 +4463,8 @@ test('lane Tom Select supports search, pointer selection, Escape and cleanup', a
     await picker.click();
     await search.fill('quality');
     await page.locator('.launch-lane-dropdown').getByRole('option', { name: 'Code quality check', exact: true }).click();
+    await expect(picker.locator('img')).toHaveAttribute('src', 'assets/img/logo.png');
+    await expect(picker.locator('img')).toHaveAttribute('alt', '');
     await expect(panel).toBeVisible();
     await expect(panel.locator('[data-lane-add]')).toBeEnabled();
     await panel.getByRole('button', { name: 'Close lane panel', exact: true }).click();

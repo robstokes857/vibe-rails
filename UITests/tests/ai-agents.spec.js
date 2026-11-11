@@ -778,6 +778,7 @@ test(`lane picker adds ${kind} without running or saving the lane early`, async 
     await expect(page.locator('[data-lane-add]')).toBeDisabled();
     await expect(page.locator('.ts-control')).toBeVisible();
     await picker.evaluate((node, kind) => node.tomselect.setValue(`new:${kind}`), kind);
+    await expect(page.locator('.ts-control img')).toHaveAttribute('src', 'assets/img/logo.png');
     await page.locator('[data-lane-add]').click();
     await expect.poll(() => Boolean(release)).toBe(true);
     await expect(page.locator('[data-lane-save]')).toBeDisabled();

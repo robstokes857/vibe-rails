@@ -19923,6 +19923,10 @@ body.performance-mode .brand-text-sm {
 .launch-lane-add .ts-control { min-height: var(--control-height); border-color: var(--control-border); border-radius: var(--radius-control); background: var(--color-bg-base); font-size: 16px; }
 .launch-lane-add .ts-wrapper.focus .ts-control { outline: 2px solid var(--focus-ring); outline-offset: 2px; box-shadow: none; border-color: var(--control-border); }
 .launch-lane-dropdown { background: var(--color-bg-surface-hover); border-color: var(--control-border); border-radius: var(--radius-surface); box-shadow: var(--shadow-menu); }
+.launch-lane-choice { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.launch-lane-choice-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 18px; width: 18px; height: 18px; }
+.launch-lane-choice-icon > .launch-provider-logo, .launch-lane-choice-icon > .board-brand-logo { flex: 0 0 18px; width: 18px; height: 18px; font-size: 18px; }
+.launch-lane-choice-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .launch-lane-footer { display: flex; justify-content: flex-end; padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
 .launch-lane-editor [data-lane-error] { margin: 0; color: var(--feedback-error-fg); }
 .launch-lane-editor [data-lane-error]:empty { display: none; }

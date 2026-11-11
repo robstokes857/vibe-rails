@@ -1,5 +1,7 @@
 import { escapeHtml, confirmDialog, enhanceSelectWithTomSelect } from './utils.js';
 import { LaunchApi } from './launch-api.js';
+import { launchPresentation } from './launch-presentation.js';
+import { boardBrandLogo } from './board-brand.js';
 
 /** Ordered definitions and explicit gates, shared by lane settings and the lane popup. */
 export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
@@ -51,6 +53,14 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
         host.classList.add('launch-lane-editor');
         const choices = items.filter(item => item.canRunAutomatically && !selections.some(selection => selection.definitionId === item.id));
         const checks = builtInChecks.filter(check => !items.some(item => item.kind === check.kind && item.canRunAutomatically));
+        const choiceItems = new Map([...choices, ...checks].map(item => [item.id, item]));
+        const renderChoice = (data, escape) => {
+            const item = choiceItems.get(data.value);
+            if (!item) return `<div>${escape(data.text)}</div>`;
+            const logo = item.kind === 'vca' || item.kind === 'code-quality'
+                ? boardBrandLogo(null, '') : launchPresentation(item).logoHtml;
+            return `<div class="launch-lane-choice"><span class="launch-lane-choice-icon" aria-hidden="true">${logo}</span><span class="launch-lane-choice-label">${escape(data.text)}</span></div>`;
+        };
         host.innerHTML = `<h3>Run order</h3><div class="launch-lane-list" data-lane-selection-list>${selections
             .map((selection, index) => {
                 const item = items.find(
@@ -79,7 +89,8 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
         picker = enhanceSelectWithTomSelect(host.querySelector('[data-lane-add-choice]'), {
             placeholder: 'Choose an agent, script or check…',
             searchPlaceholder: 'Search agents, scripts and checks…',
-            emptyMessage: 'No matching agents, scripts or checks.'
+            emptyMessage: 'No matching agents, scripts or checks.',
+            render: { option: renderChoice, item: renderChoice }
         });
         picker?.control.setAttribute('aria-label', 'Add to this lane');
         picker?.dropdown.classList.add('launch-lane-dropdown');

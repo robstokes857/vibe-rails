@@ -766,6 +766,15 @@ Desktop aliases for values specified above (these add no new visual choices):
 
 The desktop footer (`.app-footer`) is hidden on every view. Put persistent status in the top bar, not the footer.
 
+#### Desktop lane run picker
+
+The lane settings **Add to this lane** picker shows a decorative icon beside each
+agent, script or check, including the selected value. Reuse the provider artwork
+and filters for agents, the existing code icon for scripts, and the VibeRails
+brand mark for VCA and code-quality checks (both saved and new). Keep the empty
+prompt text-only. Use 18px marks with an 8px gap and allow long menu labels to wrap.
+Retain the shared searchable select's keyboard, viewport and disposal behavior.
+
 #### Desktop Quick actions
 
 The top-bar play button opens a compact **Quick actions** popover. Each launch row

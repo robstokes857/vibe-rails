@@ -90,7 +90,9 @@ Keep this list aligned with launch placeholder support; retired step tokens stay
 
 `launch-lane-editor.js` keeps ordered definition IDs and process/result/review gates.
 Its add picker uses the shared Tom Select helper, including search, viewport positioning,
-Escape and disposal. VCA and code-quality checks can be created from this picker; creating
+Escape and disposal. Menu options and the selected value reuse provider logos for agents,
+the code icon for scripts and the VibeRails mark for saved/new VCA and code-quality checks.
+VCA and code-quality checks can be created from this picker; creating
 a definition does not save the lane order or run it. The lane save remains revision-checked.
 New VCA checks use working-tree scope; new code-quality checks use card-linked commits.
 `board-lane-agent-body.js` polls current per-card lane progress, with explicit verdicts,
