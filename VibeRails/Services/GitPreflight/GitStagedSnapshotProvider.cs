@@ -989,7 +989,13 @@ public sealed partial class GitStagedSnapshotProvider : IGitStagedSnapshotProvid
         private readonly string _repositoryPath = Normalize(repositoryPath);
         private readonly Dictionary<string, bool> _directoryIsContained = new(PathComparer);
 
-        public bool IsReadableRegularFile(string fullPath)
+        public bool IsReadableRegularFile(string fullPath) => RegularFile(fullPath) is not null;
+
+        /// <summary>
+        /// The file's metadata when it is a regular file inside the repository, read once; null for a
+        /// link, a missing or unreadable entry, or a path that leaves the repository.
+        /// </summary>
+        public FileInfo? RegularFile(string fullPath)
         {
             FileInfo info;
             try
@@ -999,15 +1005,15 @@ public sealed partial class GitStagedSnapshotProvider : IGitStagedSnapshotProvid
                     || info.LinkTarget is not null
                     || info.Attributes.HasFlag(FileAttributes.ReparsePoint))
                 {
-                    return false;
+                    return null;
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                return false;
+                return null;
             }
 
-            return IsContained(Path.GetDirectoryName(fullPath));
+            return IsContained(Path.GetDirectoryName(fullPath)) ? info : null;
         }
 
         private bool IsContained(string? directory)

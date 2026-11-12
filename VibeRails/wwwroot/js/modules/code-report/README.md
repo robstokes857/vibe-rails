@@ -66,11 +66,20 @@ around the map, so opening either panel shortens the map down to its minimum hei
   updates Atlas in place. Custom themes and the VS Code opt-in remain host-owned.
 - `styles.css` scopes composition styles to `.code-report`; load host CSS, quality CSS,
   then this file. Container queries handle narrow webviews; the file list scrolls independently.
-- `setLoading`, `setResponse`, `setError` and `destroy` own graph requests, generation guards,
-  component state and teardown. Navigation destroys Atlas, radar interactions, theme observers,
-  animation frames and the details panel, and aborts pending graph requests. Late responses
-  are ignored.
+- `setLoading`, `setResponse`, `setError` and `destroy` own generation guards, component state
+  and teardown. Navigation destroys Atlas, radar interactions, theme observers, animation frames
+  and the details panel. Late responses are ignored.
   A graph failure preserves saved metrics; failed/missing analysis is never given a score.
+- The map has its own lifetime beside the report's (VIBE-313). It needs nothing from the scan, so
+  `prefetchCodeGraph(app)` asks for it when Quality is opened, alongside the page's first requests,
+  and the viewer mounts it as soon as it answers. The request is module state shared by every
+  viewer on the page: it belongs to the scan it is first shown with (`startedUtc`), which is how
+  returning to the page replays the saved scan with the same map and no new capture. Leaving the
+  page does not abort it; a request that a newer one supersedes is aborted. A scan's results reach
+  the mounted map in place (`atlas.setAnnotations`), so a slow scan never holds the map back and
+  **Scan again** never tears it down: each scan asks for the tree again, and a response with the
+  capture time already on screen keeps the frame, camera and selection. `viewer.ready` settles
+  when the map being followed is usable, or has failed.
 
 Excerpts and report timestamps describe the supplied scan; the graph describes the current
 working tree. An absent map file can still open its saved details. Report text is escaped;
@@ -97,19 +106,42 @@ TypeScript interfaces and type aliases have `interface` and `type` kinds, with s
 type signatures are not mapped as runtime functions. This does not change saved analyzer metrics.
 Cross-directory references also have
 domain edges. These are lexical source evidence, not resolved call graphs or runtime dependencies.
-No coverage or quality metric is inferred from the graph. Before mounting Atlas,
-`graph-metrics.js` overlays the accepted saved report's `lines_of_code` and
-`cyclomatic_complexity` values and a `quality` summary (rating, headline and up to 12 problems,
-display text only) onto matching file nodes. Paths use the same slash normalization
+No coverage or quality metric is inferred from the graph. Atlas mounts the graph as captured;
+`graph-metrics.js` builds the accepted saved report's overlay (`reportAnnotations`): the
+`lines_of_code` and `cyclomatic_complexity` values and a `quality` summary (rating, headline and
+up to 12 problems, display text only) for matching file nodes, which the viewer applies to the
+mounted map whether the report arrived before the map or after it. Paths use the same slash normalization
 as file selection and remain case sensitive. **Max complexity** is the maximum function cyclomatic
 complexity, not the category score. The inspector leads with the quality summary and **Open
 details**, then the measurements and connections, and closes with the saved scan's timestamp.
 A file the report does not cover says **Not in this scan.**, so an empty inspector never reads as
 clean. The server sends no per-node summaries; the response's description covers provenance.
 Directory and declaration nodes never inherit file measurements. The cached
-working-tree graph stays unchanged, so a new, empty or failed report cannot retain old metrics.
+working-tree graph stays unchanged and every `setAnnotations` call replaces the previous overlay
+(an entity it leaves out gets back what the graph supplied), so a new, empty or failed report
+cannot retain old metrics.
 Atlas only renders finite supplied metrics (including zero); unavailable lines of code,
 complexity and coverage are hidden, without placeholder cells or missing-value footnotes.
+
+Selection and reuse (VIBE-313). The page's first request is sent before the scan answers and
+names no file, so the server adds the working tree's changed source files (`git status`, read
+alongside the catalog) after any explicit priorities; a default scan's files are therefore inside
+the file budget from the first request. More changed files than fit beside the explicit
+priorities are not preferred at all, and a failed status read loses the preference, never the
+map. When a partial map (`file-limit` or `file-node-limit`) still lacks a file the scan reported,
+the viewer asks once more with the report's files; that mostly matters for an unpushed-commits
+scan, whose files are not working-tree changes, and there the map on screen is replaced once.
+The route answers with the service's own UTF-8 JSON (`ReadJsonAsync`) and the singleton keeps the
+last two captures. A capture is reused while everything it depends on is unchanged: Git's catalog,
+the selected files in order, and each selected file's size and modified time. Priorities count
+only through the selection they produce, so asking for a file the map can never hold (a vendored
+bundle the scan reported) returns the capture already there, byte for byte, and the page keeps
+its map. A capture is remembered only when every mapped file had been still for two seconds,
+because a same-length rewrite within one timestamp tick is otherwise invisible. An unchanged tree
+costs the catalog, the status and one stat per file (about 0.13 s on this repository against
+0.65 s for a capture). Sources are read sequentially, so the read budget is charged in a fixed
+order, and their outlines are parsed in batches of 2 Mi characters on up to eight workers; the
+result is identical to a sequential pass.
 
 Limits: 2,000 files, 2,800 nodes, 10,000 edges, 512 characters per reference evidence,
 8 MiB serialized graph, 12 declarations per file, 128 KiB per source file,
@@ -180,6 +212,21 @@ copies (host module and template) and declared in `code-atlas.d.mts`, and the te
 the `atlas-quality` style block, `qualityBlock()` and the reordered `renderInspector()`.
 The source patch scripts and integration references live in the sibling workbench's `docs/`.
 Refresh from that approved bundle, retaining the relative module imports and TypeScript declarations.
+
+VIBE-313 adds three VibeRails patches to `vendor/atlas`, each marked `VibeRails` in the bundle and
+declared in `code-atlas.d.mts`; retain them on a refresh:
+
+- `controller.setAnnotations(entries)` replaces the host's display overlay (`summary`, `metrics`,
+  `quality`) on entities already on the map. Entries are validated by the graph contract's own
+  field rules before anything changes, an unknown node or field is refused, and an open inspector
+  is redrawn. Camera, selection and layout are untouched.
+- `controller.getLayout()` returns the overview's settled positions as `[nodeId, x, y]`, and the
+  `layout` mount option supplies them to a later mount of the same graph. The frame uses them
+  instead of running its solver only when they cover exactly the overview's entities; anything
+  else is laid out from scratch. The viewer keeps them with the capture, so returning to the page
+  does not solve the layout again.
+- Startup waits are shorter: a 250 ms loader floor (was 750 ms), 80 ms of an unchanged stage size
+  (was 140 ms) and a 260 ms cross-fade (was 620 ms). The layout itself is unchanged.
 
 ## The field and the Git changes list (VIBE-46)
 
@@ -279,8 +326,9 @@ are read-only, mapped on the active root backend only, require both credentials 
 same safe-path rules as graph priorities plus the working-tree path guard. A row opens the shared
 Monaco diff viewer (`diff-modal.js`) with every change in its rail, loading each diff on first
 view; rows for files on the map can also focus them. The same git list feeds Atlas's **Highlight
-changes**. The last graph is cached per report (`startedUtc`) and request, so returning to the
-page replays it without capturing the repository again; a new scan refreshes it.
+changes**; until that list answers, the report's own files stand in for it. The last map
+request is kept with the scan it was shown with (`startedUtc`), so returning to the page replays
+it without capturing the repository again; a new scan asks again (see the graph contract).
 
 These integration patches live in the shipped `vendor/atlas/code-atlas.mjs` HTML template (an
 escaped string literal on line 2; decode it to review). Retain them when refreshing the approved
@@ -299,7 +347,11 @@ entities (the latter under 4x CPU throttling, with hover veil, keyboard rotation
 signals and reduced motion, Cards curves, mouse rotation inertia, the ambient link budget, the
 Git changes list and diff viewer, permanent dependency exclusion, saved metrics, scrolling,
 radar keyboard interaction, themes, narrow sizes, independent errors, escaped excerpts and
-navigation races. Run it with
+navigation races, plus the map's own lifetime: usable while a scan is held, results applied in
+the same frame, an unchanged capture kept through **Scan again**, one follow-up request for a
+report file a partial map lacks, and a remount laid out from kept positions. Capture reuse and
+changed-file priority are covered by `RepositoryCodeGraphReuseTests`; the annotation list and the
+layout preset by `code-report-graph-metrics.test.mjs` and `code-map-field.test.mjs`. Run it with
 `npx playwright test --config playwright.quality.config.js` from `UITests`.
 
 The report case in `vscode-viberails/src/test/suite/smoke.test.ts` uses a real backend and
@@ -311,6 +363,6 @@ Also review the real repository in the browser after graph supplier or Atlas lay
 `board-card-checks.js` mounts this same viewer for saved Code quality evidence. The card shows
 scope, coverage, limitations and qualified freshness ahead of the report; technical capture
 metadata stays in a disclosure. Its saved measurements precede the current repository map on
-small layouts. Closing or replacing the card aborts fetches and destroys the viewer; a late
-response cannot mount into another card. VCA evidence uses escaped text in the same report rail.
+small layouts. Closing or replacing the card destroys the viewer and aborts the card's own
+fetches; the shared map request may still finish, and a late response cannot mount into another card. VCA evidence uses escaped text in the same report rail.
 The Checks summary has no aggregate score. See `Services/Board/CHECKS.md` for the persistence contract.

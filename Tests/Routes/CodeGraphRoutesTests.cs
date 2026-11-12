@@ -96,6 +96,8 @@ public sealed class CodeGraphRoutesTests
                 git.Setup(service => service.GetRootPathAsync(It.IsAny<CancellationToken>())).ReturnsAsync(root);
                 using var success = await Send(true, true, "{\"files\":[\"file.cs\"]}");
                 Assert.Equal(HttpStatusCode.OK, success.StatusCode);
+                // The route writes the service's own UTF-8 JSON; it still has to say so.
+                Assert.Equal("application/json", success.Content.Headers.ContentType?.MediaType);
                 using var payload = JsonDocument.Parse(await success.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
                 Assert.Equal(1, payload.RootElement.GetProperty("fileCount").GetInt32());
                 Assert.True(payload.RootElement.TryGetProperty("diagnostics", out _));

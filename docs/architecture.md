@@ -711,7 +711,10 @@ page runs only its own checks; `RuleController` preserves the cached MintLint re
 navigation and disposes the viewer on departure. Settings is an icon-only cog beside the
 Automation play button in the top navigation. The authenticated,
 root-only `POST /api/v1/code-analyzer/graph` supplies bounded working-tree structure and
-lexical source references through `RepositoryCodeGraph`. Python package imports, Rust module
+lexical source references through `RepositoryCodeGraph`. The page asks for the map when Quality
+is opened, without waiting for the scan, and applies each scan's results to the mounted map in
+place; the service puts the working tree's changed files first and answers an unchanged tree with
+the capture it already holds (VIBE-313). Python package imports, Rust module
 trees, JS/TS imports/re-exports and namespace-scoped C#/PHP mentions provide link evidence;
 TypeScript interfaces and aliases appear in outlines. Coverage diagnostics distinguish source
 filters from bounded omissions; they and the scan log open from the card's menu, while the

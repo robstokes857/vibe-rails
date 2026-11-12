@@ -3,7 +3,7 @@ import {
     buildCodeAnalyzerDashboardModel,
     directoryOf
 } from './code-analyzer-dashboard.js';
-import { CodeReportViewer } from './code-report/viewer.js';
+import { CodeReportViewer, prefetchCodeGraph } from './code-report/viewer.js';
 import {
     GIT_PREFLIGHT_STEPS,
     GitPreflightRunner,
@@ -500,6 +500,12 @@ export class RuleController {
         this.bindActionMenuAutoClose(root);
         this.renderRuleInventorySummary();
         void this.runRulesOverviewChecks(root);
+    }
+
+    // The repository map needs nothing the Quality view waits for (hook status, the scan), so its
+    // request leaves with the navigation itself. A map this page already has is kept.
+    prefetchCodeQuality() {
+        if (this.app.data?.isInGit !== false) prefetchCodeGraph(this.app);
     }
 
     attachCodeQualityOverview(root) {

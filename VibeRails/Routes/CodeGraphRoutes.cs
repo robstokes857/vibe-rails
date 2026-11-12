@@ -17,7 +17,8 @@ public static class CodeGraphRoutes
                 return Results.BadRequest(new ErrorResponse("Supply at most 1000 repository-relative report paths."));
             var root = await git.GetRootPathAsync(cancellationToken);
             if (string.IsNullOrWhiteSpace(root)) return Results.BadRequest(new ErrorResponse("Not in a git repository."));
-            try { return Results.Ok(await graph.ReadAsync(root, files, cancellationToken)); }
+            // Already the wire JSON: an unchanged tree answers with the capture it had, without a second serialization.
+            try { return Results.Bytes(await graph.ReadJsonAsync(root, files, cancellationToken), "application/json; charset=utf-8"); }
             catch (InvalidOperationException ex) { return Results.BadRequest(new ErrorResponse(ex.Message)); }
         }).WithName("GetCodeReportGraph");
 

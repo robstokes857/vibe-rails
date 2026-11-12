@@ -121,6 +121,15 @@ export interface ResolvedTheme {
     nodes: ThemeNodes;
     graph: ThemeGraph;
 }
+/** Display fields a host supplies after mounting (VibeRails patch). An absent field keeps the graph's own value. */
+export interface NodeAnnotation {
+    id: string;
+    summary?: string;
+    metrics?: Record<string, number>;
+    quality?: NodeQuality;
+}
+/** One entity's settled overview position: node id, x, y (VibeRails patch). */
+export type LayoutPosition = [id: string, x: number, y: number];
 export interface CodeAtlasController {
     /** Resolves after layout, the startup reveal and the host connection finish; controls are usable. */
     readonly ready: Promise<void>;
@@ -133,6 +142,15 @@ export interface CodeAtlasController {
     setChangedFiles(files: string[]): Promise<ChangeSummary>;
     setHighlightChanges(enabled: boolean): Promise<ChangeSummary>;
     getChangeSummary(): Promise<ChangeSummary>;
+    /**
+     * Replaces the host's display overlay on entities already on the map (VibeRails patch): each
+     * entry sets `summary`, `metrics` and `quality` for one node, under the graph contract's own
+     * rules. Nodes a call leaves out get back what the graph supplied. Resolves to the entry count.
+     * Keeps the camera, selection and layout; an open inspector is redrawn.
+     */
+    setAnnotations(entries: NodeAnnotation[]): Promise<number>;
+    /** The overview's settled positions, or null before the overview has been laid out (VibeRails patch). */
+    getLayout(): Promise<LayoutPosition[] | null>;
     /** Replaces overrides over the selected base palette. Omit/reset to {} for default dark. */
     setTheme(theme?: ThemeOptions): Promise<ResolvedTheme>;
     getTheme(): Promise<ResolvedTheme>;
@@ -149,6 +167,11 @@ export interface MountOptions {
     changedFiles?: string[];
     /** Default true. Users can switch it off with Highlight changes in the toolbar. */
     highlightChanges?: boolean;
+    /**
+     * Positions `getLayout()` returned for this same graph (VibeRails patch): the overview uses them
+     * instead of running its layout solver. Ignored unless they cover exactly the overview's nodes.
+     */
+    layout?: LayoutPosition[];
     /** Base64 PNG/JPEG/WebP/GIF data URL, at most 512 KiB. */
     logo?: string;
     /** Omit to keep the built-in details dialog. Return value is ignored. */

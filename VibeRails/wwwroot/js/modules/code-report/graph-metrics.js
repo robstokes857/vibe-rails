@@ -37,3 +37,21 @@ export function withReportMetrics(graph, files, startedUtc) {
         })
     };
 }
+
+/**
+ * The same overlay as a list for a map that is already mounted: one entry per node the scan says
+ * something about, carrying only the fields it supplies. The map loads without waiting for the scan
+ * and takes its results in place (`atlas.setAnnotations`); an empty list clears the previous overlay.
+ */
+export function reportAnnotations(graph, files, startedUtc) {
+    const overlaid = withReportMetrics(graph, files, startedUtc).nodes;
+    const entries = [];
+    graph.nodes.forEach((node, index) => {
+        const next = overlaid[index];
+        if (next === node) return;
+        const entry = { id: node.id };
+        for (const field of ['summary', 'metrics', 'quality']) if (next[field] !== undefined) entry[field] = next[field];
+        entries.push(entry);
+    });
+    return entries;
+}

@@ -5,16 +5,51 @@ import { readReportTheme, observeReportTheme } from './theme-sync.js';
 import { enhanceRadar } from './radar-interactions.js';
 import { isConfirmDialogOpen } from '../utils.js';
 import { openDiffModal } from '../diff-modal.js';
-import { reportPath, withReportMetrics } from './graph-metrics.js';
+import { reportPath, reportAnnotations } from './graph-metrics.js';
 import { openFileDetailsModal } from './file-details-modal.js';
 
 export { reportPath } from './graph-metrics.js';
 
 let instanceId = 0;
-// The last graph a viewer fetched, keyed by its request and the report it belongs to. Re-entering the
-// page replays the saved report without a rescan; the map follows the same lifetime instead of capturing
-// the repository again (seconds on a large tree). A new scan response refreshes both.
+// The repository map does not depend on the scan, so it is requested on its own and shared by every
+// viewer on the page. A request belongs to the scan it is first shown with (`tag`); until then it
+// is unclaimed, which is how the map asked for when Quality was opened, or when a scan started,
+// becomes that scan's map. Re-entering the page replays the saved scan and therefore the same map,
+// without capturing the repository again; a new scan asks again, and the server answers an
+// unchanged tree with the capture it already had.
+const UNCLAIMED = Symbol('unclaimed');
+const PRIORITY_LIMIT = 1000;
+// Omission codes that mean "an eligible file was left out by a budget", which priorities can fix.
+const SELECTION_LIMITS = new Set(['file-limit', 'file-node-limit']);
 let graphCache = null;
+
+function requestGraph(app, files, tag = UNCLAIMED) {
+    // Nobody follows a superseded request any more; one that is still running stops costing the server.
+    if (graphCache && !graphCache.graph) graphCache.controller.abort();
+    const controller = new AbortController();
+    const entry = { files, tag, controller, graph: null, layout: null };
+    entry.promise = app.apiCall('/api/v1/code-analyzer/graph', 'POST', { files },
+        { showLoading: false, signal: controller.signal, preferErrorResponseMessage: true })
+        .then(graph => { entry.graph = graph; return graph; });
+    // A failed request is never replayed: the next viewer asks again.
+    entry.promise.catch(() => { if (graphCache === entry) graphCache = null; });
+    graphCache = entry;
+    return entry;
+}
+
+// The server reuses a capture while the tree is unchanged, so an equal capture time is the same map.
+const sameCapture = (shown, next) => !!shown && !!next && typeof next.capturedUtc === 'string'
+    && shown.capturedUtc === next.capturedUtc && shown.nodes?.length === next.nodes?.length
+    && shown.edges?.length === next.edges?.length;
+
+/**
+ * Asks for the repository map before a viewer exists, alongside the page's own first requests, so
+ * opening Quality does not wait for the scan (or anything else) before the map starts loading.
+ * Does nothing while a map is already known or on its way.
+ */
+export function prefetchCodeGraph(app) {
+    if (!graphCache) requestGraph(app, []);
+}
 const STATUS_LABELS = { modified: 'Modified', added: 'Added', deleted: 'Deleted', renamed: 'Renamed', copied: 'Copied',
     untracked: 'Untracked', conflicted: 'Conflicted', typechange: 'Type changed' };
 const STATUS_CODES = { modified: 'M', added: 'A', deleted: 'D', renamed: 'R', copied: 'C', untracked: '?', conflicted: 'U', typechange: 'T' };
@@ -132,58 +167,85 @@ export class CodeReportViewer {
         this.resizeObserver = typeof this.window.ResizeObserver === 'function' ? new this.window.ResizeObserver(this.fitHeight) : null;
         this.resizeObserver?.observe(this.document.body);
         this.fitHeight();
+        // The map has its own lifetime beside the report's: `graphEpoch` counts the request being
+        // followed, `generation` the report being shown. `ready` settles when the followed map is
+        // mounted, or has failed.
+        this.graphEpoch = 0;
+        this.graphEntry = null;
+        this.reportFiles = null;
+        this.reportPaths = [];
+        this.ready = Promise.resolve();
+        // A map requested while the page was still loading starts mounting now, ahead of the scan.
+        if (graphCache?.tag === UNCLAIMED) this.follow(graphCache);
     }
 
-    disposeGraph() {
-        this.cancelAutoFocus();
-        this.request?.abort();
-        this.request = null;
+    // The report's own state: everything a new scan result replaces. The map is not part of it.
+    resetReport() {
+        ++this.generation;
+        this.radar?.destroy();
+        this.radar = null;
+        this.closeDetails();
+        // The pending opening selection belongs to the report being replaced. Whether the user has
+        // already taken over (they can use the map while a scan runs) is kept until the next scan starts.
+        this.window.clearTimeout(this.autoFocusTimer);
+        this.autoFocusTimer = null;
         this.changesRequest?.abort();
         this.changesRequest = null;
+        this.changes = undefined;
+        this.quality.setLoading();
+    }
+
+    disposeMap() {
         this.themes?.destroy();
         this.themes = null;
         this.atlas?.destroy();
         this.atlas = null;
         this.graph = null;
-    }
-
-    setLoading() {
-        if (this.destroyed) return;
-        ++this.generation;
-        this.radar?.destroy();
-        this.radar = null;
-        this.closeDetails();
-        this.disposeGraph();
-        this.autoFocusCancelled = false;
-        this.changes = undefined;
+        this.overlayApplied = false;
         this.root.querySelector('[data-map-diagnostics]').hidden = true;
         this.root.querySelector('[data-graph-options]').hidden = true;
-        this.quality.setLoading();
-        this.mapHost.innerHTML = '<p class="load-error" role="status">Preparing repository map…</p>';
+    }
+
+    /** A scan is starting. The map on screen stays; the tree is asked for again alongside the scan. */
+    setLoading() {
+        if (this.destroyed) return;
+        this.resetReport();
+        this.autoFocusCancelled = false;
+        // A request nobody has been shown yet (asked for with the page, or still on its way) already
+        // describes the tree as this scan will see it.
+        const known = graphCache;
+        if (known && !known.graph) known.tag = UNCLAIMED;
+        this.follow(known?.tag === UNCLAIMED ? known : requestGraph(this.app, known?.files ?? []));
     }
 
     setError(message) {
         if (this.destroyed) return;
-        this.setLoading();
+        this.resetReport();
+        // A failed scan has no results: nothing of an earlier report may read as current.
+        this.response = null;
+        this.reportFiles = null;
+        this.reportPaths = [];
         this.quality.setError(message || 'The code report could not be loaded.');
         // The graph remains useful when analysis fails; its failure is independent.
-        this.ready = this.loadGraph([], this.generation);
+        this.claimGraph(null, []);
+        this.annotate();
         void this.loadChanges(this.generation);
     }
 
     async setResponse(response) {
         if (this.destroyed) return;
-        this.setLoading();
+        this.resetReport();
         const generation = this.generation;
         this.response = structuredClone(response);
         // A successful empty changeset has no report. Preserve its missing score.
         if (response?.success !== false && !response?.report && response?.analyzedFileCount === 0)
             this.response.report = { files: [], overview: [], scorecard: [] };
         const reportFiles = this.response?.report?.files;
-        const files = Array.isArray(reportFiles) ? reportFiles.map(file => reportPath(file?.file)).filter(Boolean) : [];
+        this.reportPaths = Array.isArray(reportFiles) ? reportFiles.map(file => reportPath(file?.file)).filter(Boolean) : [];
         // Only a report accepted by the quality viewer can supply map measurements.
         const validReport = this.quality.setResponse(this.response);
-        this.ready = this.loadGraph(files, generation, validReport);
+        this.reportFiles = validReport ? this.response.report.files : null;
+        this.claimGraph(this.response?.startedUtc ?? null, this.reportPaths);
         void this.loadChanges(generation);
         if (validReport) {
             this.composeFiles();
@@ -191,11 +253,73 @@ export class CodeReportViewer {
                 onSelect: category => this.showCategory(category)
             });
         }
-        await this.ready;
+        // A map that is already up takes the results now; one still on its way takes them when it mounts.
+        this.annotate();
+        this.syncChangedFiles();
+        this.prioritizeReportFiles();
+        // Asking again with priorities replaces `ready`; the opening selection waits for the map that stays.
+        for (let ready; ready !== this.ready && this.isCurrent(generation);) {
+            ready = this.ready;
+            await ready;
+        }
         if (this.isCurrent(generation)) this.scheduleAutoFocus(generation);
     }
 
     isCurrent(generation) { return !this.destroyed && generation === this.generation; }
+
+    // The map a report is shown with: the one asked for alongside it, the one it was shown with
+    // before, or a new capture that puts the report's own files first.
+    claimGraph(tag, files) {
+        const known = graphCache;
+        if (known && (known.tag === UNCLAIMED || known.tag === tag)) {
+            known.tag = tag;
+            this.follow(known);
+        } else this.follow(requestGraph(this.app, files.slice(0, PRIORITY_LIMIT), tag));
+    }
+
+    // Follows one request to a mounted map. A later follow, or teardown, supersedes it.
+    follow(entry) {
+        if (this.graphEntry === entry) return this.ready;
+        this.graphEntry = entry;
+        const epoch = ++this.graphEpoch;
+        const current = () => !this.destroyed && epoch === this.graphEpoch;
+        return this.ready = (async () => {
+            let graph;
+            try { graph = await entry.promise; }
+            catch (error) {
+                if (current() && !entry.controller.signal.aborted) this.showMapError(error);
+                return;
+            }
+            if (current()) await this.showGraph(entry, graph);
+        })();
+    }
+
+    showMapError(error) {
+        this.disposeMap();
+        this.mapHost.innerHTML = `<p class="load-error" role="alert">Code map unavailable: ${esc(error.message)} Saved report details are still available.</p>`;
+    }
+
+    // The scan's results for the files on a mounted map: their measurements and the inspector's
+    // summary. An empty or failed report clears whatever an earlier one put there.
+    annotate() {
+        const atlas = this.atlas;
+        if (!atlas || !this.graph) return;
+        const entries = this.reportFiles ? reportAnnotations(this.graph, this.reportFiles, this.response?.startedUtc) : [];
+        if (!entries.length && !this.overlayApplied) return;
+        this.overlayApplied = entries.length > 0;
+        atlas.setAnnotations(entries).catch(error => { if (this.atlas === atlas) this.notify(error.message); });
+    }
+
+    // The first request cannot name the report's files: the scan is still running when it is sent.
+    // When a budget left some of them off the map, ask once more with them as priorities.
+    prioritizeReportFiles() {
+        const entry = this.graphEntry, graph = this.graph;
+        if (!entry || !graph || entry.graph !== graph || !this.reportPaths.length) return;
+        if (!(graph.diagnostics?.omissions || []).some(item => SELECTION_LIMITS.has(item?.code) && item.count > 0)) return;
+        const mapped = this.mappedFiles();
+        if (!this.reportPaths.some(path => !mapped.has(path) && !entry.files.includes(path))) return;
+        this.follow(requestGraph(this.app, this.reportPaths.slice(0, PRIORITY_LIMIT), entry.tag));
+    }
 
     cancelAutoFocus() {
         this.window.clearTimeout(this.autoFocusTimer);
@@ -219,52 +343,70 @@ export class CodeReportViewer {
         }, 1500);
     }
 
-    async loadGraph(files, generation, validReport = false) {
-        this.root.querySelector('[data-map-diagnostics]').hidden = true;
-        const request = this.request = new AbortController();
-        const cacheKey = JSON.stringify([this.response?.startedUtc ?? null, files.slice(0, 1000)]);
-        try {
-            const graph = graphCache?.key === cacheKey ? graphCache.graph
-                : await this.app.apiCall('/api/v1/code-analyzer/graph', 'POST',
-                    { files: files.slice(0, 1000) },
-                    { showLoading: false, signal: request.signal, preferErrorResponseMessage: true });
-            if (!this.isCurrent(generation)) return;
-            graphCache = { key: cacheKey, graph };
+    async showGraph(entry, graph) {
+        // An unchanged tree answers a new scan with the capture already on screen. Keep that map, with
+        // its camera and selection; its settled layout belongs to the new request as well.
+        if (this.atlas && sameCapture(this.graph, graph)) {
+            const kept = this.atlas;
+            entry.layout ??= this.mapEntry?.layout ?? null;
             this.graph = graph;
-            this.mapHost.replaceChildren();
-            const atlas = this.atlas = mountCodeAtlas(this.mapHost, {
-                graph: withReportMetrics(graph, validReport ? this.response.report.files : [], this.response?.startedUtc),
-                theme: readReportTheme(this.root), cspNonce: this.window.__viberails_NONCE__,
-                changedFiles: this.changedPaths() ?? files, highlightChanges: true,
-                onOpenDetails: details => { if (this.isCurrent(generation)) this.showEntity(details); },
-                onError: error => { if (this.isCurrent(generation)) this.notify(error.message); }
+            this.mapEntry = entry;
+            // `ready` promises a usable map. A kept map can still be starting: the same capture
+            // answers a second request while the first one's frame is laying itself out.
+            try { await kept.ready; } catch { return; }
+            if (this.destroyed || this.atlas !== kept) return;
+            this.prioritizeReportFiles();
+            return;
+        }
+        this.disposeMap();
+        this.graph = graph;
+        this.mapEntry = entry;
+        this.mapHost.replaceChildren();
+        let atlas;
+        try {
+            // The graph is mounted as captured; the scan's results arrive through annotate(), whether the
+            // report is already here or still on its way. A capture this page has laid out before
+            // brings its positions, so returning to the page does not run the layout solver again.
+            atlas = this.atlas = mountCodeAtlas(this.mapHost, {
+                graph, theme: readReportTheme(this.root), cspNonce: this.window.__viberails_NONCE__,
+                changedFiles: this.highlightedPaths(), highlightChanges: true,
+                ...(entry.layout ? { layout: entry.layout } : {}),
+                onOpenDetails: details => { if (this.atlas === atlas) this.showEntity(details); },
+                onError: error => { if (this.atlas === atlas) this.notify(error.message); }
             });
             await atlas.ready;
-            if (!this.isCurrent(generation)) return;
-            this.themes = observeReportTheme(this.root, theme => atlas.setTheme(theme), error => this.notify(error.message));
-            this.syncChangedFiles();
-            // The change rows' locate buttons depend on the graph; the list often answers first on a large repository.
-            this.composeChanges();
-            const diagnostics = graph.diagnostics;
-            if (diagnostics) {
-                const omissions = diagnostics.omissions || [];
-                const body = this.root.querySelector('[data-map-diagnostics-body]');
-                body.innerHTML = `${graph.truncated ? '<p>Partial map: eligible files were left out of this snapshot; the counts below say which.</p>' : ''}
-                    <p>${esc(graph.fileCount)} source files mapped. ${esc(diagnostics.supportedFiles)} supported source files in the Git catalog.
-                    ${esc(diagnostics.excludedDependencyFiles)} vendor/node_modules/assets files and
-                    ${esc(diagnostics.excludedBuildOutputFiles)} C# bin/obj files excluded, including report paths.</p>
-                    <p>Non-C# bin/obj sources remain eligible. The map draws every entity of this snapshot and a bounded sample of
-                    its links; hover or select an entity to see all of its links. Search covers the whole snapshot.</p>
-                    ${omissions.length ? `<ul>${omissions.map(item => `<li>${esc(item.count)} ${esc(item.detail)}</li>`).join('')}</ul>`
-                        : '<p>No omissions from the eligible source files.</p>'}`;
-                this.root.querySelector('[data-map-diagnostics]').hidden = false;
-            }
         } catch (error) {
-            if (!this.isCurrent(generation) || request.signal.aborted) return;
-            this.atlas?.destroy();
-            this.atlas = null;
-            this.mapHost.innerHTML = `<p class="load-error" role="alert">Code map unavailable: ${esc(error.message)} Saved report details are still available.</p>`;
+            // A map replaced or torn down while it was starting is not a failure to report.
+            if (!this.destroyed && this.atlas === atlas) this.showMapError(error);
+            return;
         }
+        if (this.destroyed || this.atlas !== atlas) return;
+        this.themes = observeReportTheme(this.root, theme => atlas.setTheme(theme), error => this.notify(error.message));
+        this.syncChangedFiles();
+        this.annotate();
+        // The change rows' locate buttons depend on the graph; the list often answers first on a large repository.
+        this.composeChanges();
+        this.renderDiagnostics(graph);
+        if (!this.mapEntry.layout) {
+            atlas.getLayout().then(layout => { if (layout && this.atlas === atlas) this.mapEntry.layout = layout; }, () => {});
+        }
+        this.prioritizeReportFiles();
+    }
+
+    renderDiagnostics(graph) {
+        const diagnostics = graph.diagnostics;
+        if (!diagnostics) return;
+        const omissions = diagnostics.omissions || [];
+        const body = this.root.querySelector('[data-map-diagnostics-body]');
+        body.innerHTML = `${graph.truncated ? '<p>Partial map: eligible files were left out of this snapshot; the counts below say which.</p>' : ''}
+            <p>${esc(graph.fileCount)} source files mapped. ${esc(diagnostics.supportedFiles)} supported source files in the Git catalog.
+            ${esc(diagnostics.excludedDependencyFiles)} vendor/node_modules/assets files and
+            ${esc(diagnostics.excludedBuildOutputFiles)} C# bin/obj files excluded, including report paths.</p>
+            <p>Non-C# bin/obj sources remain eligible. The map draws every entity of this snapshot and a bounded sample of
+            its links; hover or select an entity to see all of its links. Search covers the whole snapshot.</p>
+            ${omissions.length ? `<ul>${omissions.map(item => `<li>${esc(item.count)} ${esc(item.detail)}</li>`).join('')}</ul>`
+                : '<p>No omissions from the eligible source files.</p>'}`;
+        this.root.querySelector('[data-map-diagnostics]').hidden = false;
     }
 
     composeFiles() {
@@ -313,10 +455,14 @@ export class CodeReportViewer {
         this.syncChangedFiles();
     }
 
+    // Until git's change list answers, the report's own files stand in for it.
+    highlightedPaths() { return this.changedPaths() ?? this.reportPaths; }
+
     syncChangedFiles() {
-        const paths = this.changedPaths();
-        if (!paths || !this.atlas) return;
-        this.atlas.setChangedFiles(paths.slice(0, 10000)).catch(error => this.notify(error.message));
+        const atlas = this.atlas;
+        if (!atlas) return;
+        atlas.setChangedFiles(this.highlightedPaths().slice(0, 10000))
+            .catch(error => { if (this.atlas === atlas) this.notify(error.message); });
     }
 
     mappedFiles() {
@@ -537,8 +683,16 @@ export class CodeReportViewer {
         if (this.destroyed) return;
         this.destroyed = true;
         ++this.generation;
+        ++this.graphEpoch;
         this.radar?.destroy();
-        this.disposeGraph();
+        this.cancelAutoFocus();
+        this.changesRequest?.abort();
+        this.changesRequest = null;
+        // The shared map request is left running: it is this page's, not this viewer's, and coming
+        // back to Quality picks it up instead of capturing the repository a second time.
+        this.disposeMap();
+        this.graphEntry = null;
+        this.mapEntry = null;
         this.quality.destroy();
         this.closeDetails();
         this.document.removeEventListener('keydown', this.onKeydown, true);

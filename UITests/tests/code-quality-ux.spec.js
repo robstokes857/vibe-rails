@@ -1143,7 +1143,7 @@ test('long file lists scroll independently and saved excerpts remain inert text'
     expect(await page.evaluate(() => window.reportInjected)).toBeUndefined();
 });
 
-test('navigation aborts a late graph and route re-entry uses the cached report', async ({ page }) => {
+test('a graph that answers after navigation mounts nothing and route re-entry uses the cached report', async ({ page }) => {
     const { scanRequests } = await installQualityApi(page);
     let release;
     const pending = new Promise(resolve => { release = resolve; });
@@ -1161,6 +1161,149 @@ test('navigation aborts a late graph and route re-entry uses the cached report',
     await page.locator('[data-action="navigate"][data-view="code-quality"]:visible').click();
     await expect(page.locator('.code-report .qr')).toHaveAttribute('data-state', 'complete', { timeout: 25_000 });
     expect(scanRequests).toHaveLength(1);
+});
+
+// VIBE-313: the map is asked for with the page and no longer waits for the scan. A real capture
+// carries its capture time; the server answers an unchanged tree with the capture it already had.
+const CAPTURE = '2026-11-12T03:00:00.0000000Z';
+
+test('the map loads while the scan is still running and takes its results in place', async ({ page }) => {
+    const { scanRequests } = await installQualityApi(page);
+    const graphRequests = [];
+    await page.route('**/api/v1/code-analyzer/graph', route => {
+        graphRequests.push(route.request().postDataJSON());
+        return route.fulfill({ json: { ...graphResponse(), capturedUtc: CAPTURE } });
+    });
+    let releaseScan;
+    const scanHeld = new Promise(resolve => { releaseScan = resolve; });
+    await page.route(/\/api\/v1\/code-analyzer(?:\?.*)?$/, async route => {
+        await scanHeld;
+        await route.fallback();
+    });
+    await openQuality(page);
+    const report = page.locator('.code-report:not(.quality-file-layer)');
+    const frame = report.locator('iframe');
+    const map = page.frameLocator('.code-report iframe');
+    // The scan has not answered and the map is already usable.
+    await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready', { timeout: 20_000 });
+    await expect(report.locator('.qr')).toHaveAttribute('data-state', 'loading');
+    expect(graphRequests).toEqual([{ files: [] }]);
+    await frame.evaluate(element => { element.dataset.mount = 'first'; });
+    const cells = map.locator('#inspector .metric');
+    await map.locator('body').evaluate(() => CodeAtlas.focusNode('payment-file'));
+    await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
+    await expect(cells.locator('span')).toHaveText(['Direct links']);
+
+    releaseScan();
+    await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete', { timeout: 25_000 });
+    // The results reach the map that is already there: the open inspector is redrawn in the same frame.
+    await expect(cells.locator('strong')).toHaveText(['2', '31', '1']);
+    await expect(map.locator('#inspector .entity-note')).toContainText('Measured in the scan from');
+    await expect(frame).toHaveAttribute('data-mount', 'first');
+    expect(graphRequests).toHaveLength(1);
+
+    // Scan again asks for the tree again; an unchanged capture keeps the map, its selection and the overlay.
+    await page.locator('.project-health-quality').getByRole('button', { name: 'Scan again', exact: true }).click();
+    await expect.poll(() => scanRequests.length).toBe(2);
+    await expect.poll(() => graphRequests.length).toBe(2);
+    await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete', { timeout: 25_000 });
+    await page.evaluate(() => window.app.ruleController.codeReportViewer.ready);
+    await expect(frame).toHaveAttribute('data-mount', 'first');
+    await expect(report.locator('iframe')).toHaveCount(1);
+    await expect(map.locator('#inspector h2')).toHaveText('PaymentProcessor.cs');
+    await expect(cells.locator('strong')).toHaveText(['2', '31', '1']);
+    expect(graphRequests[1]).toEqual({ files: [] });
+});
+
+test('a report file missing from a partial map is asked for once; only a new capture replaces the map', async ({ page }) => {
+    const { scanRequests } = await installQualityApi(page);
+    const graphRequests = [];
+    let recapture = false;
+    let releasePrioritized;
+    const prioritizedHeld = new Promise(resolve => { releasePrioritized = resolve; });
+    await page.route('**/api/v1/code-analyzer/graph', async route => {
+        const request = route.request().postDataJSON();
+        graphRequests.push(request);
+        const prioritized = request.files.includes(HELPER_PATH);
+        if (prioritized) await prioritizedHeld;
+        const graph = { ...graphResponse(), capturedUtc: CAPTURE, truncated: true };
+        graph.diagnostics = { supportedFiles: 9, excludedDependencyFiles: 0, excludedBuildOutputFiles: 0, includesDependencies: false,
+            omissions: [{ code: 'file-limit', count: 7, detail: 'source files omitted by the 2,000-file limit.' }] };
+        if (prioritized && recapture) graph.capturedUtc = '2026-11-12T03:00:09.0000000Z';
+        else {
+            // The helper is a file the map cannot hold (the server excludes it, or it no longer exists).
+            graph.fileCount = 1;
+            graph.nodes = graph.nodes.filter(node => node.id !== 'helper-file');
+            graph.edges = graph.edges.filter(edge => edge.target !== 'helper-file');
+        }
+        await route.fulfill({ json: graph }).catch(() => {});
+    });
+    await openQuality(page);
+    const report = page.locator('.code-report:not(.quality-file-layer)');
+    const frame = report.locator('iframe');
+    const map = page.frameLocator('.code-report iframe');
+    const helperMapped = () => page.evaluate(path => window.app.ruleController.codeReportViewer.mappedFiles().has(path), HELPER_PATH);
+    await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete', { timeout: 25_000 });
+    await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready', { timeout: 20_000 });
+    // The first request cannot name the report's files; the second names them, once.
+    await expect.poll(() => graphRequests.length).toBe(2);
+    expect(graphRequests).toEqual([{ files: [] }, { files: [PAYMENT_PATH, HELPER_PATH] }]);
+    await frame.evaluate(element => { element.dataset.mount = 'first'; });
+    releasePrioritized();
+    await page.evaluate(() => window.app.ruleController.codeReportViewer.ready);
+    // The same capture came back: the map on screen is kept and nothing is asked a third time.
+    await page.waitForTimeout(400);
+    await expect(frame).toHaveAttribute('data-mount', 'first');
+    expect(await helperMapped()).toBe(false);
+    expect(graphRequests).toHaveLength(2);
+    await expect(report.locator('.qr-file')).toHaveCount(2);
+
+    // A capture that does hold the file is a different map and replaces the one on screen.
+    recapture = true;
+    await page.locator('.project-health-quality').getByRole('button', { name: 'Scan again', exact: true }).click();
+    await expect.poll(() => scanRequests.length).toBe(2);
+    await expect.poll(() => graphRequests.length).toBe(3);
+    await expect(report.locator('.qr')).toHaveAttribute('data-state', 'complete', { timeout: 25_000 });
+    await expect.poll(helperMapped).toBe(true);
+    await page.evaluate(() => window.app.ruleController.codeReportViewer.ready);
+    await expect(report.locator('iframe')).toHaveCount(1);
+    await expect(frame).not.toHaveAttribute('data-mount', 'first');
+    await expect(map.locator('body')).toHaveAttribute('data-startup', 'ready', { timeout: 20_000 });
+    await page.waitForTimeout(400);
+    expect(graphRequests).toHaveLength(3);
+});
+
+test('returning to Quality lays the map out from the positions it had settled on', async ({ page }) => {
+    await installQualityApi(page);
+    await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ json: { ...graphResponse(), capturedUtc: CAPTURE } }));
+    await openDetails(page);
+    await page.evaluate(() => window.app.ruleController.codeReportViewer.ready);
+    // The settled overview is kept with the capture: one position per entity.
+    await expect.poll(() => page.evaluate(() => window.app.ruleController.codeReportViewer.mapEntry?.layout?.length ?? 0)).toBe(4);
+    // A moved copy tells a remount that used it from one that solved the layout again.
+    const moved = await page.evaluate(() => {
+        const entry = window.app.ruleController.codeReportViewer.mapEntry;
+        entry.layout = entry.layout.map(([id, x, y]) => [id, x + 40, y - 25]);
+        return entry.layout;
+    });
+    await page.locator('[data-action="navigate"][data-view="ai-agents"]:visible').click();
+    await expect(page.locator('.code-report iframe')).toHaveCount(0);
+    await page.locator('[data-action="navigate"][data-view="code-quality"]:visible').click();
+    await expect(page.locator('.code-report .qr')).toHaveAttribute('data-state', 'complete', { timeout: 25_000 });
+    await page.evaluate(() => window.app.ruleController.codeReportViewer.ready);
+    const shown = await page.evaluate(() => window.app.ruleController.codeReportViewer.atlas.getLayout());
+    const byId = positions => Object.fromEntries(positions.map(([id, x, y]) => [id, [x, y]]));
+    expect(byId(shown)).toEqual(byId(moved));
+    // The host checks a supplied layout before anything reaches the frame.
+    const rejected = await page.evaluate(async graph => {
+        const { mountCodeAtlas } = await import('/js/modules/code-report/vendor/atlas/code-atlas.mjs');
+        const host = document.body.appendChild(document.createElement('div'));
+        try { mountCodeAtlas(host, { graph, layout: [['payment-file', 'left', 0]] }).destroy(); }
+        catch (error) { return error.message; }
+        finally { host.remove(); }
+        return null;
+    }, graphResponse());
+    expect(rejected).toBe('Each layout position must be [nodeId, x, y].');
 });
 
 test('report respects reduced motion and host theme without remounting the map', async ({ page }) => {

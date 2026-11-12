@@ -219,3 +219,31 @@ test('the front view is the flat map exactly; perspective and the fog deepen as 
     assert.equal(flat.scale, 1);
     assert.ok(flat.brightness > .62 && flat.brightness <= 1);
 });
+
+// VIBE-313: the host keeps the overview's settled positions and supplies them on the next mount.
+test('a complete set of settled positions replaces the solver; anything less is solved from scratch', () => {
+    // Just over fifty entities, so the wide-field stretch applies to a solved layout.
+    const { nodes, edges, index, positions } = globeFixture(2, 13);
+    assert.ok(nodes.length > 50);
+    const settled = new Map([...positions.values()].map(item => [item.id, [item.x, item.y]]));
+    const again = layout(nodes, edges, index, settled);
+    assert.equal(again.size, positions.size);
+    for (const item of positions.values()) {
+        const other = again.get(item.id);
+        assert.deepEqual([other.x, other.y, other.z], [item.x, item.y, item.z], `${item.id} keeps its place and its depth`);
+    }
+    assert.deepEqual(again.space, positions.space);
+    // Supplied positions are taken as given: not solved again and not stretched a second time.
+    const moved = new Map([...settled].map(([id, [x, y]]) => [id, [x + 40, y - 25]]));
+    const shifted = layout(nodes, edges, index, moved);
+    for (const [id, [x, y]] of moved) assert.deepEqual([shifted.get(id).x, shifted.get(id).y], [x, y]);
+    // One entity short, one from another graph, or not a position map at all: a different graph is
+    // never half placed.
+    const short = new Map(moved);
+    short.delete(nodes[5].id);
+    const foreign = new Map(short).set('elsewhere', [0, 0]);
+    for (const preset of [short, foreign, [], {}]) {
+        const solved = layout(nodes, edges, index, preset);
+        for (const item of positions.values()) assert.deepEqual([solved.get(item.id).x, solved.get(item.id).y], [item.x, item.y]);
+    }
+});

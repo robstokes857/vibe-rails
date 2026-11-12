@@ -1,5 +1,7 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -41,13 +43,106 @@ public sealed class RepositoryCodeGraph
         + "type-name mentions. References are source evidence, not resolved calls or runtime dependencies.";
     // Large repositories with a cold Git index can take a while to enumerate; this is a bound, not a target.
     private static readonly TimeSpan CatalogTimeout = TimeSpan.FromMinutes(2);
+    // Outlines are parsed a batch at a time, side by side. The reads stay sequential, so the source
+    // budget is charged in the same order as before, and the batch bounds the text held at once.
+    private const int ParseBatchChars = 2 * 1024 * 1024;
+    private static readonly int ParseWorkers = Math.Clamp(Environment.ProcessorCount / 2, 1, 8);
+    // File times tick coarsely: a file written twice within one tick, at the same length, looks
+    // unchanged. A capture is only kept for reuse when every mapped file had been still this long.
+    private static readonly TimeSpan SettleMargin = TimeSpan.FromSeconds(2);
+    // The page asks without priorities first and, when a partial map lacks files its scan reported,
+    // once more with those files. That second request is a second capture only if it selects differently.
+    private const int MaxRememberedMaps = 2;
+    private const int MaxStatusChars = 4 * 1024 * 1024;
+    private static readonly TimeSpan StatusTimeout = TimeSpan.FromSeconds(30);
+    private readonly SemaphoreSlim _mapGate = new(1, 1);
+    private readonly List<(string Fingerprint, byte[] Json)> _maps = [];
 
     /// <summary>Reads only regular, repository-contained files; never follows links.</summary>
     public async Task<CodeGraphResponse> ReadAsync(string repositoryPath, IReadOnlyList<string> priorityFiles,
         CancellationToken cancellationToken)
     {
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryPath));
-        var paths = await ListFilesAsync(root, cancellationToken);
+        var paths = SplitCatalog(await ReadCatalogAsync(root, cancellationToken));
+        return await CaptureAsync(root, paths, Plan(paths, priorityFiles),
+            new GitStagedSnapshotProvider.WorkingTreePathGuard(root), cancellationToken);
+    }
+
+    /// <summary>
+    /// The page's map as wire JSON: the given priorities, then the working tree's changed files, then
+    /// the rest of the repository. The page asks for it before any scan has answered, and the files a
+    /// scan reports are changed files, so they are inside the file budget from the first request.
+    /// The last captures are reused while Git's file catalog, the files selected for the map and
+    /// the size and modified time of each of them are unchanged, so reopening the page or rescanning
+    /// an unchanged tree costs the catalog and one stat per file instead of reading and parsing each
+    /// of them again. Priorities that select the same files in the same order are the same capture.
+    /// </summary>
+    public async Task<ReadOnlyMemory<byte>> ReadJsonAsync(string repositoryPath, IReadOnlyList<string> priorityFiles,
+        CancellationToken cancellationToken)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryPath));
+        // One capture at a time: a second request for the same tree waits, then reuses the first one's map.
+        await _mapGate.WaitAsync(cancellationToken);
+        try
+        {
+            var settledBeforeUtc = DateTime.UtcNow - SettleMargin;
+            var catalogRead = ReadCatalogAsync(root, cancellationToken);
+            var changedRead = ReadChangedPathsAsync(root, cancellationToken);
+            await Task.WhenAll(catalogRead, changedRead);
+            var catalog = await catalogRead;
+            priorityFiles = WithChangedPaths(priorityFiles, await changedRead);
+            var paths = SplitCatalog(catalog);
+            var plan = Plan(paths, priorityFiles);
+            var guard = new GitStagedSnapshotProvider.WorkingTreePathGuard(root);
+            var fingerprint = Fingerprint(root, catalog, plan.Selected, guard, settledBeforeUtc, out var settled);
+            var known = _maps.FindIndex(map => map.Fingerprint == fingerprint);
+            if (known >= 0)
+            {
+                var map = _maps[known];
+                _maps.RemoveAt(known);
+                _maps.Add(map);
+                return map.Json;
+            }
+            var response = await CaptureAsync(root, paths, plan, guard, cancellationToken);
+            var json = JsonSerializer.SerializeToUtf8Bytes(response, AppJsonSerializerContext.Default.CodeGraphResponse);
+            if (settled)
+            {
+                if (_maps.Count == MaxRememberedMaps) _maps.RemoveAt(0);
+                _maps.Add((fingerprint, json));
+            }
+            return json;
+        }
+        finally { _mapGate.Release(); }
+    }
+
+    // Explicit priorities keep their place; changed files take the room that is left. A tree with
+    // more changes than fit (a new repository where every file is untracked) is not preferred by
+    // change at all: taking the first thousand by name would undo the per-directory turns below.
+    internal static IReadOnlyList<string> WithChangedPaths(IReadOnlyList<string> priorityFiles, IReadOnlyList<string> changedPaths)
+    {
+        if (changedPaths.Count == 0) return priorityFiles;
+        var known = priorityFiles.ToHashSet(StringComparer.Ordinal);
+        var added = changedPaths.Where(path => IsSourcePath(path) && !known.Contains(path))
+            .Distinct(StringComparer.Ordinal).ToArray();
+        return added.Length == 0 || priorityFiles.Count + added.Length > MaxPriorityFiles ? priorityFiles : [.. priorityFiles, .. added];
+    }
+
+    // Paths only. A failed or slow status read loses the preference, never the map.
+    private static async Task<IReadOnlyList<string>> ReadChangedPathsAsync(string root, CancellationToken cancellationToken)
+    {
+        var status = await GitCli.RunAsync(root,
+            ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules"],
+            cancellationToken, StatusTimeout, maxOutputChars: MaxStatusChars + 1);
+        if (!status.Succeeded || status.StdOut.Length > MaxStatusChars) return [];
+        return WorkingTreeChanges.ParseStatus(status.StdOut).Where(entry => entry.Status != "deleted")
+            .Select(entry => entry.Path).ToArray();
+    }
+
+    /// <summary>The files a map will hold and why any eligible file is left out.</summary>
+    private sealed record MapPlan(string[] Selected, bool Truncated, CodeGraphDiagnosticsBuilder Diagnostics);
+
+    private static MapPlan Plan(string[] paths, IReadOnlyList<string> priorityFiles)
+    {
         var priority = priorityFiles.ToHashSet(StringComparer.Ordinal);
         var supported = paths.Where(path => IsSafePath(path) && MintLintAnalyzer.SupportsFile(path))
             .Distinct(StringComparer.Ordinal).ToArray();
@@ -63,19 +158,75 @@ public sealed class RepositoryCodeGraph
             .OrderBy(path => path, StringComparer.Ordinal).ToArray();
         var selected = SelectPaths(candidates, priority, MaxFiles, MaxNodes).ToArray();
         // Fewer selected than eligible means the file or node budget left some out: say the map is partial.
-        var truncated = selected.Length < candidates.Length;
         diagnostics.Add(selected.Length == MaxFiles ? "file-limit" : "file-node-limit",
             candidates.Length - selected.Length, selected.Length == MaxFiles ? FileLimitText : NodeLimitText);
-        var guard = new GitStagedSnapshotProvider.WorkingTreePathGuard(root);
-        var files = new List<(string Path, SourceOutline? Outline)>();
+        return new(selected, selected.Length < candidates.Length, diagnostics);
+    }
+
+    // Everything a capture depends on, without opening a file: the catalog decides which files exist,
+    // the selection which of them are mapped and in what order, and each selected file's size and
+    // modified time whether its outline could differ. A refused or missing path is part of the state
+    // too. Priorities count only through the selection they produce: a priority that names a file
+    // the map can never hold (a vendored bundle a scan reported) or one that is selected anyway
+    // asks for the capture that is already there, and gets it.
+    private static string Fingerprint(string root, string catalog, string[] selected,
+        GitStagedSnapshotProvider.WorkingTreePathGuard guard, DateTime settledBeforeUtc, out bool settled)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        Span<byte> number = stackalloc byte[sizeof(long)];
+        AddText(hash, root);
+        AddText(hash, catalog);
+        settled = true;
+        foreach (var path in selected)
+        {
+            AddText(hash, path);
+            var file = guard.RegularFile(Path.GetFullPath(Path.Combine(root, path)));
+            long length = -1, modified = 0;
+            if (file is not null)
+            {
+                try
+                {
+                    length = file.Length;
+                    modified = file.LastWriteTimeUtc.Ticks;
+                    if (file.LastWriteTimeUtc >= settledBeforeUtc) settled = false;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { length = -1; }
+            }
+            BinaryPrimitives.WriteInt64LittleEndian(number, length);
+            hash.AppendData(number);
+            BinaryPrimitives.WriteInt64LittleEndian(number, modified);
+            hash.AppendData(number);
+        }
+        return Convert.ToHexStringLower(hash.GetHashAndReset());
+
+        // Length-prefixed, so no two different field lists hash alike (the catalog itself contains NULs).
+        static void AddText(IncrementalHash hash, string text)
+        {
+            Span<byte> length = stackalloc byte[sizeof(int)];
+            BinaryPrimitives.WriteInt32LittleEndian(length, text.Length);
+            hash.AppendData(length);
+            hash.AppendData(MemoryMarshal.AsBytes(text.AsSpan()));
+        }
+    }
+
+    private static async Task<CodeGraphResponse> CaptureAsync(string root, string[] paths, MapPlan plan,
+        GitStagedSnapshotProvider.WorkingTreePathGuard guard, CancellationToken cancellationToken)
+    {
+        var selected = plan.Selected;
+        var diagnostics = plan.Diagnostics;
+        var truncated = plan.Truncated;
+        var kept = new bool[selected.Length];
+        var outlines = new SourceOutline?[selected.Length];
+        var pending = new List<(int Index, string Text)>();
+        var pendingChars = 0;
         long bytesRead = 0;
         // One read buffer for the whole map: a fresh 128 KiB array per file is a large-object
         // allocation for each of up to MaxFiles files. Only [0, length) is read after each fill.
         var buffer = new byte[MaxFileBytes + 1];
-        foreach (var path in selected)
+        for (var index = 0; index < selected.Length; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var fullPath = Path.GetFullPath(Path.Combine(root, path));
+            var fullPath = Path.GetFullPath(Path.Combine(root, selected[index]));
             // A link, device or unreadable entry is a file the map silently omits, so say the map is partial.
             if (!guard.IsReadableRegularFile(fullPath))
             {
@@ -83,7 +234,7 @@ public sealed class RepositoryCodeGraph
                 diagnostics.Add("unreadable-path", 1, "files omitted: unavailable, unreadable or refused by the repository path guard.");
                 continue;
             }
-            SourceOutline? outline = null;
+            kept[index] = true;
             try
             {
                 // Bound the read itself, including files that grow after the stat.
@@ -94,7 +245,12 @@ public sealed class RepositoryCodeGraph
                     var length = await stream.ReadAtLeastAsync(buffer, buffer.Length, false, cancellationToken);
                     bytesRead += length;
                     if (length <= MaxFileBytes && !buffer.AsSpan(0, length).Contains((byte)0))
-                        outline = SourceOutline.Read(path, Encoding.UTF8.GetString(buffer, 0, length));
+                    {
+                        var text = Encoding.UTF8.GetString(buffer, 0, length);
+                        pending.Add((index, text));
+                        pendingChars += text.Length;
+                        if (pendingChars >= ParseBatchChars) ParsePending();
+                    }
                     else
                     {
                         truncated = true;
@@ -114,9 +270,24 @@ public sealed class RepositoryCodeGraph
                 truncated = true;
                 diagnostics.Add("read-error", 1, "files kept without outlines: source could not be read. Retry after checking file access.");
             }
-            files.Add((path, outline));
         }
+        ParsePending();
+        var files = new List<(string Path, SourceOutline? Outline)>(selected.Length);
+        for (var index = 0; index < selected.Length; index++)
+            if (kept[index]) files.Add((selected[index], outlines[index]));
         return Build(RepositoryName(root), files, truncated, cancellationToken, diagnostics, paths);
+
+        // The language parsers keep no state between files and each outline depends on its own text
+        // alone, so the workers produce exactly what a sequential pass would, in the selection's order.
+        void ParsePending()
+        {
+            if (pending.Count == 0) return;
+            Parallel.For(0, pending.Count,
+                new ParallelOptions { MaxDegreeOfParallelism = ParseWorkers, CancellationToken = cancellationToken },
+                slot => outlines[pending[slot].Index] = SourceOutline.Read(selected[pending[slot].Index], pending[slot].Text));
+            pending.Clear();
+            pendingChars = 0;
+        }
     }
 
     // A lexical prefix can consume the entire budget before reaching the application's UI
@@ -520,7 +691,10 @@ public sealed class RepositoryCodeGraph
 
     private static string DisplayName(string name) => name.Length > 500 ? name[..497] + "…" : name;
 
-    private static async Task<string[]> ListFilesAsync(string root, CancellationToken cancellationToken)
+    private static string[] SplitCatalog(string catalog) => catalog.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>Git's NUL-separated list of tracked and untracked, non-ignored files.</summary>
+    private static async Task<string> ReadCatalogAsync(string root, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(CatalogTimeout);
@@ -541,7 +715,7 @@ public sealed class RepositoryCodeGraph
             await process.WaitForExitAsync(timeout.Token);
             await error;
             if (process.ExitCode != 0) throw new InvalidOperationException("Could not read repository files for the code map.");
-            return new string(buffer, 0, count).Split('\0', StringSplitOptions.RemoveEmptyEntries);
+            return new string(buffer, 0, count);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

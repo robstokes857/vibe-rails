@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { withReportMetrics } from '../../../VibeRails/wwwroot/js/modules/code-report/graph-metrics.js';
+import { reportAnnotations, withReportMetrics } from '../../../VibeRails/wwwroot/js/modules/code-report/graph-metrics.js';
 
 const graph = {
     nodes: [
@@ -95,4 +95,31 @@ test('reusing the cached graph never retains a previous scan overlay', () => {
     assert.equal(empty.nodes[0].metrics, undefined);
     assert.equal(empty.nodes[3].summary, undefined);
     assert.equal(graph.nodes[0].metrics, undefined);
+});
+
+// VIBE-313: the map mounts before the scan answers, so the same overlay reaches it as a list.
+test('a mounted map receives one entry per node the scan describes, with only the supplied fields', () => {
+    const files = [file([metric('lines_of_code', 12), metric('cyclomatic_complexity', 6)])];
+    const entries = reportAnnotations(graph, files, 'invalid');
+    const overlaid = withReportMetrics(graph, files, 'invalid').nodes;
+    // Symbols and directories are untouched, so they are not sent at all.
+    assert.deepEqual(entries.map(entry => entry.id), ['file', 'unscanned']);
+    // No limits were supplied, so there is no quality summary and the entry has no such key.
+    assert.deepEqual(entries[0], { id: 'file', summary: 'Measured in the saved scan.', metrics: { loc: 12, complexity: 6 } });
+    assert.deepEqual(entries[1], { id: 'unscanned', summary: 'Not in this scan.' });
+    assert.deepEqual(overlaid.filter((node, index) => node !== graph.nodes[index]).map(node => node.id), ['file', 'unscanned']);
+    // With limits the inspector's summary travels with the measurements, exactly as the overlay built it.
+    const judged = [file([metric('lines_of_code', 40, { warn: 300, critical: 600 })])];
+    const quality = withReportMetrics(graph, judged).nodes[0].quality;
+    assert.ok(quality);
+    assert.deepEqual(reportAnnotations(graph, judged)[0].quality, quality);
+    // The map's own nodes are never carried back: an entry holds an id and display fields only.
+    for (const entry of entries) assert.deepEqual(Object.keys(entry).filter(key => !['id', 'summary', 'metrics', 'quality'].includes(key)), []);
+});
+
+test('an empty, missing or unmeasured report sends nothing, which clears the previous overlay', () => {
+    for (const files of [[], [null], [{ file: '' }]]) assert.deepEqual(reportAnnotations(graph, files), []);
+    // A covered file without measurements or findings keeps its node; its neighbour still says it was not scanned.
+    assert.deepEqual(reportAnnotations(graph, [file([])]), [{ id: 'unscanned', summary: 'Not in this scan.' }]);
+    assert.equal(graph.nodes[0].summary, undefined, 'the cached graph is never written to');
 });
