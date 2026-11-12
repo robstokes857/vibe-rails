@@ -257,6 +257,7 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
     private readonly bool _originalIsInGit = ParserConfigs.GetIsInGit();
     private readonly Mock<ITerminalTabHostService> _tabHost = new(MockBehavior.Strict);
     private readonly Mock<IRepository> _repository = new(MockBehavior.Strict);
+    private readonly VibeRails.Auth.AgentCredentialService _agentCredentials = new();
     private string _connectionString = null!;
     private string _project = null!;
     private WebApplication _app = null!;
@@ -312,6 +313,8 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         builder.Services.AddSingleton<IBoardFileIndexService>(new BoardFileIndexService(TimeProvider.System, (_, _) => Task.FromResult<IReadOnlyList<string>?>(null)));
         builder.Services.AddSingleton(_tabHost.Object);
         builder.Services.AddSingleton(_repository.Object);
+        // Scoped CLI credentials (start_board_agent); only requests carrying a vr_agent_ token consult it.
+        builder.Services.AddSingleton(_agentCredentials);
         builder.Services.AddScoped<IBoardLaunchService, BoardLaunchService>();
         builder.Services.AddScoped<BoardManagerService>();
         builder.Services.AddScoped<IBoardContextEstimator, BoardContextEstimator>();

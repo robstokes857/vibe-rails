@@ -260,7 +260,11 @@ public static partial class BoardRoutes
             .WithName("DeleteBoardComment");
 
         app.MapPost("/api/v1/board/cards/{card}/launch", (IBoardLaunchService launcher, HttpContext http, string card, LaunchBoardCardRequest? request, CancellationToken cancellationToken) =>
-            RunAsync(async () => OkOrNotFound(await launcher.LaunchAsync(await LaunchProjectAsync(http, cancellationToken), card, request?.Selection, cancellationToken, request?.Intent ?? "work", request?.Review, request?.Question, request?.Task), "Card")))
+            RunAsync(async () =>
+            {
+                var launch = LaunchRequestFor(http, request);
+                return OkOrNotFound(await launcher.LaunchAsync(await LaunchProjectAsync(http, cancellationToken), card, launch?.Selection, cancellationToken, launch?.Intent ?? "work", launch?.Review, launch?.Question, launch?.Task), "Card");
+            }))
             .WithName("LaunchBoardCard");
 
         // The context an agent launched on this card right now would receive (VB-63): the launch
@@ -546,6 +550,24 @@ public static partial class BoardRoutes
 
     // Only middleware-authenticated contacts can select the project captured by their run.
     // No request field or header supplied by a caller is a project capability.
+    /// <summary>
+    /// What this caller may ask of the launch route. The dashboard sends the whole request. A CLI's
+    /// tool contact (start_board_agent) may send only what that tool sends: a picker key, one of its
+    /// four intents and a worker task. Reviewer routing carries launch options (model, mode, YOLO)
+    /// and a question opens a discussion session; both stay with the dashboard credentials, so a
+    /// tool can never choose the flags its launch runs with (API_SEC.md, "MCP and agent launches").
+    /// </summary>
+    internal static LaunchBoardCardRequest? LaunchRequestFor(HttpContext http, LaunchBoardCardRequest? request)
+    {
+        if (http.Items[typeof(VibeRails.Auth.AgentCredentialService.Contact)] is not VibeRails.Auth.AgentCredentialService.Contact)
+            return request;
+        if ((request?.Intent ?? "work") is not ("work" or "manager" or "worker" or "code_review"))
+            throw new BoardValidationException("A CLI tool can start work, manager, worker or code_review launches only.");
+        if (request?.Review is not null || request?.Question is not null)
+            throw new BoardValidationException("Reviewer routing and discussion questions are set in the dashboard, not by a CLI tool.");
+        return request;
+    }
+
     internal static async Task<string> LaunchProjectAsync(HttpContext http, CancellationToken ct)
     {
         if (http.Items[typeof(VibeRails.Auth.AgentCredentialService.Contact)] is VibeRails.Auth.AgentCredentialService.Contact { SessionId: { } session } contact

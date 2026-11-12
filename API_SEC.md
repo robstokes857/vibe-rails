@@ -758,6 +758,10 @@ disables redirects/proxies/cookies, and bounds time and response size. Start tak
 card identifier and uses its saved assignment; the root enforces its current project and
 ordinary launch validation. No caller-supplied executable, argv, project path or credential
 is accepted. Uncertain launch results require a status check, never an automatic retry.
+A request authenticated by a tool contact may carry only `selection`, `intent` (work, manager,
+worker or code_review) and `task`, as the tool sends them. Reviewer routing and overrides, which
+carry launch options including the provider's permission bypass, and discussion questions are
+refused with 400 before any tab is created; they belong to the dashboard credentials (VIBE-310).
 
 Desktop MCP presence uses server-generated connection identities and bounded local leases
 in `board.db`, through `IBoardStore`. It adds no endpoint or listener. Same-project writes or
