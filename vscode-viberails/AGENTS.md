@@ -159,6 +159,11 @@ remain in the backend and never enter bridge messages. No URI callback handler i
   origin (including its scheme and port); requests to resource or external origins pass through.
 - CORS configured for localhost and vscode-webview origins
 - No inline scripts - all event handlers use proper addEventListener
+- Every notification goes through `notifications.ts` (`showInfo`, `showWarning`, `showError`,
+  `confirmWarning`), which shows the message as plain text. VS Code renders `[label](command:…)`
+  in a notification as a link that runs the command, and messages here carry reviewer comments,
+  repository and definition names and backend errors. Never call `vscode.window.show…Message`
+  directly; `notification-text.test.ts` fails on it (VIBE-310)
 - The `fonts.googleapis.com` / `fonts.gstatic.com` CSP entries are load-bearing: `assets/bootstrap.min.css` `@import`s the Lato family, which HTML `<link>` stripping does not remove
 
 Session replay needs `frame-src 'self'` to load VS Code's empty same-origin frame shell

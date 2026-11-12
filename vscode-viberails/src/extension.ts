@@ -13,6 +13,7 @@ import {
 } from './review-inbox-view';
 import { ReviewRequestRow, ReviewRequestsTreeDataProvider } from './review-requests-view';
 import { bindSidebarTreeView } from './sidebar-tree-view';
+import { confirmWarning, showError, showInfo, showWarning } from './notifications';
 import {
     LAUNCH_CATALOG_PATH,
     BOOTSTRAP_REQUEST_TIMEOUT_MS,
@@ -125,7 +126,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         } catch (error) {
             if (closingPromise || deactivating) return;
             const message = error instanceof Error ? error.message : String(error);
-            vscode.window.showErrorMessage(`Failed to open VibeRails Dashboard: ${message}`);
+            void showError(`Failed to open VibeRails Dashboard: ${message}`);
         }
     });
 
@@ -143,7 +144,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             await webviewManager.importScript(target.filePath, getStartupTimeoutMs());
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            void vscode.window.showErrorMessage(`Could not add VibeRails script: ${message}`);
+            void showError(`Could not add VibeRails script: ${message}`);
         }
     }));
     registerTestCommands(context);
@@ -171,7 +172,7 @@ function autoStartBackend(context: vscode.ExtensionContext): void {
     void startBackend(context).catch(error => {
         if (deactivating || closingPromise) return;
         const message = error instanceof Error ? error.message : String(error);
-        void vscode.window.showWarningMessage(`VibeRails could not start automatically: ${message}. Open the dashboard to retry.`);
+        void showWarning(`VibeRails could not start automatically: ${message}. Open the dashboard to retry.`);
     });
 }
 
@@ -205,7 +206,7 @@ async function closeDashboard(showMessage: boolean, shutdownBackend: boolean): P
         await stopping;
 
         if (showMessage) {
-            vscode.window.showInformationMessage('VibeRails closed');
+            void showInfo('VibeRails closed');
         }
     });
 
@@ -370,7 +371,7 @@ function registerLauncherView(context: vscode.ExtensionContext, registeredComman
             notifyQueued: (label, message) => {
                 vscode.window.setStatusBarMessage(`$(check) ${label}: ${message}`, LAUNCHER_STATUS_MESSAGE_MS);
             },
-            notifyError: (message) => { void vscode.window.showErrorMessage(message); },
+            notifyError: (message) => { void showError(message); },
             refresh: () => { void provider.refresh(); },
             running: runningLauncherKeys
         })),
@@ -396,8 +397,7 @@ function registerReviewInboxView(context: vscode.ExtensionContext, registeredCom
 
     const dependencies: ReviewInboxActionDependencies = {
         getProjectPath: () => provider.getState()?.project ?? null,
-        confirmRepositoryMismatch: async (message) =>
-            await vscode.window.showWarningMessage(message, { modal: true }, 'Approve in this repository') === 'Approve in this repository',
+        confirmRepositoryMismatch: (message) => confirmWarning(message, 'Approve in this repository'),
         request: (method, route, body) => requestJson(getBackendConnection(), method, route, body),
         askComment: (row) => vscode.window.showInputBox({
             title: `Reject the review request from ${row.requestedBy}`,
@@ -407,7 +407,7 @@ function registerReviewInboxView(context: vscode.ExtensionContext, registeredCom
             validateInput: (value) => value.trim() ? undefined : 'Say why in a comment when you reject a review.'
         }),
         notify: (message) => { vscode.window.setStatusBarMessage(`$(check) ${message}`, LAUNCHER_STATUS_MESSAGE_MS); },
-        notifyError: (message) => { void vscode.window.showErrorMessage(message); },
+        notifyError: (message) => { void showError(message); },
         refresh: () => { void provider.refresh(); },
         openExternal: (url) => vscode.env.openExternal(vscode.Uri.parse(url))
     };
@@ -436,7 +436,7 @@ function registerReviewRequestsView(context: vscode.ExtensionContext, registered
         isBackendReady,
         fetchRequests: () => requestJson(getBackendConnection(), 'GET', REVIEW_REQUESTS_PATH),
         notify: (message, change) => {
-            void vscode.window.showInformationMessage(message, ...(change.cardKey ? [openCard] : [])).then((choice) => {
+            void showInfo(message, ...(change.cardKey ? [openCard] : [])).then((choice) => {
                 if (choice === openCard) void vscode.commands.executeCommand(COMMAND_REVIEW_REQUESTS_OPEN, change);
             });
         }
@@ -488,7 +488,7 @@ async function sendToDashboard(context: vscode.ExtensionContext, message: object
         }
     } catch (error) {
         const text = error instanceof Error ? error.message : String(error);
-        void vscode.window.showErrorMessage(`${failure}: ${text}`);
+        void showError(`${failure}: ${text}`);
     }
 }
 

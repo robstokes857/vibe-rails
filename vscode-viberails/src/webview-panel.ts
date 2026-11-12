@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { DASHBOARD_MESSAGE_TIMEOUT_MS, WEBVIEW_VIEW_TYPE } from './constants';
 import { openExternalSignIn } from './external-sign-in';
+import { showError } from './notifications';
 import { ReviewRequestChange, reviewRequestChangeFromMessage } from './review-requests-view';
 
 export class WebviewPanelManager {
@@ -170,9 +171,9 @@ export class WebviewPanelManager {
             } else if (message.command === 'openExternal') {
                 void openExternalSignIn(message.url, url => vscode.env.openExternal(vscode.Uri.parse(url)))
                     .then(opened => {
-                        if (!opened) void vscode.window.showErrorMessage('VibeRails could not open sign-in. Open https://viberails.ai/link in your browser and enter the displayed code.');
+                        if (!opened) void showError('VibeRails could not open sign-in. Open https://viberails.ai/link in your browser and enter the displayed code.');
                     }).catch(() => {
-                        void vscode.window.showErrorMessage('VibeRails could not open sign-in. Open https://viberails.ai/link in your browser and enter the displayed code.');
+                        void showError('VibeRails could not open sign-in. Open https://viberails.ai/link in your browser and enter the displayed code.');
                     });
             } else if (message.command === 'setTitle' && this.panel && typeof message.title === 'string') {
                 // Strip Unicode format (Cf — RTL/LTR overrides, zero-width joiners) and
@@ -227,7 +228,7 @@ export class WebviewPanelManager {
                 preview: false
             });
         } catch {
-            vscode.window.showErrorMessage(`Vibe Rails could not open ${filePath}`);
+            void showError(`Vibe Rails could not open ${filePath}`);
         }
     }
 
