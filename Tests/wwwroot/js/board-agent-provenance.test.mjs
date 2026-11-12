@@ -83,3 +83,13 @@ function controller() {
     instance.state.columns = [{ id: 'backlog', name: 'Backlog' }];
     return instance;
 }
+
+test('the shared date formatter gives the same text as a per-call toLocaleString', () => {
+    // VIBE-310: one Intl.DateTimeFormat is reused for every card instead of building one per call.
+    const options = { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+    for (const iso of [MADE_AT, '2026-01-01T00:00:00Z', '2025-12-31T23:59:59.999Z', '2030-06-15T12:30:00+05:30']) {
+        assert.equal(formatMadeAt(iso), new Date(iso).toLocaleString(undefined, options));
+        assert.equal(formatMadeAt(iso), formatMadeAt(iso));
+    }
+    for (const bad of ['', null, undefined, 'not a date']) assert.equal(formatMadeAt(bad), '');
+});

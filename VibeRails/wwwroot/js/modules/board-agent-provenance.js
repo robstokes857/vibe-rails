@@ -9,11 +9,17 @@ export function agentMakerName(card) {
     return card?.agentMadeBy || 'an agent';
 }
 
+// One formatter for every card. toLocaleString with options builds a new Intl.DateTimeFormat on
+// each call, and a card tile asks three times; on a board of agent-made cards that was most of the
+// time spent building the tiles. The output is the same.
+let madeAtFormat = null;
+
 /** Date and time with the year: a card can be read long after it was made. Empty for a bad value. */
 export function formatMadeAt(iso) {
     const date = new Date(iso);
     if (!iso || Number.isNaN(date.getTime())) return '';
-    return date.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    madeAtFormat ??= new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return madeAtFormat.format(date);
 }
 
 /** One line for a tooltip or an accessible name: "Made by Claude Opus 5.5 · Oct 5, 2026, 2:31 PM". */

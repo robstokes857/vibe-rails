@@ -160,6 +160,29 @@ test('background refresh replaces moved/deleted cards and preserves the number o
     assert.equal(h.busy, false, 'a background refresh does not cover the board with a loading state');
 });
 
+test('background refresh re-reads loaded history in the fewest requests and never beyond it', async () => {
+    // VIBE-310: with 250 Done cards on screen the poll made eight follow-up requests of 30. The
+    // server allows 100, and each request recounts the whole board.
+    const h = pollHarness();
+    h.controller.cardPage = { lanes: [{ columnId: 'done', nextOffset: 250, hasMore: true }] };
+    const pending = h.controller.refreshBoardSnapshot();
+    h.firstPage();
+    const sizes = [];
+    for (const nextOffset of [130, 230, 250]) {
+        await tick();
+        const request = h.requests.at(-1);
+        const query = new URL(request.url, 'http://local').searchParams;
+        sizes.push([query.get('offset'), query.get('pageSize')]);
+        request.resolve({ cards: [{ id: `done-${nextOffset}`, columnId: 'done' }],
+            lanes: [{ columnId: 'done', nextOffset, hasMore: true, continuationToken: 'fresh-order' }] });
+    }
+    await pending;
+    assert.deepEqual(sizes, [['30', '100'], ['130', '100'], ['230', '20']]);
+    assert.equal(h.requests.length, 6, 'three follow-up requests instead of eight, and none past what was loaded');
+    assert.equal(h.controller.cardPage.lanes[0].nextOffset, 250);
+    assert.equal(new URL(h.requests[2].url, 'http://local').searchParams.get('pageSize'), '30', 'the first page is unchanged');
+});
+
 test('background snapshots are discarded after navigation, paging, dragging or filter changes', async () => {
     for (const invalidate of [c => { c.state.boardId = 'B'; }, c => c.disposeSessionActivity(),
         c => { c._refreshGeneration++; }, c => { c._boardDragging = true; },

@@ -258,8 +258,10 @@ async function getBoardCardActivityAsync(boardId, cardIds, extra = {}) {
     return { cards: response?.cards || [], activeAutomationColumnIds: response?.activeAutomationColumnIds || [] };
 }
 
-async function getBoardCardPageAsync(boardId, filters = {}, { columnId, offset = 0, continuationToken, signal } = {}) {
-    const params = new URLSearchParams({ pageSize: '30' });
+// pageSize is 30 for what the user pages through. The background poll asks for up to 100 (the
+// server's own cap) when it re-reads cards that are already on screen.
+async function getBoardCardPageAsync(boardId, filters = {}, { columnId, offset = 0, continuationToken, signal, pageSize = 30 } = {}) {
+    const params = new URLSearchParams({ pageSize: String(Math.min(100, Math.max(1, Math.trunc(pageSize) || 30))) });
     for (const [key, value] of Object.entries(filters)) {
         if (value) params.set(key, value);
     }

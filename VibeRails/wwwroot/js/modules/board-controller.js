@@ -329,9 +329,13 @@ export class BoardController {
             const cards = new Map((page.cards || []).map(card => [card.id, card]));
             for (const lane of page.lanes || []) {
                 while (lane.hasMore && lane.nextOffset < (loaded.get(lane.columnId) || 0)) {
+                    // Re-read what is already on screen in as few requests as the server allows:
+                    // exactly the loaded remainder, up to 100 a request, never beyond it. Every
+                    // request also recounts the whole board, so 30 at a time cost three times more.
                     const response = await BoardApi.getBoardCardPageAsync(boardId, filters, {
                         columnId: lane.columnId, offset: lane.nextOffset,
-                        continuationToken: lane.continuationToken, signal: abort.signal
+                        continuationToken: lane.continuationToken, signal: abort.signal,
+                        pageSize: Math.min(100, (loaded.get(lane.columnId) || 0) - lane.nextOffset)
                     });
                     if (!current()) return;
                     const next = response.lanes?.find(item => item.columnId === lane.columnId);
