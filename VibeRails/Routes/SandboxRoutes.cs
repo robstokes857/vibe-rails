@@ -27,7 +27,7 @@ public static class SandboxRoutes
             // environment's row, and it needs both to decide which is which.
             var ownerNames = await ResolveOwnerNamesAsync(repository, sandboxes, cancellationToken);
             var response = sandboxes.Select(s => new SandboxResponse(
-                s.Id, s.Name, s.Path, s.Branch, s.SourceBranch, s.CommitHash, s.RemoteUrl, s.CreatedUTC,
+                s.Id, s.Name, s.Path, s.Branch, s.SourceBranch, s.CommitHash, ProjectRoutes.StripUserInfo(s.RemoteUrl), s.CreatedUTC,
                 s.EnvironmentId,
                 s.EnvironmentId.HasValue && ownerNames.TryGetValue(s.EnvironmentId.Value, out var owner) ? owner : null
             )).ToList();
@@ -54,7 +54,7 @@ public static class SandboxRoutes
                     request.Name, projectPath, options: null, cancellationToken);
                 return Results.Ok(new SandboxResponse(
                     sandbox.Id, sandbox.Name, sandbox.Path,
-                    sandbox.Branch, sandbox.SourceBranch, sandbox.CommitHash, sandbox.RemoteUrl, sandbox.CreatedUTC));
+                    sandbox.Branch, sandbox.SourceBranch, sandbox.CommitHash, ProjectRoutes.StripUserInfo(sandbox.RemoteUrl), sandbox.CreatedUTC));
             }
             catch (InvalidOperationException ex)
             {

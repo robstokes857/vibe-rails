@@ -196,7 +196,7 @@ public static class ProjectRoutes
                 LaunchDirectory: launchDirectory,
                 RootPath: detected.projectRoot,
                 GitBranch: Utils.ParserConfigs.GetGitBranch(),
-                GitRemoteUrl: Utils.ParserConfigs.GetGitRemoteUrl(),
+                GitRemoteUrl: StripUserInfo(Utils.ParserConfigs.GetGitRemoteUrl()),
                 IsActiveRootBackend: isActiveRootBackend
             ));
         }).WithName("GitInit");

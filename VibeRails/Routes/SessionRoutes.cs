@@ -28,7 +28,8 @@ public static class SessionRoutes
             int? limit,
             CancellationToken cancellationToken) =>
         {
-            var sessions = await repository.GetRecentSessionsAsync(limit ?? 10, cancellationToken);
+            // Bounded: SQLite reads a negative LIMIT as "no limit", which returned every session row.
+            var sessions = await repository.GetRecentSessionsAsync(Math.Clamp(limit ?? 10, 1, 500), cancellationToken);
             return Results.Ok(sessions);
         }).WithName("GetRecentSessions");
 

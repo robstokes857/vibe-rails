@@ -327,8 +327,10 @@ app.Use(async (context, next) =>
 {
     var sw = Stopwatch.StartNew();
     var method = context.Request.Method;
-    var path = context.Request.Path.Value ?? string.Empty;
-    var query = RedactAuthTokens(context.Request.QueryString.Value ?? string.Empty);
+    // Logged before authentication, so anyone who can reach the port chooses this text. The path
+    // arrives percent-decoded: escape controls (a %0A would start a forged record) and bound both.
+    var path = RequestLogText.Path(context.Request.Path.Value);
+    var query = RequestLogText.Query(RedactAuthTokens(context.Request.QueryString.Value ?? string.Empty));
     var isWs = context.WebSockets.IsWebSocketRequest;
     var tag = isWs ? "WS" : "HTTP";
     Log.Information("[{Tag} →] {Method} {Path}{Query}", tag, method, path, query);

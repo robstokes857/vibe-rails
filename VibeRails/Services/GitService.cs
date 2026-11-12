@@ -222,7 +222,7 @@ namespace VibeRails.Services
                 // Get file stats (lines added/deleted) since the commit
                 // Using diff against the commit to see what changed in working directory
                 var numstatOutput = await RunGitCommandAsync(
-                    ["diff", "--numstat", commitHash],
+                    ["diff", "--no-ext-diff", "--no-textconv", "--numstat", commitHash],
                     DiffCommandTimeout,
                     cancellationToken);
 
@@ -302,8 +302,10 @@ namespace VibeRails.Services
         {
             try
             {
+                // No external diff driver or textconv filter: a repository's own configuration must
+                // not choose a program to run for a diff the app takes on its own.
                 var diff = await RunGitCommandAsync(
-                    ["diff", commitHash, "--", filePath],
+                    ["diff", "--no-ext-diff", "--no-textconv", commitHash, "--", filePath],
                     DiffCommandTimeout,
                     cancellationToken);
 

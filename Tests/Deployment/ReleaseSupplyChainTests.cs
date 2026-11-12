@@ -40,6 +40,23 @@ public sealed partial class ReleaseSupplyChainTests
     }
 
     [Fact]
+    public void PackageReferences_NameExactVersions()
+    {
+        // The signed release build restores these on the runner that later signs. A floating
+        // version (6.*) would compile whatever was published last into the release (VIBE-310).
+        string[] projects = ["VibeRails", "VibeRails.Data.Sqlite", "VibeRails.Data.Abstractions", "TokenSaver", "MintLint", "PyBridge", "Pty.Net", "TerminalEmulator"];
+        var floating = projects
+            .SelectMany(project => Directory.EnumerateFiles(Path.Combine(RepositoryRoot, project), "*.csproj", SearchOption.AllDirectories))
+            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}") && !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+            .SelectMany(path => Regex.Matches(File.ReadAllText(path), """<PackageReference\s[^>]*\bVersion\s*=\s*"([^"]*)"[^>]*>""")
+                .Where(match => !Regex.IsMatch(match.Groups[1].Value, """^\d+(\.\d+){1,3}(-[0-9A-Za-z.\-]+)?$"""))
+                .Select(match => $"{Path.GetRelativePath(RepositoryRoot, path)}: {match.Value}"))
+            .ToArray();
+
+        Assert.True(floating.Length == 0, "Pin an exact package version:\n" + string.Join("\n", floating));
+    }
+
+    [Fact]
     public void WorkflowMacOsRunners_DoNotUseRetiredImages()
     {
         var workflows = Directory.GetFiles(Path.Combine(RepositoryRoot, ".github", "workflows"), "*.yml");
