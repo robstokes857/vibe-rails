@@ -278,7 +278,7 @@ public class TerminalRunner
                 if (remoteConn.IsConnected)
                 {
                     var takeoverGate = new SemaphoreSlim(1, 1);
-                    var remoteViewerAuthorized = RemoteConfig.IsPinConfigured ? 0 : 1;
+                    var remoteViewerAuthorized = RemoteViewerLock.Initial;
                     var remoteTakeoverNotified = false;
                     var lockPromptSent = false;
                     // Deliberately persists for the whole session and is reset ONLY on a
@@ -339,17 +339,18 @@ public class TerminalRunner
 
                     // Single authorization gate for every remote-triggered handler.
                     // Call only while holding takeoverGate. Re-reads RemoteConfig each
-                    // time (a PIN can be configured or cleared mid-session) and opens
-                    // the no-PIN fast path as a side effect. Anything a remote frame
+                    // time (a PIN can be configured or cleared mid-session). No PIN means
+                    // locked, never open: clearing the PIN re-locks a live session instead
+                    // of unlocking it (RemoteViewerLock). Anything a remote frame
                     // can cause — input, replay, resize, __cmd__ — must pass this
                     // first: a locked viewer's frames are dropped, never acted on.
-                    bool IsRemoteViewerAuthorized()
+                    bool IsRemoteViewerAuthorized(out bool pinConfigured)
                     {
-                        var pinRequired = RemoteConfig.IsPinConfigured;
-                        if (!pinRequired)
-                            System.Threading.Volatile.Write(ref remoteViewerAuthorized, 1);
-
-                        return System.Threading.Volatile.Read(ref remoteViewerAuthorized) == 1;
+                        pinConfigured = RemoteConfig.IsPinConfigured;
+                        var state = RemoteViewerLock.Current(
+                            System.Threading.Volatile.Read(ref remoteViewerAuthorized), pinConfigured);
+                        System.Threading.Volatile.Write(ref remoteViewerAuthorized, state);
+                        return state == RemoteViewerLock.Unlocked;
                     }
 
                     async Task HandleRemoteInputAsync(byte[] bytes)
@@ -359,8 +360,16 @@ public class TerminalRunner
                             await takeoverGate.WaitAsync(CancellationToken.None);
                             try
                             {
-                                if (!IsRemoteViewerAuthorized())
+                                if (!IsRemoteViewerAuthorized(out var pinConfigured))
                                 {
+                                    // With no PIN there is nothing to verify: stay locked, and do
+                                    // not count the frame as a failed attempt toward the lockout.
+                                    if (!pinConfigured)
+                                    {
+                                        await SendLockedAsync();
+                                        return;
+                                    }
+
                                     var text = System.Text.Encoding.UTF8.GetString(bytes).Trim();
                                     if (text.StartsWith(TerminalControlProtocol.PinResponse, StringComparison.Ordinal))
                                     {
@@ -447,7 +456,7 @@ public class TerminalRunner
                             await takeoverGate.WaitAsync(CancellationToken.None);
                             try
                             {
-                                if (!IsRemoteViewerAuthorized())
+                                if (!IsRemoteViewerAuthorized(out _))
                                 {
                                     await SendLockedAsync();
                                     return;
@@ -491,7 +500,7 @@ public class TerminalRunner
                                 // Resize reaches the real PTY (reflow, and the child sees
                                 // the new dimensions) just like input does, so it rides
                                 // the same authorization gate.
-                                if (!IsRemoteViewerAuthorized())
+                                if (!IsRemoteViewerAuthorized(out _))
                                 {
                                     Log.Warning(
                                         "[Remote] Dropped resize from unauthorized viewer ({Cols}x{Rows})",
@@ -531,7 +540,7 @@ public class TerminalRunner
                                 // ITerminalIoObserver hook pipeline — same trust boundary
                                 // as input, so same gate. The command/payload are NOT
                                 // logged here: they're attacker-controlled while locked.
-                                if (!IsRemoteViewerAuthorized())
+                                if (!IsRemoteViewerAuthorized(out _))
                                 {
                                     Log.Warning("[Remote] Dropped command from unauthorized viewer");
                                     await SendLockedAsync();
@@ -571,7 +580,7 @@ public class TerminalRunner
                             {
                                 System.Threading.Volatile.Write(
                                     ref remoteViewerAuthorized,
-                                    RemoteConfig.IsPinConfigured ? 0 : 1);
+                                    RemoteViewerLock.Initial);
                                 remoteTakeoverNotified = false;
                                 lockPromptSent = false;
                                 // failedPinAttempts is intentionally NOT reset here — the lockout
@@ -608,7 +617,7 @@ public class TerminalRunner
                             {
                                 System.Threading.Volatile.Write(
                                     ref remoteViewerAuthorized,
-                                    RemoteConfig.IsPinConfigured ? 0 : 1);
+                                    RemoteViewerLock.Initial);
                                 remoteTakeoverNotified = false;
                                 lockPromptSent = false;
                                 // failedPinAttempts is intentionally NOT reset here — the lockout
@@ -620,10 +629,9 @@ public class TerminalRunner
                                 takeoverGate.Release();
                             }
 
-                            if (RemoteConfig.IsPinConfigured)
-                                await SendLockedAsync(force: true);
-                            else
-                                terminal.PushSnapshotTo(remoteOutputConsumer);
+                            // Always the lock prompt, never an unprompted snapshot: without a
+                            // PIN the viewer simply stays locked.
+                            await SendLockedAsync(force: true);
                         }
                         catch (Exception ex)
                         {
