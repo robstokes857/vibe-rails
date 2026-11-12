@@ -210,7 +210,12 @@ CLI credentials cannot reach it.
 The closed production set is:
 
 1. The main Kestrel host in [Program.cs](VibeRails/Program.cs), using `ListenLocalhost`:
-   at most one host per VibeRails backend process.
+   at most one host per VibeRails backend process. It is built through
+   [BackendHost](VibeRails/Utils/BackendHost.cs): the content root is the install directory,
+   `appsettings*.json` are read from there only (once, no reload), and Kestrel is detached from
+   the `Kestrel` configuration section. The launch directory is a project the user opened; a
+   file in it, or any configuration value, must never configure the host or add an endpoint
+   (VIBE-310). `BackendHostTests` pins this.
 2. [PortFinder](VibeRails/Utils/PortFinder.cs) may briefly start/stop a loopback `TcpListener`
    to probe availability. It has no accept loop and reads no requests; it is not a server.
 

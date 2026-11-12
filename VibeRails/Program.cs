@@ -204,16 +204,14 @@ if (RetiredLaunchArguments.IsRetired(args))
     return;
 }
 
-var builder = WebApplication.CreateSlimBuilder(args);
+// Configuration comes from the install directory, never from the launch directory: the slim
+// builder would otherwise read appsettings*.json from the project the user opened (VIBE-310).
+var builder = BackendHost.CreateBuilder(args, exeDirectory);
 
 // Remove default host logging providers so Microsoft.Extensions.Logging does not
 // write into interactive native terminal sessions. File logging still goes
 // through the static Serilog logger configured above.
 builder.Logging.ClearProviders();
-
-// CreateSlimBuilder doesn't load appsettings.json by default — add it explicitly
-builder.Configuration.AddJsonFile(Path.Combine(exeDirectory, "appsettings.json"), optional: false, reloadOnChange: false);
-builder.Configuration.AddJsonFile(Path.Combine(exeDirectory, $"appsettings.{builder.Environment.EnvironmentName}.json"), optional: true, reloadOnChange: false);
 
 // Configure JSON serialization for AOT
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -228,10 +226,7 @@ builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.None);
 
 // Configure Kestrel with auto-selected port
 int port = PortFinder.FindOpenPort();
-builder.WebHost.ConfigureKestrel(options =>
-{
-    options.ListenLocalhost(port);
-});
+builder.WebHost.ConfigureKestrel(options => BackendHost.ListenOnLoopbackOnly(options, port));
 
 // Register DI services
 MapRegisterServices.Register(builder.Services, args, $"http://127.0.0.1:{port}");
