@@ -142,6 +142,39 @@ public sealed class BoardDataBackupTests : IDisposable
     }
 
     [Fact]
+    public async Task AnUnchangedBoardStagesNoFilesAndASingleChangeStagesAgain()
+    {
+        // VIBE-310: every fifteen-minute cycle used to write one file per row and delete them all
+        // again when the fingerprint matched. The comparison now happens before any file is written.
+        await store.EnsureDefaultColumnsAsync(root, Ct);
+        var card = await store.CreateCardAsync(root, new(null, "Before", "", null, "medium", null, [], false), Ct);
+        using var cloud = new Cloud(); var service = Service(cloud);
+        await service.TickAsync(Ct);
+        var first = service.StagedFiles;
+        Assert.True(first > 0);
+        Assert.Single(cloud.CommitVersions);
+
+        for (var cycle = 0; cycle < 3; cycle++)
+        {
+            now = now.AddMinutes(16);
+            await service.TickAsync(Ct);
+        }
+        Assert.Equal(first, service.StagedFiles);
+        Assert.Single(cloud.CommitVersions);
+        Assert.Null(service.GetStatus().PendingVersion);
+        Assert.Null(service.GetStatus().Error);
+        var spool = Path.Combine(root, "board-data-backups");
+        Assert.Empty(Directory.GetFiles(spool, "*.bin", SearchOption.AllDirectories));
+        Assert.DoesNotContain(Directory.GetFiles(spool, "*.json", SearchOption.AllDirectories),
+            file => BoardBackupProtocol.IsHash(Path.GetFileNameWithoutExtension(file)));
+
+        await store.UpdateCardAsync(root, card.Id, new(Title: "After"), Ct); now = now.AddMinutes(16);
+        await service.TickAsync(Ct);
+        Assert.True(service.StagedFiles > first);
+        Assert.Equal(2, cloud.CommitVersions.Count);
+    }
+
+    [Fact]
     public async Task ChangedCardReusesPreviouslyAcknowledgedBinaryContent()
     {
         await store.EnsureDefaultColumnsAsync(root, Ct);

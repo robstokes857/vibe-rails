@@ -17,6 +17,8 @@ public sealed class BoardDataBackupService
     private static readonly SemaphoreSlim Gate = new(1, 1);
     internal static readonly TimeSpan CaptureInterval = TimeSpan.FromMinutes(15);
     private string Spool => Path.Combine(root(), "board-data-backups");
+    /// <summary>Row and content files this instance has staged for upload; an unchanged board adds none.</summary>
+    internal long StagedFiles { get; private set; }
 
     public BoardDataBackupService(IBoardStore store, BoardBackupTransport transport, IFeatureLog log)
         : this(store, transport, () => Path.GetDirectoryName(ParserConfigs.GetStatePath())!, ParserConfigs.GetApiKey,
@@ -80,6 +82,16 @@ public sealed class BoardDataBackupService
                     PrivateFilePermissions.EnsureDirectory(directory);
                     state = state with { NextContent = 0, NextRecord = 0 }; Save();
                     using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromMinutes(10));
+                    // Most cycles find nothing new. Learn that from the hashes alone before staging
+                    // one file per row: writing and then deleting them cost tens of seconds of disk
+                    // work every fifteen minutes on a board that had not changed (VIBE-310).
+                    if (state.Fingerprint is not null && state.Receipt is { } acknowledged && acknowledged.AccountId == owner
+                        && Fingerprint(await CaptureAsync(null, state.PendingVersion, deadline.Token)) == state.Fingerprint)
+                    {
+                        state = state with { PendingVersion = null, NextContent = 0, NextRecord = 0, Attempts = 0,
+                            NextAttemptUtc = now() + CaptureInterval, Error = null };
+                        Save(); Cleanup(directory); return;
+                    }
                     var manifest = await CaptureAsync(directory, state.PendingVersion, deadline.Token);
                     var fingerprint = Fingerprint(manifest);
                     if (state.Fingerprint == fingerprint && state.Receipt is { } previous && previous.AccountId == owner)
@@ -161,7 +173,12 @@ public sealed class BoardDataBackupService
         finally { Gate.Release(); }
     }
 
-    private async Task<BoardBackupManifest> CaptureAsync(string directory, string version, CancellationToken ct)
+    /// <summary>
+    /// Reads every Board row and content part and returns their inventory. With a
+    /// <paramref name="directory"/> each one is also staged there for upload; with null nothing is
+    /// written, which is enough to tell whether anything changed since the acknowledged snapshot.
+    /// </summary>
+    private async Task<BoardBackupManifest> CaptureAsync(string? directory, string version, CancellationToken ct)
     {
         var records = new HashSet<string>(StringComparer.Ordinal); var contents = new HashSet<string>(StringComparer.Ordinal);
         var started = now();
@@ -176,8 +193,10 @@ public sealed class BoardDataBackupService
             var set = item.Json is null ? contents : records;
             if (!set.Add(item.Sha256)) return;
             if (set.Count > BoardBackupProtocol.MaxItems) throw new InvalidDataException("Complete Board backup exceeds the inventory bound; no snapshot acknowledged.");
+            if (directory is null) return;
             var path = Path.Combine(directory, item.Sha256 + (item.Json is null ? ".bin" : ".json"));
             await File.WriteAllBytesAsync(path, bytes, token); PrivateFilePermissions.EnsureFile(path);
+            StagedFiles++;
         }, ct);
         var name = Environment.MachineName;
         return new(1, computer, name.Length > 80 ? name[..80] : name, version, started, now(),
