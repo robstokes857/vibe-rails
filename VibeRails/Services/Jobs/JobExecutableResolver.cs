@@ -125,7 +125,9 @@ public sealed class JobExecutableResolver : IJobExecutableResolver
         foreach (var raw in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var directory = raw.Trim('"');
-            if (directory.Length > 0 && seen.Add(directory))
+            // A relative entry ("." or "node_modules\.bin") would resolve against the current
+            // directory, the project, and let it supply the interpreter.
+            if (directory.Length > 0 && Path.IsPathFullyQualified(directory) && seen.Add(directory))
                 yield return directory;
         }
 

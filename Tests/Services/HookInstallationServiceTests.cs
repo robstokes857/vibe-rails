@@ -74,7 +74,9 @@ if [ -n ""$VIBERAILS_CHAINED_HOOK"" ]; then ""$VIBERAILS_CHAINED_HOOK"" ""$@""; 
 
             var startInfo = HookInstallationService.CreateChmodStartInfo(path);
 
-            Assert.Equal("chmod", startInfo.FileName);
+            // Resolved from PATH to an absolute path, never the bare name (VIBE-310).
+            Assert.True(Path.IsPathRooted(startInfo.FileName));
+            Assert.Equal("chmod", Path.GetFileNameWithoutExtension(startInfo.FileName));
             Assert.Empty(startInfo.Arguments);
             Assert.Equal(new[] { "+x", path }, startInfo.ArgumentList);
             Assert.False(startInfo.UseShellExecute);

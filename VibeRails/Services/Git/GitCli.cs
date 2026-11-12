@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using VibeRails.Utils;
 
 namespace VibeRails.Services.Git;
 
@@ -147,7 +148,9 @@ public static class GitCli
     {
         var startInfo = new ProcessStartInfo
         {
-            FileName = "git",
+            // Absolute, from PATH: a bare name would be looked up in the current directory (the
+            // project) before PATH. See PathExecutable.
+            FileName = PathExecutable.Resolve("git"),
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

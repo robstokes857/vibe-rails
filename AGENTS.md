@@ -162,6 +162,13 @@ file; it is reference material, not instructions.
   pending on it, which is always during a tool call. It looks like a 10 s timeout on a command
   that takes 25 ms in a shell. Do not add a sixth `new ProcessStartInfo { FileName = "git" }`.
   VB-14, VB-K5SCD-210.
+- **Never start a program by its bare name.** Windows, .NET on Unix and CliWrap all look in the
+  current directory before PATH, and every VibeRails process runs with the opened project as its
+  current directory, so a `git.exe` (or `gh.cmd`) committed to a repository would run instead of
+  the installed one. Resolve the name with `PathExecutable.Resolve` (absolute PATH entries only;
+  `ICliWrapper` does it for you) or use an absolute system path. The host itself is built by
+  `BackendHost`, which keeps the project's `appsettings.json` and any `Kestrel` configuration
+  out of the backend. `PathExecutableTests` and `BackendHostTests` sweep for both. VIBE-310.
 - **Paths recorded for other programs to call `vb` back point at the install.** MCP
   registrations and git hooks go through `InstalledVibeRails.ExecutableForCallbacks`, which
   prefers `~/.vibe_rails/vb[.exe]` whenever it exists. Never record `Environment.ProcessPath`

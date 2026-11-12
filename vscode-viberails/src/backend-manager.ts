@@ -379,7 +379,9 @@ export class BackendManager {
 
     private killProcessTreeWindows(pid: number): Promise<void> {
         return new Promise((resolve) => {
-            const killer = cp.spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+            // The system binary by absolute path: a bare name is also looked up in the current directory.
+            const taskkill = path.join(process.env.SystemRoot ?? process.env.windir ?? 'C:\\Windows', 'System32', 'taskkill.exe');
+            const killer = cp.spawn(taskkill, ['/PID', String(pid), '/T', '/F'], {
                 stdio: 'ignore',
                 shell: false,
                 windowsHide: true

@@ -1529,7 +1529,7 @@ namespace VibeRails.Services
         {
             var startInfo = new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "chmod",
+                FileName = VibeRails.Utils.PathExecutable.Resolve("chmod"),
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,

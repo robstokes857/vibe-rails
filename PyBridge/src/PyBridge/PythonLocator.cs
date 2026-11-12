@@ -204,7 +204,9 @@ public static class PythonLocator
 
         foreach (var rawDir in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            if (IsWindowsStoreAliasDirectory(rawDir))
+            // A relative entry would resolve against the current directory and let a project
+            // folder supply the interpreter.
+            if (!Path.IsPathFullyQualified(rawDir.Trim('"')) || IsWindowsStoreAliasDirectory(rawDir))
                 continue;
 
             foreach (var fileName in fileNames)

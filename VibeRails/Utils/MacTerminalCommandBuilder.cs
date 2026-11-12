@@ -9,7 +9,8 @@ internal static class MacTerminalCommandBuilder
         var appleScript = BuildAppleScript(shellCommand);
         var startInfo = new ProcessStartInfo
         {
-            FileName = "osascript",
+            // The system binary by absolute path; a bare name is looked up in the project first.
+            FileName = "/usr/bin/osascript",
             UseShellExecute = false,
         };
         startInfo.ArgumentList.Add("-e");

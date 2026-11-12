@@ -803,6 +803,15 @@ Approved Python script discovery starts in the installed scripts directory and e
 repository/active-venv and PYBRIDGE_PYTHON overrides. Visible Windows shell launches resolve
 an absolute pwsh.exe from absolute PATH entries and change directory inside the quoted script;
 VS Code uses its resolved application executable. Repository folders never select these programs.
+The same holds for every program the backend starts itself (VIBE-310): `git`, `gh` and the other
+programs run through `ICliWrapper`, `chmod` and `xdg-open` are resolved by
+[PathExecutable](VibeRails/Utils/PathExecutable.cs) to an absolute path from the fully qualified
+PATH entries, and `osascript`/`open` use their system paths. A bare name is never handed to the
+OS, .NET or CliWrap, all of which look in the current directory (the opened project) before PATH;
+a program that is not on PATH fails to start. Script interpreter discovery skips relative PATH
+entries for the same reason. The browser is opened by the OS shell (Windows) or an absolute
+opener with the URL as one argument, never through `cmd`. `PathExecutableTests` pins the resolver
+and sweeps for bare program-name literals.
 
 The root-only script terminal WebSocket (`/api/v1/python-scripts/run/terminal/ws`) uses the
 existing authenticated Kestrel listener and both credentials, with no middleware exception.

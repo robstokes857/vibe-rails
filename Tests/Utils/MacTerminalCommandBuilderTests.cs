@@ -29,7 +29,7 @@ public class MacTerminalCommandBuilderTests
     {
         var startInfo = MacTerminalCommandBuilder.BuildStartInfo("echo \"hello\"");
 
-        Assert.Equal("osascript", startInfo.FileName);
+        Assert.Equal("/usr/bin/osascript", startInfo.FileName);
         Assert.False(startInfo.UseShellExecute);
         Assert.Equal("-e", startInfo.ArgumentList[0]);
         Assert.Equal(

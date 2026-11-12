@@ -75,7 +75,9 @@ public sealed class CliWrapper : ICliWrapper
 
         // Fully qualified: this namespace's own last segment is "Cli", which otherwise wins over
         // CliWrap's static Cli class during name resolution.
-        var command = CliWrap.Cli.Wrap(request.Executable)
+        // A bare name (gh) is resolved from PATH here: CliWrap and the OS would otherwise look in
+        // the current directory, which is the project, first. Rooted paths pass through unchanged.
+        var command = CliWrap.Cli.Wrap(PathExecutable.Resolve(request.Executable, allowScripts: true))
             .WithArguments(request.Arguments)
             .WithWorkingDirectory(workingDirectory)
             .WithValidation(CommandResultValidation.None)   // exit codes are surfaced, not thrown
