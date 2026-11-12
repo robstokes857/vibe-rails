@@ -671,6 +671,10 @@ explicit teardown; see the [viewer contract](VibeRails/wwwroot/js/modules/code-r
 The MCP Explorer's remote frame follows the same rule: only constant handshake messages use
 target `'*'`, and data goes over the transferred port
 ([MCP guide](VibeRails/Services/Mcp/AGENTS.md#mcp-explorer-dashboard)).
+The MCP Explorer forwards the dashboard's own credential pair to one destination only: the
+in-process `/mcp` on the exact loopback address and port its request arrived on, taken from the
+connection, never from the `Host` header (`McpExplorerTarget`, VIBE-310). Every other target,
+including other 127.x addresses on the same port, receives only the headers the user typed.
 
 ### MCP and agent launches
 
@@ -1268,6 +1272,17 @@ The durable `BoardSyncRebuilds` intent pins the board and destination fingerprin
 resumes delete confirmation, idempotent publication, then local-history upload. Imported boards,
 ordinary 409 contention, network/auth failures and malformed responses never authorize deletion.
 Replacement discards that remote board's content and sharing identity; local rows are retained.
+
+Pulled content is validated before it is applied (VIBE-310): an assignee is a base CLI only, never
+a saved environment or a local Agent (`preset:`); `changes` is an object for every entry kind;
+hosted invitation ids are opaque identifiers in both directions, because each becomes a path
+segment that a client would otherwise resolve (`..`); and a lane colour is written into the page
+only as `#rrggbb`. Entries that fail are skipped and counted, never retried forever.
+
+A relay-attached terminal's viewer is unlocked only by the Remote Access PIN. A session is offered
+to the relay only while a PIN exists; if the PIN is cleared afterwards, live sessions lock (frames
+dropped, lock prompt, no snapshot) instead of opening, and frames sent while no PIN exists do not
+count toward the failed-PIN lockout. See `RemoteViewerLock`.
 
 Remote Start work is outbound polling by an open root backend, only for its own project's
 published, non-imported boards. Requests carry opaque board/card IDs and a required sync sequence,

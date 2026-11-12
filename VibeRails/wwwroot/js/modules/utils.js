@@ -796,6 +796,14 @@ export function escapeHtml(text) {
         .replace(/'/g, '&#39;');
 }
 
+// A colour bound for a style attribute. escapeHtml stops the attribute from being closed, but not
+// `;`, so a colour that arrives from elsewhere (a shared board's lane) could add CSS declarations.
+// Only a #rrggbb value is ever written; anything else yields '' and the default styling applies.
+export function cssHexColor(value) {
+    const color = typeof value === 'string' ? value.trim() : '';
+    return /^#[0-9a-fA-F]{6}$/.test(color) ? color : '';
+}
+
 // Escape HTML, then turn newlines into <br>. The escape runs FIRST so any markup
 // in the input is neutralized and only literal newlines become breaks. Shared by
 // the global app toast (toast-service.js) and the terminal toast (terminal-toast.js).

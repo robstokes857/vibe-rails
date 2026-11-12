@@ -738,8 +738,8 @@ public sealed partial class BoardSyncService(
     /// </summary>
     private static (bool Apply, BaseLlmOptions? Options) RemoteLaunchOptions(string? assignee, JsonElement to, bool keepYolo)
     {
-        if (!BoardSelection.TryParse(assignee, out var selection) || selection!.IsEnvironment)
-            return (to.ValueKind == JsonValueKind.Null, null); // Saved environments use their own settings.
+        if (!BoardSelection.TryParse(assignee, out var selection) || selection!.IsEnvironment || selection.IsPreset)
+            return (to.ValueKind == JsonValueKind.Null, null); // Saved environments and Agents use their own settings.
         if (to.ValueKind is not (JsonValueKind.Null or JsonValueKind.Object)) return (false, null);
         string? Read(string name) => to.ValueKind == JsonValueKind.Object && to.TryGetProperty(name, out var value)
             && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
@@ -919,6 +919,11 @@ public sealed partial class BoardSyncService(
         if (entry.Kind is not (BoardSyncWire.KindCreated or BoardSyncWire.KindChange or BoardSyncWire.KindDeleted
             or BoardSyncWire.KindComment or BoardSyncWire.KindNote))
             throw new BoardValidationException("This version cannot apply remote entry kind: " + SkippedKind(entry.Kind));
+        // Every kind's changes are read as an object further down (a deletion carries
+        // deletedComment). Anything else must be skipped here: it would otherwise fail with a
+        // non-validation error on every pull and hold back the entries after it.
+        if (entry.Changes is { ValueKind: not (JsonValueKind.Object or JsonValueKind.Null or JsonValueKind.Undefined) })
+            throw new BoardValidationException("A remote entry's changes must be an object.");
         if (entry.Kind is not (BoardSyncWire.KindCreated or BoardSyncWire.KindChange)) return;
         if (entry.Changes is not { ValueKind: JsonValueKind.Object } changes)
             throw new BoardValidationException("A remote field change is missing its values.");
@@ -941,7 +946,10 @@ public sealed partial class BoardSyncService(
                 "priority" => to.ValueKind == JsonValueKind.String && BoardPriorities.IsValid(to.GetString()),
                 "points" => to.ValueKind == JsonValueKind.Null || (to.ValueKind == JsonValueKind.Number && to.TryGetInt32(out var p) && p is 1 or 2 or 3 or 5 or 8 or 13),
                 "assignee" => to.ValueKind == JsonValueKind.Null || (to.ValueKind == JsonValueKind.String
-                    && BoardSelection.TryParse(to.GetString(), out var selected) && !selected!.IsEnvironment && selected.Key == to.GetString()),
+                    // A base CLI only, as pushes write it. A saved environment or a local Agent
+                    // (preset:) is this machine's own definition, with its own arguments, and a
+                    // remote entry must never select one.
+                    && BoardSelection.TryParse(to.GetString(), out var selected) && !selected!.IsEnvironment && !selected.IsPreset && selected.Key == to.GetString()),
                 "tags" => to.ValueKind == JsonValueKind.Array && to.GetArrayLength() <= BoardService.MaxTags && to.EnumerateArray().All(t => t.ValueKind == JsonValueKind.String && t.GetString()!.Length <= BoardService.MaxTagLength),
                 "blocked" or "flagged" => to.ValueKind is JsonValueKind.True or JsonValueKind.False,
                 "lane" => to.ValueKind == JsonValueKind.String && IsOpaqueId(to.GetString()),

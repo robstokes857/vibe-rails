@@ -34,7 +34,7 @@ import { previousWorkHtml } from './board-previous-work.js';
 //   - app.showToast for success/failure, never a bespoke toast stack
 //   - Font Awesome icons and the --color-* theme tokens
 
-import { escapeHtml, confirmDialog, parseLlmSelection, getCliBrand, canonicalLlmSelection } from './utils.js';
+import { escapeHtml, cssHexColor, confirmDialog, parseLlmSelection, getCliBrand, canonicalLlmSelection } from './utils.js';
 import { mountLlmPicker, setLlmPickerValue, getEnabledLlmItems, getAllLlmItems } from './pickers/llm-picker.js';
 import { launchKind } from './launch-kind.js';
 import { BoardApi } from './board-api.js';
@@ -1094,7 +1094,7 @@ export class BoardController {
 
                 return `
                     <section class="board-lane${collapsed ? ' is-collapsed' : ''}" data-column-id="${escapeHtml(column.id)}"
-                        style="--lane-color:${escapeHtml(column.color)}">
+                        style="--lane-color:${cssHexColor(column.color)}">
                         ${this.laneAgents.button(column)}
                         <header class="board-lane-head" ${collapsed ? 'hidden' : ''}>
                             <button type="button" class="board-lane-grip" title="Drag to reorder this lane"

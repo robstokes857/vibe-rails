@@ -15,8 +15,8 @@ public sealed partial class BoardStore
     {
         if (changes is null) return;
         using var document = JsonDocument.Parse(changes);
-        if (!document.RootElement.TryGetProperty("deletedComment", out var field)) return;
-        if (!field.TryGetProperty("to", out var value) || value.ValueKind != JsonValueKind.String || value.GetString() is not { Length: > 0 and <= 64 } commentId)
+        if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty("deletedComment", out var field)) return;
+        if (field.ValueKind != JsonValueKind.Object || !field.TryGetProperty("to", out var value) || value.ValueKind != JsonValueKind.String || value.GetString() is not { Length: > 0 and <= 64 } commentId)
             throw new BoardValidationException("Invalid deleted comment identity.");
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;

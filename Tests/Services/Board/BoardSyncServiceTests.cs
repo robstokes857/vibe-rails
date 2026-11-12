@@ -875,6 +875,8 @@ public sealed partial class BoardSyncServiceTests : IDisposable
             "\"lane\":{\"to\":\"bad lane\"}", "\"lane\":{\"to\":\"_lane\"}",
             "\"lane\":{\"to\":\"" + new string('x', 65) + "\"}",
             "\"assignee\":{\"to\":\"env:7:codex\"}", "\"assignee\":{\"to\":\"base:CODEX\"}",
+            // A local Agent (VIBE-310): pushes only ever write base:<cli>, so a remote entry must not pick one.
+            "\"assignee\":{\"to\":\"preset:preset_0123456789abcdef0123456789abcdef:claude\"}",
             "\"assignee\":{\"to\":\" base:codex \"}", "\"points\":{\"to\":4}",
             "\"blocked\":{\"to\":\"true\"}", "\"flagged\":{\"to\":1}",
             "\"tags\":{\"to\":[\"" + new string('x', 41) + "\"]}", "\"description\":{}"
@@ -901,6 +903,32 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         Assert.False(await store.HasLogEntryAsync(entry.Id, Ct));
         Assert.Equal("Local", (await store.FindCardAsync(root, card.Id, Ct))!.Title);
         if (kind == "created") Assert.Null(await store.FindCardAsync(root, entry.CardId, Ct));
+    }
+
+    [Theory]
+    [InlineData("deleted", "[1]")]
+    [InlineData("deleted", "\"x\"")]
+    [InlineData("deleted", "5")]
+    [InlineData("deleted", "{\"deletedComment\":7}")]
+    [InlineData("comment", "[]")]
+    [InlineData("note", "true")]
+    public async Task ChangesThatAreNotAnObjectAreSkippedInsteadOfStallingThePull(string kind, string changes)
+    {
+        // VIBE-310: these used to fail with a non-validation error on every pull, which held back
+        // every later entry (and remote Start work) for that board on every desktop.
+        var card = await Card();
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        client.Web(card, kind, "Remote", changes);
+        var entry = client.Entries[^1];
+        client.Web(card, "change", "", "{\"title\":{\"to\":\"After\"}}");
+
+        var status = await service.SyncNowAsync(root, card.BoardId, Ct);
+
+        Assert.Null(status!.LastError);
+        Assert.Equal(entry.Id, Assert.Single(status.SkippedEntries!).EntryId);
+        Assert.False(await store.HasLogEntryAsync(entry.Id, Ct));
+        // The entry after it still applies.
+        Assert.Equal("After", (await store.FindCardAsync(root, card.Id, Ct))!.Title);
     }
 
     [Theory]

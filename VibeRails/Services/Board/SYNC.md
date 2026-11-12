@@ -232,6 +232,10 @@ The payload contains the board name and key prefix, lane IDs/names/colours/order
 title, description, type, priority, points, tags, blocked/attention flags, lane, portable assignee,
 comments, notes, and their recorded changes/authorship/timestamps. An environment assignee is
 represented by its base CLI; its environment ID stays local. Author session IDs are omitted.
+The same holds on the way in: a pulled assignee must be a base CLI (`base:<cli>`). An entry that
+names a saved environment or a local Agent (`preset:…`) is skipped as invalid, so a remote change
+can never select a definition, with its own arguments, that exists only on this machine. A pulled
+entry whose `changes` is not an object is skipped the same way instead of failing every pull.
 Field changes use an explicit allowlist. Generated summaries are rebuilt from portable fields.
 The allowlist also carries `context` (VB-63): not a card field but the agent-context sample a
 launch records (estimated tokens, prompt and card-read split, intent, CLI and the breakdown),

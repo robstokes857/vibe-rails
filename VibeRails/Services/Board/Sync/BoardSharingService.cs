@@ -15,6 +15,10 @@ public sealed class BoardSharingService(IBoardStore store, IBoardSyncClient clie
         var descriptor = await client.DescribeAsync(link.RemoteBoardId, ct, link.DestinationKey)
             ?? throw new BoardValidationException("Board sharing requires the updated viberails.ai server.");
         var sharing = descriptor.IsOwner ? await client.GetSharingAsync(link.RemoteBoardId, ct, link.DestinationKey) : null;
+        // The dashboard puts each invitation id into a request path. An id such as ".." would be
+        // resolved away by the browser and address the board itself, so only opaque ids are shown.
+        if (sharing is not null && (sharing.Invitations is null || sharing.Invitations.Any(invite => invite is null || !BoardSyncWire.IsOpaqueId(invite.Id))))
+            throw new BoardValidationException("The server returned an invalid collaborator list.");
         return new(true, descriptor.IsOwner, descriptor.RemoteBoardId, sharing);
     }
 
@@ -22,6 +26,7 @@ public sealed class BoardSharingService(IBoardStore store, IBoardSyncClient clie
     public async Task<BoardSharingResult> SaveAsync(string project, string boardId, string? inviteId, BoardSharingEmailRequest body, CancellationToken ct)
     {
         if (body.Email is not { Length: > 0 and <= 320 }) throw new BoardValidationException("Enter an email address up to 320 characters.");
+        if (inviteId is not null) RequireInviteId(inviteId);
         var link = await LinkAsync(project, boardId, ct);
         await client.SaveInviteAsync(link.RemoteBoardId, inviteId, body, ct, link.DestinationKey);
         return new("Invitation saved. The recipient can review it in Boards if eligible.");
@@ -30,9 +35,16 @@ public sealed class BoardSharingService(IBoardStore store, IBoardSyncClient clie
     /// <summary>Revokes an invitation through the hosted owner check.</summary>
     public async Task<BoardSharingResult> RemoveAsync(string project, string boardId, string inviteId, CancellationToken ct)
     {
+        RequireInviteId(inviteId);
         var link = await LinkAsync(project, boardId, ct);
         await client.RemoveInviteAsync(link.RemoteBoardId, inviteId, ct, link.DestinationKey);
         return new(Saved: true);
+    }
+
+    /// <summary>An invitation id becomes a path segment of the hosted request; only an opaque id may.</summary>
+    private static void RequireInviteId(string inviteId)
+    {
+        if (!BoardSyncWire.IsOpaqueId(inviteId)) throw new BoardValidationException("That invitation is not valid.");
     }
 
     private async Task<BoardSyncLinkRecord> LinkAsync(string project, string boardId, CancellationToken ct)
