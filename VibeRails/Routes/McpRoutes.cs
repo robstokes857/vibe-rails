@@ -197,45 +197,14 @@ public static class McpRoutes
         return element.HasValue ? CloneIfDefined(element.Value) : null;
     }
 
-    private static Uri ResolveEndpoint(HttpContext ctx, string? endpoint)
-    {
-        if (string.IsNullOrWhiteSpace(endpoint))
-        {
-            return BuildLoopbackEndpoint(ctx);
-        }
+    private static Uri ResolveEndpoint(HttpContext ctx, string? endpoint) =>
+        McpExplorerTarget.Resolve(endpoint, ctx.Connection.LocalIpAddress, ctx.Connection.LocalPort);
 
-        endpoint = endpoint.Trim();
-        if (endpoint.StartsWith("/", StringComparison.Ordinal))
-        {
-            var port = ctx.Request.Host.Port ?? 80;
-            return new Uri($"http://127.0.0.1:{port}{endpoint}");
-        }
+    // The in-process /mcp on the listener this request arrived on: the connection's own address
+    // and port, never the Host header's.
+    private static Uri BuildLoopbackEndpoint(HttpContext ctx) =>
+        McpExplorerTarget.Own(ctx.Connection.LocalIpAddress, ctx.Connection.LocalPort);
 
-        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-        {
-            throw new ArgumentException("Endpoint must be an absolute HTTP or HTTPS URL.");
-        }
-
-        return uri;
-    }
-
-    private static Uri BuildLoopbackEndpoint(HttpContext ctx)
-    {
-        // The server binds localhost; reach /mcp on the same port via the loopback address.
-        var port = ctx.Request.Host.Port ?? 80;
-        return new Uri($"http://127.0.0.1:{port}/mcp");
-    }
-
-    private static bool IsLoopbackMcpEndpoint(HttpContext ctx, Uri endpoint)
-    {
-        var port = ctx.Request.Host.Port ?? 80;
-        var path = endpoint.AbsolutePath.TrimEnd('/');
-        var isMcpPath = string.Equals(path, "/mcp", StringComparison.OrdinalIgnoreCase);
-        var isSamePort = endpoint.Port == port;
-        var isLoopbackHost = string.Equals(endpoint.Host, "localhost", StringComparison.OrdinalIgnoreCase)
-            || (IPAddress.TryParse(endpoint.Host, out var address) && IPAddress.IsLoopback(address));
-
-        return isMcpPath && isSamePort && isLoopbackHost;
-    }
+    private static bool IsLoopbackMcpEndpoint(HttpContext ctx, Uri endpoint) =>
+        McpExplorerTarget.IsOwn(endpoint, ctx.Connection.LocalIpAddress, ctx.Connection.LocalPort);
 }

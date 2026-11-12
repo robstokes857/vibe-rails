@@ -488,6 +488,13 @@ endpoint so the request clears auth (which requires both); external targets rece
 headers explicitly supplied in the Explorer. Kestrel serves local
 loopback requests on a separate connection, so there is no self-deadlock.
 
+"The local `/mcp`" is decided by [McpExplorerTarget](../../Routes/McpExplorerTarget.cs), not by
+the URL's look (VIBE-310): only the exact loopback address and port the Explorer's own request
+arrived on (`HttpContext.Connection`), with path `/mcp`. The `Host` header's port is not used.
+Another 127.x address, the other loopback family or another port on this machine can belong to a
+different process, so those are external targets and get no credentials. A blank endpoint, `/mcp`
+and `http://localhost:<our port>/mcp` all resolve to the connection's own address.
+
 Remote tools render only in `mcp-remote.html`, an opaque-origin `sandbox="allow-scripts"` frame
 that never fetches. Its one window message is a constant `mcp-remote-ready`; the parent checks
 `event.source` and replies with a transferred `MessageChannel` port, and tool lists, calls and
