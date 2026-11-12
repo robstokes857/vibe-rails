@@ -24,7 +24,15 @@ public sealed class ConversationTitleStore : IConversationTitleStore
             AND NOT EXISTS(SELECT 1 FROM UserInputs u WHERE u.SessionId=s.Id AND u.Id<>$inputId);
         UPDATE ConversationTitleRequests
         SET MessageCount=MessageCount+1, CharacterCount=CharacterCount+$characters, LatestInputId=$inputId
-        WHERE SessionId=$sessionId AND UserInputId<>$inputId AND Cancelled=0 AND GenerationCount<2;
+        WHERE SessionId=$sessionId AND UserInputId<>$inputId AND Cancelled=0;
+        UPDATE ConversationTitleRequests
+        SET Cancelled=0, LatestInputId=$inputId, RetryAfterUTC=$now
+        WHERE SessionId=$sessionId AND Cancelled=1 AND Attempts=0 AND LastTitle IS NOT NULL
+            AND EXISTS(SELECT 1 FROM Sessions s WHERE s.Id=$sessionId AND s.ConversationTitleEligible=1
+                AND s.SessionDisplayName=LastTitle AND s.JobRunId IS NULL
+                AND COALESCE(s.ParentSessionId,'')='' AND lower(s.Cli)<>'shell')
+            AND EXISTS(SELECT 1 FROM UserInputs u WHERE u.SessionId=$sessionId
+                AND u.Id>LastInputId ORDER BY u.Id LIMIT 1 OFFSET 3);
         """;
 
     // Explicit naming, including a rename to the same text, cancels an in-flight automatic title.
@@ -40,18 +48,21 @@ public sealed class ConversationTitleStore : IConversationTitleStore
         // Every root runs this every few seconds, so find a candidate with a plain WAL read and
         // take the writer lock only to claim one. Idle ticks must not touch the write lock.
         using var select = db.CreateCommand();
-        // One title per conversation: due once the user has written enough, or when the session
-        // ends with whatever it has. Its open rows are covered by idx_conversation_titles_open.
+        // Completed requests stay closed between milestones. Capture reopens a successful title
+        // after four more inputs, including titles completed by an older one-shot root.
         select.CommandText = """
             SELECT q.SessionId, COALESCE(s.SessionDisplayName,''),
                 CASE WHEN $fingerprint IS NOT NULL AND q.SettingsFingerprint IS NOT $fingerprint THEN 0 ELSE q.Attempts END,
                 (s.JobRunId IS NULL AND COALESCE(s.ParentSessionId,'')='' AND lower(s.Cli)<>'shell' AND
                     (COALESCE(s.SessionDisplayName,'')='' OR s.SessionDisplayName=substr(u.InputText,1,120)
-                        OR COALESCE(s.SessionDisplayName=q.LastTitle,0))), q.LatestInputId, q.GenerationCount
+                        OR COALESCE(s.SessionDisplayName=q.LastTitle,0))),
+                (SELECT MAX(i.Id) FROM UserInputs i WHERE i.SessionId=q.SessionId), q.GenerationCount
             FROM ConversationTitleRequests q
             JOIN Sessions s ON s.Id=q.SessionId JOIN UserInputs u ON u.Id=q.UserInputId
-            WHERE q.Cancelled=0 AND q.GenerationCount=0
-                AND (q.MessageCount>=2 OR q.CharacterCount>=300 OR s.EndedUTC IS NOT NULL)
+            WHERE q.Cancelled=0
+                AND ((q.GenerationCount=0 AND (q.MessageCount>=2 OR q.CharacterCount>=300 OR s.EndedUTC IS NOT NULL))
+                    OR (q.GenerationCount>0 AND EXISTS(SELECT 1 FROM UserInputs i
+                        WHERE i.SessionId=q.SessionId AND i.Id>q.LastInputId ORDER BY i.Id LIMIT 1 OFFSET 3)))
                 AND (q.RetryAfterUTC<=$now OR ($fingerprint IS NOT NULL AND q.SettingsFingerprint IS NOT $fingerprint))
                 AND NOT EXISTS(SELECT 1 FROM ConversationTitleApiBackoff b
                     WHERE b.Fingerprint=$fingerprint AND b.RetryAfterUTC>$now)
@@ -111,13 +122,16 @@ public sealed class ConversationTitleStore : IConversationTitleStore
         cmd.Parameters.AddWithValue("$now", now.ToString("O"));
         cmd.Parameters.AddWithValue("$generation", work.Generation);
         var applied = await cmd.ExecuteScalarAsync(ct) is not null;
-        // Cancelled=1 closes the request for good, applied or not. Older roots still carry a refresh
-        // step that only claims open rows, so this also keeps them from making a second call.
+        // Close each milestone so idle polling stays cheap and older roots cannot refresh early.
+        // Four inputs may have arrived during HTTP; keep that next milestone open in that case.
+        // Failed/stopped requests retain their attempt count so capture cannot revive them.
         cmd.CommandText = """
             UPDATE ConversationTitleRequests SET CompletedUTC=$now, Lease=NULL, LeaseUntilUTC=NULL,
                 GenerationCount=GenerationCount+$applied, LastInputId=$inputId,
                 LastTitle=CASE WHEN $applied=1 THEN $title ELSE LastTitle END,
-                Cancelled=1, Attempts=0, RetryAfterUTC=$now
+                Cancelled=CASE WHEN $applied=1 AND EXISTS(SELECT 1 FROM UserInputs u
+                    WHERE u.SessionId=$sessionId AND u.Id>$inputId ORDER BY u.Id LIMIT 1 OFFSET 3) THEN 0 ELSE 1 END,
+                Attempts=CASE WHEN $applied=1 THEN 0 ELSE Attempts END, RetryAfterUTC=$now
             WHERE SessionId=$sessionId AND Lease=$lease AND LeaseUntilUTC>$now AND Cancelled=0 AND GenerationCount=$generation;
             """;
         cmd.Parameters.AddWithValue("$applied", applied ? 1 : 0);

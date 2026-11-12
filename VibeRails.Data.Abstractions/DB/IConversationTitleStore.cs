@@ -9,12 +9,13 @@ public interface IConversationTitleStore
 {
     /// <summary>
     /// Claims one due request for two minutes, excluding work leased by another root. A conversation
-    /// is due once, when its user text reaches the milestone or its session ends.
+    /// is first due when its user text reaches the milestone or its session ends, then after
+    /// every four additional captured user messages following a successful title.
     /// </summary>
     Task<ConversationTitleWork?> ClaimAsync(DateTime now, CancellationToken ct, string? settingsFingerprint = null);
     /// <summary>
-    /// Applies a title atomically and closes the request; null ends it without changing the name.
-    /// Each conversation gets one title. Explicit names always win.
+    /// Applies a title atomically and completes the milestone; null stops requests without changing
+    /// the name. Later user messages can reopen a successful milestone. Explicit names always win.
     /// </summary>
     Task<bool> CompleteAsync(ConversationTitleWork work, string? title, DateTime now, CancellationToken ct);
     /// <summary>Releases owned work until its next retry without changing the session name.</summary>

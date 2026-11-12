@@ -191,26 +191,34 @@ the last generated title, cancellation state, a saved-key fingerprint and shared
 that refresh (2026-10-14); the column stays, and current code neither reads nor writes it.
 `/4` adds `idx_conversation_titles_open` (open requests: `Cancelled=0 AND GenerationCount=0`), because
 the session-end half of the due rule joins `Sessions` and the `/2` milestone index cannot serve it.
-The `/2` index stays for older binaries.
+`/5` adds `idx_conversation_titles_queued` (`Cancelled=0`) for recurring refreshes; all earlier
+indexes stay for older binaries. This is an index-only upgrade with no row conversion or backfill.
 It stores references and counts, never prompt copies or API keys. The additive
 `Sessions.ConversationTitleEligible` flag defaults to zero; only newly created sessions opt in.
 Setup never enrolls existing history. Input capture updates counts in its existing transaction.
-A conversation is due once: at 300 trimmed user-input characters or two captured user messages,
-or when its session ends (`Sessions.EndedUTC`), with whatever it has. Completing work, applied
-or not, sets `Cancelled=1`, which also keeps an older root's refresh rule from claiming it again.
+A conversation is first due at 300 trimmed user-input characters or two captured user messages,
+or when its session ends (`Sessions.EndedUTC`), with whatever it has. After a successful title,
+capture reopens the request after four more input rows beyond `LastInputId`, scoped to that session.
+The same rule applies to successful one-shot titles from older versions on new input; startup
+does not reopen them. Completion closes the milestone with `Cancelled=1`, unless four inputs
+already arrived beyond the claim's watermark. This keeps idle polling and older roots quiet
+between milestones. Success resets `Attempts=0`; a stopped/failed request retains its attempts
+so capture cannot reopen it. Renames clear `ConversationTitleEligible` and prevent reopening.
 
 `IConversationTitleStore` claims one milestone for two minutes and commits before external work.
 Every root polls every few seconds, so the claim finds a candidate with a plain read and takes the
 writer lock only for a guarded UPDATE; an idle tick never blocks other `state.db` writers. Only a
 key-wide failure (rejected key, rate limit, unavailable endpoint, network) writes the shared API
-backoff; a conversation's own failures delay only that conversation, which gives up after five.
+backoff; a conversation's own failures delay only that conversation, which gives up after five
+attempts at a milestone. Failures preserve the last generated title.
 Explicit naming cancels future/pending/claimed work in the same transaction, even when the text
 stays the same. Completion rechecks Automation/resume/shell eligibility and the claim, preserving
 changed names while allowing the transcript parser to set its automatic preview during a claim.
-Root-only `ConversationTitleJob` uses the full current Send-to transcript, credential redaction,
-fresh saved settings and bounded HTTP; no input-path network call is made. Board membership is
-checked before and after remote work; history gives Board labels precedence over generated titles,
-including late attachments. Resume summaries and explicit live-tab/Board session labels are separate.
+Root-only `ConversationTitleJob` uses captured user messages through the claim's input watermark,
+with only the latest four for a refresh. It uses credential redaction, fresh saved settings and
+bounded HTTP; no input-path network call is made. The primary Board card is optional background
+for the request. Generated titles take precedence over card labels in the sidebar. Resume summaries
+and explicit live-tab/Board session labels are separate.
 
 ## Shared search component (VIBE-55)
 

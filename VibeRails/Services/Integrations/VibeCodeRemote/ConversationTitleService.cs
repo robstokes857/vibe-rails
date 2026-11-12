@@ -9,7 +9,7 @@ using VibeRails.Services.Diagnostics;
 
 namespace VibeRails.Services.Integrations.VibeCodeRemote;
 
-/// <summary>Requests one title per conversation outside the terminal input path.</summary>
+/// <summary>Generates and refreshes conversation titles outside the terminal input path.</summary>
 public sealed class ConversationTitleService(IConversationTitleStore store, IUserInputStore inputs,
     IBoardStore boards, ConversationTitleClient client, IAppEventBus events, IFeatureLog? featureLog = null)
 {
@@ -30,7 +30,10 @@ public sealed class ConversationTitleService(IConversationTitleStore store, IUse
             fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(settings.ApiKey)));
             work = await store.ClaimAsync(DateTime.UtcNow, ct, fingerprint);
             if (work is null) return;
-            var userText = work.Eligible ? UserText(await inputs.GetUserInputsForSessionAsync(work.SessionId, ct)) : "";
+            var userText = work.Eligible
+                ? UserText((await inputs.GetUserInputsForSessionAsync(work.SessionId, ct))
+                    .Where(input => input.Id <= work.InputId), recentOnly: work.Generation > 0)
+                : "";
             if (userText.Length == 0)
             {
                 await store.CompleteAsync(work, null, DateTime.UtcNow, ct);
@@ -43,7 +46,7 @@ public sealed class ConversationTitleService(IConversationTitleStore store, IUse
             Write(work, "request-started",
                 $"Starting automatic chat-title request to {ConversationTitleClient.Endpoint}; attempt={work.Attempts}; storyContext={story is not null}.", "started");
             var started = Stopwatch.GetTimestamp();
-            var result = await client.GenerateAsync(userText, settings, ct, story);
+            var result = await client.GenerateAsync(userText, settings, ct, story, preferRecentText: work.Generation > 0);
             var status = result.Title is not null ? "succeeded"
                 : result.Outcome is "no_topic" or "no_user_text" or "settings_changed_or_disabled" ? "skipped" : "failed";
             Write(work, "request-finished",
@@ -123,11 +126,14 @@ public sealed class ConversationTitleService(IConversationTitleStore store, IUse
 
     /// <summary>
     /// The user's captured messages in order. Bare slash commands (<c>/clear</c>, <c>/model</c>) say
-    /// nothing about the topic, so they are left out unless they are all there is.
+    /// nothing about the topic, so they are left out unless they are all there is. Refreshes use
+    /// only the latest four captured messages, preventing the opening topic from dominating.
     /// </summary>
-    internal static string UserText(IEnumerable<UserInputRecord> inputs)
+    internal static string UserText(IEnumerable<UserInputRecord> inputs, bool recentOnly = false)
     {
-        var messages = inputs.OrderBy(input => input.Sequence).ThenBy(input => input.Id)
+        IEnumerable<UserInputRecord> ordered = inputs.OrderBy(input => input.Sequence).ThenBy(input => input.Id);
+        if (recentOnly) ordered = ordered.TakeLast(4);
+        var messages = ordered
             .Select(input => input.InputText.Trim()).Where(text => text.Length > 0).ToList();
         var topical = messages.Where(text => !IsBareCommand(text)).ToList();
         return string.Join('\n', topical.Count > 0 ? topical : messages);

@@ -807,7 +807,11 @@ comment composer's submit sits in a footer **below** the textarea, not in its to
 board in the same project; each relation appears on both cards. The full card response carries
 `linkedCards[]` with current key/title, board and lane names. `board-card-links.js` uses the shared `board-card-search-picker.js`
 search picker (up to 50 matches by key or title), immediate link/unlink calls, and its abortable
-search lifecycle. Self/already-linked cards are omitted. All displayed metadata is escaped.
+search lifecycle. The links picker searches only nonblank queries; empty input shows a hint
+without fetching or displaying candidates. Successful linking clears the query and results
+and returns focus to the open search field. Failed links preserve the query for retry.
+The shared history picker retains its empty-query browsing behavior.
+Self/already-linked cards are omitted. All displayed metadata is escaped.
 Opening a linked card checks for unsaved fields, description or comment text first; cancel
 leaves the draft intact. Link mutations never save or reload the surrounding form. New cards stage links and save them atomically on Create. Dispose the rail on modal close/replacement and unload.
 
@@ -875,6 +879,9 @@ renders without rewriting stored text. Navigation uses existing replay/diff/unsa
 guards. Abort and generation checks prevent stale results or asynchronous selections from
 overwriting edited text. Completed picks leave the caret after the separating whitespace,
 including existing spaces or line breaks, so continued typing does not reopen the search.
+Whitespace also ends a plain card ID after the first-stage card choice; prose typed later
+on that line must not turn the completed ID into another title search. Multiword title
+searches and a fresh `!` after the completed reference remain available.
 
 The card keeps the latest Checks summary and optional saved report under Advanced. Run checks and Earlier results
 are unmounted. Code reviews is a read-only sidebar section below Agent & Automation runs: it shows

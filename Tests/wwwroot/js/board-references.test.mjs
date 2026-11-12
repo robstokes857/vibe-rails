@@ -45,6 +45,23 @@ test('Markdown is optional and user HTML stays inert across styles and links', (
         assert.doesNotMatch(renderCommentHtml(attack), /<img|href="(?:javascript|data):/);
 });
 
+test('whitespace ends a card ID reference without ending multiword title searches', () => {
+    for (const id of ['VB-12', 'VIBE-123', 'VB-ABCDE-107']) {
+        const reference = `See !${id}`;
+        assert.deepEqual(findBoardReferenceToken(reference, reference.length), { start: 4, query: id, kind: '!' });
+        for (const suffix of [' ', ' more details', '\tmore details', '\nmore details']) {
+            const value = reference + suffix;
+            assert.equal(findBoardReferenceToken(value, value.length), null, value);
+        }
+        const value = `${reference} more details !another card`;
+        assert.deepEqual(findBoardReferenceToken(value, value.length), {
+            start: value.lastIndexOf('!'), query: 'another card', kind: '!'
+        });
+    }
+    const title = 'See !fix login form';
+    assert.equal(findBoardReferenceToken(title, title.length).query, 'fix login form');
+});
+
 test('references are inert buttons and never parsed inside code', () => {
     const guid = '12345678123412341234123456789abc';
     const text = `!${guid} #abcdef0123 @[VIBE-34](card:card_1) ![VIBE-35](card:card_2)`;
@@ -180,6 +197,22 @@ test('a card with no sessions explains the empty list and can be referenced with
     assert.equal(popup.input.value, '![VB-12](card:card_12) ');
     assert.match(renderCommentHtml(popup.input.value), /data-board-ref-card="card_12"/);
     assert.deepEqual(popup.calls.links, []);
+});
+
+test('typing after a selected card ID closes the popup and does not search the following prose', async t => {
+    const popup = bindPopup(t, { cards: [card(12, 'Fix login form')] });
+    await popup.type('See !fix login form for details.', 'See !fix login form'.length);
+    assert.match(await popup.pick(), /Reference card VB-12/);
+    assert.equal(popup.input.value, 'See !VB-12 for details.');
+    const searches = [...popup.calls.projectCards];
+
+    assert.equal(await popup.type(popup.input.value, 'See !VB-12 '.length), '');
+    assert.equal(await popup.type('See !VB-12 for details. More prose.'), '');
+    assert.deepEqual(popup.calls.projectCards, searches);
+    assert.deepEqual(popup.calls.history, []);
+
+    assert.match(await popup.type('See !VB-12 for details. !login form'), /Fix login form/);
+    assert.equal(popup.calls.projectCards.at(-1), 'login form');
 });
 
 test('choosing a session before existing text finishes the reference and stops searching', async t => {

@@ -40,6 +40,7 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged, ap
         isActive: () => !busy && picker.open,
         currentBoardId: card.boardId,
         action: 'Link',
+        searchOnEmpty: false,
         emptyText: 'No matching cards available to link.'
     });
 
@@ -59,6 +60,7 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged, ap
 
     async function changeLink(targetId, remove) {
         if (busy || disposed) return;
+        let didLink = false;
         busy = true;
         cardSearch.cancel();
         host.querySelectorAll('button, input').forEach(control => { control.disabled = true; });
@@ -83,6 +85,10 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged, ap
             links.sort((a, b) => (a.displayId || a.key).localeCompare(b.displayId || b.key, undefined, { numeric: true }));
             card.linkedCards = links;
             renderLinks();
+            if (!remove) {
+                search.value = '';
+                didLink = true;
+            }
             onChanged?.();
         } catch (error) {
             if (!disposed) showError(error?.message || (remove ? 'Could not unlink the card.' : 'Could not link the card.'));
@@ -91,6 +97,7 @@ export function bindCardLinks(editor, card, { openCard, showError, onChanged, ap
             if (!disposed) {
                 host.querySelectorAll('button, input').forEach(control => { control.disabled = false; });
                 void cardSearch.load();
+                if (didLink && picker.open) search.focus();
             }
         }
     }

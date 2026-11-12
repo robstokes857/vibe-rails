@@ -20,6 +20,9 @@ CREATE INDEX idx_conversation_titles_open ON ConversationTitleRequests(RetryAfte
 -- index idx_conversation_titles_pending
 CREATE INDEX idx_conversation_titles_pending ON ConversationTitleRequests(RetryAfterUTC, UserInputId) WHERE CompletedUTC IS NULL;
 
+-- index idx_conversation_titles_queued
+CREATE INDEX idx_conversation_titles_queued ON ConversationTitleRequests(RetryAfterUTC,UserInputId) WHERE Cancelled=0;
+
 -- index idx_conversation_titles_updated
 CREATE INDEX idx_conversation_titles_updated ON ConversationTitleRequests(CompletedUTC DESC) WHERE LastTitle IS NOT NULL;
 

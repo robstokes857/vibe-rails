@@ -203,13 +203,17 @@ and debug logging, security, performance, future enhancements, resources.
 
 ## Chat history metadata (2026-09-28)
 
-`ConversationTitleService` makes one leased title request per conversation through
-`IConversationTitleStore` in `state.db`: when the user has written enough, or when the session ends.
+`ConversationTitleService` makes leased title requests through `IConversationTitleStore` in
+`state.db`: first when the user has written enough, or when the session ends, then after every
+four additional captured user messages. Refreshes use the latest four messages through the
+claim's input watermark; messages arriving during the request count toward the next refresh.
 It sends the user's captured messages (`IUserInputStore`), not the Send-to transcript, so launch
 prompts such as the story-tracking nudge never reach the title API. A Board-linked conversation is
 titled too; its primary card's display ID, title and description go first, labeled as background.
-`ConversationTitleClient.ComposeRequest` redacts each part whole, then bounds it. The VIBE-158
-refresh and its `LastExcerptHash` are retired; the column stays, unused. The sidebar shows a
+`ConversationTitleClient.ComposeRequest` redacts each part whole, then bounds it. Refreshes keep
+the most recent text within the payload limit and ask for the current topic. The old VIBE-158
+excerpt-hash refresh remains retired; `LastExcerptHash` stays unused. Explicit renames stop
+automatic titles; failures preserve the last title and retain the existing retry limits. The sidebar shows a
 generated title ahead of the card label, and the card keeps its own row.
 
 Title diagnostics use the bounded `IFeatureLog` journal under `conversation-titles`: request

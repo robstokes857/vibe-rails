@@ -117,29 +117,87 @@ public sealed class ConversationTitleServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SendsTheUserTextOnceAndKeepsTitleSeparateFromResumeSummary()
+    public async Task RefreshesFromFourRecentMessagesAndKeepsTitleSeparateFromResumeSummary()
     {
         var repository = await Seed();
         await repository.SaveChatSummaryAsync(new ChatSummary { SessionId = "session", SummaryText = "Existing resume recap", Date = DateTime.UtcNow }, Ct);
-        string? sent = null;
+        var sent = new List<string?>();
         var handler = new Handler(async (request, ct) =>
         {
-            sent = await SentText(request, ct);
-            return Reply("First title");
+            sent.Add(await SentText(request, ct));
+            return Reply($"Title {sent.Count}");
         });
-        var service = Service(repository, EmptyBoard(), handler);
+        var events = new Mock<IAppEventBus>();
+        var service = Service(repository, EmptyBoard(), handler, events: events.Object);
         await service.ProcessOneAsync(Ct);
-        Assert.Equal($"{ConversationTitleClient.UserTextHeading}\n{new string('a', 300)}", sent);
-        Assert.Equal("First title", (await repository.GetSessionDisplayInfoAsync("session")).DisplayName);
+        Assert.Equal($"{ConversationTitleClient.UserTextHeading}\n{new string('a', 300)}", sent[0]);
+        Assert.Equal("Title 1", (await repository.GetSessionDisplayInfoAsync("session")).DisplayName);
 
-        // However much the user writes afterwards, the conversation has had its one request.
-        for (var message = 2; message <= 12; message++)
-            await repository.InsertUserInputAsync("session", message, new string('b', 500), null);
+        for (var message = 2; message <= 13; message++)
+        {
+            await repository.InsertUserInputAsync("session", message, $"Current topic message {message}", null);
+            await service.ProcessOneAsync(Ct);
+            Assert.Equal(1 + (message - 1) / 4, handler.Count);
+        }
+        Assert.Equal($"{ConversationTitleClient.RecentUserTextHeading}\n" +
+            string.Join('\n', Enumerable.Range(10, 4).Select(n => $"Current topic message {n}")), sent[^1]);
         Scalar("UPDATE Sessions SET EndedUTC='2026-10-12T13:00:00.0000000Z'");
         await service.ProcessOneAsync(Ct);
-        Assert.Equal(1, handler.Count);
-        Assert.Equal("First title", (await repository.GetSessionDisplayInfoAsync("session")).DisplayName);
+        Assert.Equal(4, handler.Count);
+        Assert.Equal("Title 4", (await repository.GetSessionDisplayInfoAsync("session")).DisplayName);
+        Assert.True((await repository.GetChatHistoryItemAsync("session", Ct))!.SessionTitleGenerated);
+        Assert.Equal(4, events.Invocations.Count(x => x.Arguments[0] as string == "session_title_updated"));
         Assert.Equal("Existing resume recap", Assert.Single((await repository.GetChatSummariesBySessionAsync("session", Ct))!).SummaryText);
+    }
+
+    [Fact]
+    public async Task InputsCapturedAfterClaimWaitForTheNextRefresh()
+    {
+        var repository = await Seed();
+        var inputs = new Mock<IUserInputStore>();
+        inputs.Setup(x => x.GetUserInputsForSessionAsync("session", It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                for (var message = 2; message <= 5; message++)
+                    await repository.InsertUserInputAsync("session", message, $"New topic {message}", null);
+                return await repository.GetUserInputsForSessionAsync("session", Ct);
+            });
+        var sent = new List<string?>();
+        var handler = new Handler(async (request, ct) =>
+        {
+            sent.Add(await SentText(request, ct));
+            return Reply("Current title");
+        });
+
+        await Service(inputs.Object, EmptyBoard(), handler).ProcessOneAsync(Ct);
+        await Service(repository, EmptyBoard(), handler).ProcessOneAsync(Ct);
+        await Service(repository, EmptyBoard(), handler).ProcessOneAsync(Ct);
+
+        Assert.Equal(2, handler.Count);
+        Assert.DoesNotContain("New topic", sent[0]);
+        Assert.Equal($"{ConversationTitleClient.RecentUserTextHeading}\n" +
+            string.Join('\n', Enumerable.Range(2, 4).Select(n => $"New topic {n}")), sent[1]);
+    }
+
+    [Fact]
+    public async Task FailedRefreshKeepsTheExistingTitleAndRetriesWithoutMoreInput()
+    {
+        var repository = await Seed();
+        var handler = new Handler((_, _) => Task.FromResult(Reply("Initial topic")));
+        await Service(repository, EmptyBoard(), handler).ProcessOneAsync(Ct);
+        for (var message = 2; message <= 5; message++)
+            await repository.InsertUserInputAsync("session", message, $"New topic {message}", null);
+        var failed = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError)));
+        await Service(repository, EmptyBoard(), failed).ProcessOneAsync(Ct);
+        Assert.Equal("Initial topic", (await repository.GetSessionDisplayInfoAsync("session")).DisplayName);
+        Assert.Equal(0L, Scalar("SELECT Cancelled FROM ConversationTitleRequests"));
+        Scalar("UPDATE ConversationTitleRequests SET RetryAfterUTC='2000-01-01T00:00:00.0000000Z'");
+
+        await Service(repository, EmptyBoard(), new Handler((_, _) => Task.FromResult(Reply("New topic")))).ProcessOneAsync(Ct);
+
+        Assert.Equal("New topic", (await repository.GetSessionDisplayInfoAsync("session")).DisplayName);
+        Assert.Equal(2L, Scalar("SELECT GenerationCount FROM ConversationTitleRequests"));
+        Assert.Equal(0L, Scalar("SELECT Attempts FROM ConversationTitleRequests"));
     }
 
     [Fact]
@@ -238,10 +296,18 @@ public sealed class ConversationTitleServiceTests : IDisposable
             && entry.Message.Contains("outcome=no_topic"));
     }
 
-    [Fact]
-    public async Task ManualRenameDuringRemoteCallWins()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ManualRenameDuringRemoteCallWins(bool refresh)
     {
         var repository = await Seed();
+        if (refresh)
+        {
+            await Service(repository, EmptyBoard(), new Handler((_, _) => Task.FromResult(Reply("Initial title")))).ProcessOneAsync(Ct);
+            for (var message = 2; message <= 5; message++)
+                await repository.InsertUserInputAsync("session", message, "New topic", null);
+        }
         var handler = new Handler(async (_, _) =>
         {
             await repository.SetSessionDisplayNameAsync("session", "My chosen name");

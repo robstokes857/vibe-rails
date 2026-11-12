@@ -1444,6 +1444,45 @@ for (const { width, mouse } of [{ width: 1280, mouse: false }, { width: 375, mou
     });
 }
 
+for (const { width, mouse } of [{ width: 1280, mouse: false }, { width: 375, mouse: true }]) {
+    test(`typing after a selected card ID stops reference search at ${width}px`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 950 });
+        await openBoard(page);
+        const searches = [];
+        await page.route('**/api/v1/board/cards/link-candidates?*', route => {
+            searches.push(new URL(route.request().url()).searchParams.get('q'));
+            return route.fulfill({ json: { cards: [{ id: 'other_card', key: 'VB-AAAAA-7', displayId: 'VIBE-7', title: 'Other card' }] } });
+        });
+        await page.route('**/api/v1/board/cards/other_card/sessions', route => route.fulfill({ json: [] }));
+        await page.getByRole('button', { name: 'Create card', exact: true }).click();
+        const composer = page.locator('[data-board-composer="description"]');
+        const input = composer.locator('textarea');
+        const popup = composer.locator('[data-board-file-popup]');
+        await input.fill('See  for details.');
+        await input.press('Home');
+        for (let i = 0; i < 4; i++) await input.press('ArrowRight');
+        await input.pressSequentially('!Other card');
+        await expect(popup.getByRole('option')).toContainText(['Other card']);
+        if (mouse) await popup.getByRole('option').click();
+        else await input.press('Enter');
+        await expect(input).toHaveValue('See !VB-AAAAA-7 for details.');
+        await expect(popup).toContainText('Reference card VIBE-7');
+        const searchCount = searches.length;
+
+        // Continue the sentence after the selected ID, leaving the session picker behind.
+        await input.press('End');
+        await input.pressSequentially(' More details.');
+        await page.waitForTimeout(300);
+        await expect(popup).toHaveCount(0);
+        expect(searches).toHaveLength(searchCount);
+        await expect(input).toHaveValue('See !VB-AAAAA-7 for details. More details.');
+
+        await input.pressSequentially(' !Other');
+        await expect(popup).toContainText('Other card');
+        expect(searches).toHaveLength(searchCount + 1);
+    });
+}
+
 for (const width of [320, 375, 768, 1024, 1280]) test(`Board descriptions share prompt highlighting and compact variables at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 950 });
     const requests = await openBoard(page);
@@ -1877,12 +1916,19 @@ test('new-card links stay in the draft and are submitted with creation', async (
     const editor = page.locator('[data-board-card-editor]');
     await editor.locator('#board-card-title').fill('Linked from the beginning');
     await editor.locator('[data-board-link-picker] > summary').click();
+    await expect(editor.locator('[data-board-link-card]')).toHaveCount(0);
+    await editor.locator('[data-board-link-search]').fill('Related');
     await editor.locator('[data-board-link-card="card_related"]').click();
     await expect(editor.locator('[data-board-linked-cards]')).toContainText('Related work');
+    await expect(editor.locator('[data-board-link-search]')).toHaveValue('');
+    await expect(editor.locator('[data-board-link-search]')).toBeFocused();
+    await expect(editor.locator('[data-board-link-card]')).toHaveCount(0);
     expect(requests.filter(r => r.method === 'POST' && r.path.startsWith('/api/v1/board/cards')
         && r.path !== '/api/v1/board/cards/activity')).toEqual([]);
     await editor.locator('[data-board-unlink-card="card_related"]').click();
     await expect(editor.locator('[data-board-linked-cards]')).not.toContainText('Related work');
+    await expect(editor.locator('[data-board-link-card]')).toHaveCount(0);
+    await editor.locator('[data-board-link-search]').fill('Related');
     await editor.locator('[data-board-link-card="card_related"]').click();
     await editor.locator('[data-board-save-card]').click();
     await expect(editor).toHaveCount(0);
@@ -3566,18 +3612,42 @@ for (const width of [1440, 520]) {
         const requests = await openBoard(page, { relatedCards: true });
         await page.getByText('Description images', { exact: true }).click();
         await page.locator('[data-board-link-picker] > summary').click();
+        const search = page.locator('[data-board-link-search]');
+        const candidateReads = () => requests.filter(request => request.path.endsWith('/links/candidates')).length;
+        await expect(page.locator('[data-board-link-status]')).toContainText('Type a card ID or title');
+        await expect(page.locator('[data-board-link-card]')).toHaveCount(0);
+        expect(candidateReads()).toBe(0);
+        await search.fill('VB-');
         await expect(page.locator('[data-board-link-card]')).toHaveCount(2);
         await expect(page.locator('[data-board-link-results] img')).toHaveCount(0);
         expect(await page.evaluate(() => window.__linkXss)).toBeUndefined();
-        await page.locator('[data-board-link-search]').fill('VB-2');
+        await search.fill('   ');
+        await expect(page.locator('[data-board-link-card]')).toHaveCount(0);
+        await expect(page.locator('[data-board-link-status]')).toContainText('Type a card ID or title');
+        await page.waitForTimeout(300);
+        expect(candidateReads()).toBe(1);
+        await search.fill('VB-2');
         await expect(page.locator('[data-board-link-card]')).toHaveCount(1);
-        await page.locator('[data-board-link-card="card_related"]').click();
+        const readsBeforeLink = candidateReads();
+        if (width === 1440) {
+            await search.press('ArrowDown');
+            await expect(page.locator('[data-board-link-card="card_related"]')).toBeFocused();
+            await page.keyboard.press('Enter');
+        } else await page.locator('[data-board-link-card="card_related"]').click();
         await expect(page.locator('[data-board-linked-cards]')).toContainText('VB-2 · Related work');
         await expect(page.locator('[data-board-linked-cards]')).toContainText('Sprint 2 · Build');
         await expect(page.locator('[data-board-count="linked-cards"]')).toHaveText('1');
         await expect(page.locator('[data-board-link-results] [data-board-link-card]')).toHaveCount(0);
+        await expect(search).toHaveValue('');
+        await expect(search).toBeFocused();
+        await expect(page.locator('[data-board-link-status]')).toContainText('Type a card ID or title');
+        await page.waitForTimeout(300);
+        expect(candidateReads()).toBe(readsBeforeLink);
         expect(requests.filter(request => request.method === 'PUT')).toHaveLength(0);
         await page.locator('[data-board-link-picker] > summary').click();
+        await page.locator('[data-board-link-picker] > summary').click();
+        await expect(page.locator('[data-board-link-card]')).toHaveCount(0);
+        expect(candidateReads()).toBe(readsBeforeLink);
         const layout = await page.locator('[data-board-card-editor]').evaluate(element => ({
             width: element.clientWidth, scrollWidth: element.scrollWidth
         }));
@@ -3603,11 +3673,13 @@ test('link navigation protects draft edits and an unsuccessful link leaves them 
     await page.getByText('Description images', { exact: true }).click();
     await page.locator('#board-card-title').fill('Unsaved title');
     await page.locator('[data-board-link-picker] > summary').click();
+    await page.locator('[data-board-link-search]').fill('Related');
     const failLink = route => route.fulfill({ status: 500, json: { error: 'Link unavailable' } });
     await page.route('**/cards/card_test/links', failLink);
     await page.locator('[data-board-link-card="card_related"]').click();
     await expect(page.locator('[data-board-count="linked-cards"]')).toHaveText('0');
     await expect(page.locator('#board-card-title')).toHaveValue('Unsaved title');
+    await expect(page.locator('[data-board-link-search]')).toHaveValue('Related');
     await page.unroute('**/cards/card_test/links', failLink);
     await page.locator('[data-board-link-card="card_related"]').click();
     await expect(page.locator('[data-board-open-linked-card="card_related"]')).toBeVisible();
@@ -4104,10 +4176,13 @@ for (const width of [1440, 390]) {
         await expect(editor.locator('[data-local-card-comments]')).toContainText('Comment saved on outside card');
         await expect(editor.getByLabel('Description', { exact: true })).toHaveValue('Preserve this unsaved description');
         await editor.locator('[data-board-link-picker] > summary').click();
+        await editor.locator('[data-board-link-search]').fill('Description');
         await editor.locator('[data-board-link-card="card_test"]').click();
         await expect(editor.locator('[data-board-linked-cards]')).toContainText('Description images');
         await editor.locator('[data-board-unlink-card="card_test"]').click();
         await expect(editor.locator('[data-board-linked-cards]')).toContainText('No cards linked');
+        await expect(editor.locator('[data-board-link-card]')).toHaveCount(0);
+        await editor.locator('[data-board-link-search]').fill('Description');
         await editor.locator('[data-board-link-card="card_test"]').click();
         expect(requests.filter(request => request.method === 'POST' && request.path.endsWith('/links')).length).toBe(2);
         expect(await editor.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);

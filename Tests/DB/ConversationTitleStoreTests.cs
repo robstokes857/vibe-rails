@@ -116,7 +116,7 @@ public sealed class ConversationTitleStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task OneTitlePerConversation_EvenUnderAnOlderRootsRefreshRule()
+    public async Task CompletedMilestoneStaysClosedWithoutMoreCapturedInput_EvenForOlderRoots()
     {
         var store = new ConversationTitleStore(ConnectionString);
         Seed();
@@ -261,7 +261,7 @@ public sealed class ConversationTitleStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task TwoMessagesTriggerTheOnlyTitle_AndLaterInputNeverAsksAgain()
+    public async Task TwoMessagesTriggerFirstTitle_ThenEveryFourInputsRefreshAcrossInstances()
     {
         var repository = new Repository(ConnectionString);
         var store = new ConversationTitleStore(ConnectionString);
@@ -271,10 +271,100 @@ public sealed class ConversationTitleStoreTests : IDisposable
         await repository.InsertUserInputAsync("new", 2, "Help with login", null);
         var first = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(DateTime.UtcNow.AddSeconds(1), Ct));
         Assert.True(await store.CompleteAsync(first, "Fix login", DateTime.UtcNow.AddSeconds(2), Ct));
-        for (var message = 3; message <= 12; message++)
+        for (var message = 3; message <= 14; message++)
+        {
             await repository.InsertUserInputAsync("new", message, new string('z', 500), null);
+            var other = new ConversationTitleStore(ConnectionString);
+            var next = await other.ClaimAsync(DateTime.UtcNow.AddSeconds(1), Ct);
+            if ((message - 2) % 4 != 0)
+            {
+                Assert.Null(next);
+                continue;
+            }
+            Assert.NotNull(next);
+            Assert.Equal((message - 2) / 4, next.Generation);
+            Assert.Equal(1, next.Attempts);
+            Assert.Null(await store.ClaimAsync(DateTime.UtcNow.AddSeconds(1), Ct));
+            Assert.True(await other.CompleteAsync(next, $"Topic {message}", DateTime.UtcNow.AddSeconds(2), Ct));
+        }
         Assert.Null(await store.ClaimAsync(DateTime.UtcNow.AddDays(1), Ct));
-        Assert.Equal(1L, Scalar("SELECT GenerationCount FROM ConversationTitleRequests"));
+        Assert.Equal(4L, Scalar("SELECT GenerationCount FROM ConversationTitleRequests"));
+    }
+
+    [Fact]
+    public async Task QueuedIndexUpgradePreservesCompletedTitles_AndNewInputReopensThem()
+    {
+        var repository = new Repository(ConnectionString);
+        var store = new ConversationTitleStore(ConnectionString);
+        await repository.CreateSessionAsync("new", "codex", null, ".", 1);
+        await repository.InsertUserInputAsync("new", 1, new string('a', 300), null);
+        var first = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(DateTime.UtcNow.AddSeconds(1), Ct));
+        await store.CompleteAsync(first, "Existing title", DateTime.UtcNow.AddSeconds(2), Ct);
+        // Shipped one-shot completion used this same closed row, with Attempts=0.
+        Execute("""
+            DROP INDEX idx_conversation_titles_queued;
+            DELETE FROM SchemaMigrations WHERE Component='conversation-titles' AND Version=5;
+            """);
+        using var legacy = SqliteConnectionFactory.Open(ConnectionString);
+        _ = new ConversationTitleStore(ConnectionString);
+        Assert.Equal(1L, Scalar("SELECT Cancelled FROM ConversationTitleRequests"));
+        Assert.Equal("Existing title", Scalar("SELECT SessionDisplayName FROM Sessions"));
+        Assert.Equal((long)StateDatabaseSchema.Generation, Scalar("PRAGMA user_version"));
+        Assert.Equal(1L, Scalar("SELECT count(*) FROM sqlite_master WHERE name='idx_conversation_titles_queued'"));
+        var schemaVersion = Scalar("PRAGMA schema_version");
+        _ = new ConversationTitleStore(ConnectionString);
+        Assert.Equal(schemaVersion, Scalar("PRAGMA schema_version"));
+        using var oldWrite = legacy.CreateCommand();
+        oldWrite.CommandText = "UPDATE ConversationTitleRequests SET CharacterCount=500";
+        Assert.Equal(1, await oldWrite.ExecuteNonQueryAsync(Ct));
+
+        for (var message = 2; message <= 4; message++)
+            await repository.InsertUserInputAsync("new", message, "Different topic", null);
+        Assert.Null(await store.ClaimAsync(DateTime.UtcNow.AddSeconds(1), Ct));
+        await repository.InsertUserInputAsync("new", 5, "Finish the new topic", null);
+        Assert.NotNull(await store.ClaimAsync(DateTime.UtcNow.AddSeconds(1), Ct));
+    }
+
+    [Fact]
+    public async Task InputsDuringARequestRemainDueAndOtherSessionsDoNotCount()
+    {
+        var repository = new Repository(ConnectionString);
+        var store = new ConversationTitleStore(ConnectionString);
+        await repository.CreateSessionAsync("new", "codex", null, ".", 1);
+        await repository.CreateSessionAsync("other", "shell", null, ".", 1);
+        await repository.InsertUserInputAsync("new", 1, new string('a', 300), null);
+        var first = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(DateTime.UtcNow.AddSeconds(1), Ct));
+        for (var message = 2; message <= 5; message++)
+        {
+            await repository.InsertUserInputAsync("other", message, "Unrelated", null);
+            await repository.InsertUserInputAsync("new", message, "Different topic", null);
+        }
+        Assert.True(await store.CompleteAsync(first, "Initial title", DateTime.UtcNow.AddSeconds(2), Ct));
+        var second = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(DateTime.UtcNow.AddSeconds(3), Ct));
+        Assert.True(await store.CompleteAsync(second, "Current title", DateTime.UtcNow.AddSeconds(4), Ct));
+        Assert.False(await store.CompleteAsync(first, "Stale title", DateTime.UtcNow.AddSeconds(5), Ct));
+        for (var message = 6; message <= 20; message++)
+            await repository.InsertUserInputAsync("other", message, "Still unrelated", null);
+        Assert.Null(await store.ClaimAsync(DateTime.UtcNow.AddDays(1), Ct));
+    }
+
+    [Fact]
+    public async Task StoppedRefreshIsNotReopenedByMoreInput()
+    {
+        var repository = new Repository(ConnectionString);
+        var store = new ConversationTitleStore(ConnectionString);
+        await repository.CreateSessionAsync("new", "codex", null, ".", 1);
+        await repository.InsertUserInputAsync("new", 1, new string('a', 300), null);
+        var first = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(DateTime.UtcNow.AddSeconds(1), Ct));
+        await store.CompleteAsync(first, "Initial title", DateTime.UtcNow.AddSeconds(2), Ct);
+        for (var message = 2; message <= 5; message++)
+            await repository.InsertUserInputAsync("new", message, "Different topic", null);
+        var refresh = Assert.IsType<ConversationTitleWork>(await store.ClaimAsync(DateTime.UtcNow.AddSeconds(3), Ct));
+        Assert.False(await store.CompleteAsync(refresh, null, DateTime.UtcNow.AddSeconds(4), Ct));
+        for (var message = 6; message <= 10; message++)
+            await repository.InsertUserInputAsync("new", message, "More context", null);
+        Assert.Null(await store.ClaimAsync(DateTime.UtcNow.AddDays(1), Ct));
+        Assert.Equal("Initial title", Scalar("SELECT SessionDisplayName FROM Sessions"));
     }
 
     [Fact]
@@ -313,7 +403,8 @@ public sealed class ConversationTitleStoreTests : IDisposable
         Assert.True((await repository.GetChatHistoryItemAsync("new", Ct))!.SessionTitleGenerated);
         Assert.True(await repository.UpdateChatHistorySessionNameAsync("new", "My title", Ct));
         Assert.False((await repository.GetChatHistoryItemAsync("new", Ct))!.SessionTitleGenerated);
-        await repository.InsertUserInputAsync("new", 2, new string('b', 1000), null);
+        for (var message = 2; message <= 6; message++)
+            await repository.InsertUserInputAsync("new", message, new string('b', 1000), null);
         Assert.Null(await store.ClaimAsync(DateTime.UtcNow.AddDays(1), Ct));
     }
 

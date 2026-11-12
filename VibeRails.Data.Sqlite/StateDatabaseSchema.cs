@@ -212,6 +212,11 @@ internal static class StateDatabaseSchema
                 CREATE INDEX idx_conversation_titles_open ON ConversationTitleRequests(RetryAfterUTC,UserInputId)
                     WHERE Cancelled=0 AND GenerationCount=0;
                 """));
+        SqliteMigrationRunner.Apply(connection, "conversation-titles", 5, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, """
+                CREATE INDEX idx_conversation_titles_queued ON ConversationTitleRequests(RetryAfterUTC,UserInputId)
+                    WHERE Cancelled=0;
+                """));
         SqliteMigrationRunner.Apply(connection, "managed-worktrees", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, """
                 CREATE TABLE ManagedWorktrees (

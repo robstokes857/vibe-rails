@@ -376,6 +376,11 @@ Agents reuse the Board provider and launch-options controls. Actions use their
 script/check fields. Automatic runs name the execution project. Mobile stacks these same
 slots without moving Save into the scroller.
 
+In the desktop Board's **Linked cards** section, **Find a card** waits for a nonblank
+search before showing candidates. An empty field shows a short search hint. After a
+successful link, clear the search and results and return focus to the field; preserve
+the query after a failed link so it can be retried.
+
 Context editors use native triangle disclosures for App, Board and Card context and
 each card type, ordered broadest first. Only the first disclosure opens by default.
 Place one primary **Save context** action below the editor; it saves changed levels

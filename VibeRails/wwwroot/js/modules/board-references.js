@@ -20,8 +20,10 @@ export function findBoardReferenceToken(value, caret) {
     const match = before.match(/(?:^|\s)(!)([^\r\n!#@\[\]()"`]{0,256})$/)
         || before.match(/(?:^|\s)(#)([^\s!#\[\]()`]{0,256})$/);
     if (match) {
-        // Spaces belong to a title search, but a completed session reference is finished.
-        if (/^\s/.test(match[2]) || SESSION_ID.test(match[2].split(/\s/)[0]) && /\s/.test(match[2])) return null;
+        // Spaces belong to a title search, but finish a card/session identifier. Otherwise
+        // prose after a selected card ID becomes a new query on every keystroke.
+        const identifier = match[2].split(/\s/)[0];
+        if (/^\s/.test(match[2]) || /\s/.test(match[2]) && (SESSION_ID.test(identifier) || CARD_ID.test(identifier))) return null;
         return { start: before.length - match[2].length - 1, query: match[2], kind: match[1] };
     }
     return null;

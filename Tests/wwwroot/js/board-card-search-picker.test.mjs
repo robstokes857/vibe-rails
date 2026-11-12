@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CardSearchPicker } from '../../../VibeRails/wwwroot/js/modules/board-card-search-picker.js';
 
-function harness() {
+function harness(options = {}) {
     const input = Object.assign(new EventTarget(), { value: '' });
     const results = Object.assign(new EventTarget(), { innerHTML: '', querySelectorAll: () => [] });
     const status = { textContent: '' };
@@ -12,6 +12,7 @@ function harness() {
     });
     const calls = [], selected = [];
     const picker = new CardSearchPicker(host, {
+        ...options,
         search(query, { signal }) {
             return new Promise((resolve, reject) => calls.push({ query, signal, resolve, reject }));
         },
@@ -37,6 +38,47 @@ test('typing clears selectable results and cancels old work before the debounce 
     h.calls[1].resolve([]);
     await latest;
     assert.equal(h.status.textContent, 'No matching cards.');
+});
+
+test('query-only pickers do not load candidates for empty or whitespace-only searches', async t => {
+    const h = harness({ searchOnEmpty: false });
+    t.after(() => h.picker.dispose());
+    for (const value of ['', '   ']) {
+        h.input.value = value;
+        const loading = h.picker.load();
+        assert.equal(h.calls.length, 0);
+        await loading;
+        assert.equal(h.results.innerHTML, '');
+        assert.match(h.status.textContent, /Type a card ID or title/);
+        h.input.dispatchEvent(new Event('input'));
+        assert.match(h.status.textContent, /Type a card ID or title/);
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
+    assert.equal(h.calls.length, 0);
+});
+
+test('clearing a query-only picker cancels pending results and still allows the next search', async t => {
+    const h = harness({ searchOnEmpty: false });
+    t.after(() => h.picker.dispose());
+    h.input.value = 'old';
+    const old = h.picker.load();
+    h.input.value = '';
+    h.input.dispatchEvent(new Event('input'));
+    assert.equal(h.calls[0].signal.aborted, true);
+    h.calls[0].resolve([{ id: 'old', key: 'VB-1', title: 'Old result' }]);
+    await old;
+    await new Promise(resolve => setTimeout(resolve, 250));
+    assert.equal(h.calls.length, 1);
+    assert.deepEqual(h.picker.candidates, []);
+    assert.equal(h.results.innerHTML, '');
+    assert.match(h.status.textContent, /Type a card ID or title/);
+
+    h.input.value = ' next ';
+    const next = h.picker.load();
+    assert.equal(h.calls[1].query, 'next');
+    h.calls[1].resolve([{ id: 'next', key: 'VB-2', title: 'Next result' }]);
+    await next;
+    assert.match(h.results.innerHTML, /Next result/);
 });
 
 test('late results and failures cannot replace a newer search, and selection uses the returned identity', async t => {

@@ -2,6 +2,8 @@ import { escapeHtml } from './utils.js';
 import { cardLabel } from './board-card-label.js';
 import { cardLocationHtml } from './board-search.js';
 
+const EMPTY_SEARCH_HINT = 'Type a card ID or title to find a card.';
+
 export function cardPickerText(card, currentBoardId) {
     return `<span class="board-side-text">
         <span class="board-side-title">${escapeHtml(cardLabel(card))}</span>
@@ -11,7 +13,8 @@ export function cardPickerText(card, currentBoardId) {
 
 /** Shared Find a card search, result rendering and cancellation for links and history. */
 export class CardSearchPicker {
-    constructor(host, { search, onSelect, onResults, isActive = () => true, currentBoardId, action = 'Select', emptyText = 'No matching cards.' }) {
+    constructor(host, { search, onSelect, onResults, isActive = () => true, currentBoardId,
+        action = 'Select', emptyText = 'No matching cards.', searchOnEmpty = true }) {
         this.input = host.querySelector('[data-board-link-search]');
         this.results = host.querySelector('[data-board-link-results]');
         this.status = host.querySelector('[data-board-link-status]');
@@ -20,6 +23,7 @@ export class CardSearchPicker {
         this.currentBoardId = currentBoardId;
         this.action = action;
         this.emptyText = emptyText;
+        this.searchOnEmpty = searchOnEmpty;
         this.onResults = onResults;
         this.candidates = [];
         this.generation = 0;
@@ -28,6 +32,10 @@ export class CardSearchPicker {
             this.cancel();
             this.candidates = [];
             this.results.innerHTML = '';
+            if (!this.searchOnEmpty && !this.input.value.trim()) {
+                this.status.textContent = EMPTY_SEARCH_HINT;
+                return;
+            }
             this.status.textContent = 'Finding cards…';
             this.timer = setTimeout(() => void this.load(), 200);
         }, { signal: this.lifetime.signal });
@@ -58,14 +66,19 @@ export class CardSearchPicker {
     async load() {
         this.cancel();
         if (this.disposed || !this.isActive()) return;
+        this.candidates = [];
+        this.results.innerHTML = '';
+        const query = this.input.value.trim();
+        if (!this.searchOnEmpty && !query) {
+            this.status.textContent = EMPTY_SEARCH_HINT;
+            return;
+        }
         const generation = this.generation;
         const abort = this.abort = new AbortController();
         const current = () => !this.disposed && !abort.signal.aborted && generation === this.generation && this.isActive();
-        this.candidates = [];
-        this.results.innerHTML = '';
         this.status.textContent = 'Finding cards…';
         try {
-            const cards = await this.search(this.input.value.trim(), { signal: abort.signal });
+            const cards = await this.search(query, { signal: abort.signal });
             if (!current()) return;
             this.candidates = cards;
             this.results.innerHTML = cards.map(card => `<div class="board-side-row">

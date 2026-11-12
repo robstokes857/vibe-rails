@@ -34,6 +34,22 @@ public sealed class ConversationTitleClientTests
     }
 
     [Fact]
+    public void RefreshKeepsNewestContextAndRedactsBeforeTruncating()
+    {
+        var text = "Old topic " + new string('x', 25_000) + "\nNow fix the checkout. password=hunter2";
+        var sent = ConversationTitleClient.ComposeRequest(text, null, Enabled.ApiKey, preferRecentText: true);
+        Assert.StartsWith(ConversationTitleClient.RecentUserTextHeading + "\n…", sent);
+        Assert.EndsWith("Now fix the checkout. password=XXXXX", sent);
+        Assert.DoesNotContain("Old topic", sent);
+        Assert.DoesNotContain("hunter2", sent);
+        Assert.Equal(ConversationTitleClient.RecentUserTextHeading.Length + 1 + ConversationTitleClient.MaxUserTextChars, sent.Length);
+
+        var tail = new string('t', ConversationTitleClient.MaxUserTextChars - 2);
+        var unicode = ConversationTitleClient.ComposeRequest("prefix\U0001F600" + tail, null, Enabled.ApiKey, preferRecentText: true);
+        Assert.Equal(ConversationTitleClient.RecentUserTextHeading + "\n…" + tail, unicode);
+    }
+
+    [Fact]
     public async Task RedactsTheUserTextAndSendsTheHeaderCredential()
     {
         var handler = new Handler(async (request, ct) =>
