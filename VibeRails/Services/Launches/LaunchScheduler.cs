@@ -16,6 +16,8 @@ public sealed class LaunchScheduler(IServiceScopeFactory scopes, ILaunchStore st
     IJiraPullScheduler? jira = null, IAdoPullScheduler? ado = null, IBoardSyncScheduler? sync = null) : BackgroundService
 {
     private readonly string owner = Environment.ProcessId + ":" + Guid.NewGuid().ToString("N");
+    // Each lease lasts 30 s and is renewed after 15 s, not on every 2 s tick (VIBE-321).
+    private readonly HeldLeases leases = new(TimeSpan.FromSeconds(30));
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
@@ -47,9 +49,11 @@ public sealed class LaunchScheduler(IServiceScopeFactory scopes, ILaunchStore st
         var launch = services.GetRequiredService<LaunchService>();
         var now = DateTime.UtcNow;
         var project = await services.GetRequiredService<IBoardProjectResolver>().ResolveAsync(ct);
-        await store.TryLeaseProjectAsync(LaunchService.ProjectKey(project), LaunchService.ProjectRoot(project), owner, now, TimeSpan.FromSeconds(30), ct);
+        var projectKey = LaunchService.ProjectKey(project);
+        await leases.HoldAsync("project:" + projectKey, now, (at, duration) =>
+            store.TryLeaseProjectAsync(projectKey, LaunchService.ProjectRoot(project), owner, at, duration, ct));
         await services.GetRequiredService<BoardLaunchWorkflow>().TickAsync(ct);
-        if (await store.TryLeaseAsync("scheduler", owner, now, TimeSpan.FromSeconds(30), ct))
+        if (await leases.HoldAsync("scheduler", now, (at, duration) => store.TryLeaseAsync("scheduler", owner, at, duration, ct)))
         {
             jira?.Tick(now, ct);
             ado?.Tick(now, ct);
@@ -72,7 +76,8 @@ public sealed class LaunchScheduler(IServiceScopeFactory scopes, ILaunchStore st
                 }
             }
         }
-        var openProjects = await store.GetOpenProjectRootsAsync(now, ct);
+        // Read only when a queued run needs it: an idle tick then opens launches.db once fewer.
+        IReadOnlyList<string>? openProjects = null;
         var runs = await store.GetActiveRunsAsync(ct);
         foreach (var run in runs)
         {
@@ -82,6 +87,7 @@ public sealed class LaunchScheduler(IServiceScopeFactory scopes, ILaunchStore st
             }
             else if (run.Status == "queued")
             {
+                openProjects ??= await store.GetOpenProjectRootsAsync(now, ct);
                 if (CanDispatchHere(run, project, openProjects, now)) await launcher.DispatchAsync(run.Id, ct);
             }
             else await ReconcileAsync(run, services, ct);

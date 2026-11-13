@@ -57,7 +57,9 @@ public sealed partial class BoardSearchService(ISearchIndexStore store, Func<IBe
             vector = queryEmbedding ?? await EmbedQueryAsync(query, ct);
         var candidates = new List<Candidate>();
         // Card-level grouping happens in SQL, so a long card cannot consume multiple result slots.
-        foreach (var match in store.Search("board", query, vector, int.MaxValue, projectScope, excluded))
+        // Exact-only lookups keep identity matches alone, so the store need not score every card's text.
+        foreach (var match in store.Search("board", query, vector, int.MaxValue, projectScope, excluded,
+            identityOnly: exactOnly && query.Length > 0, ct: ct))
         {
             ct.ThrowIfCancellationRequested();
             var document = match.Document.Board!;

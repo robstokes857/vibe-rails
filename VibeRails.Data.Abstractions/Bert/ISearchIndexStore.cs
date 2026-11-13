@@ -50,8 +50,11 @@ public interface ISearchIndexStore
     void CompleteChunk(SearchWork work, float[] vector, string modelVersion);
     void Fail(SearchWork work, bool source, string error);
     void Release(SearchWork work, bool source);
+    /// <param name="identityOnly">Match documents by identity (id, key, display id) alone, so an exact lookup skips the text scan.</param>
+    /// <param name="ct">Interrupts the running SQLite statement when cancelled.</param>
     IReadOnlyList<SearchMatch> Search(string kind, string query, float[]? embedding, int count,
-        string? projectScope = null, IReadOnlyCollection<string>? excluded = null);
+        string? projectScope = null, IReadOnlyCollection<string>? excluded = null, bool identityOnly = false,
+        CancellationToken ct = default);
     IReadOnlyList<SearchDocument> ReadDocuments(string kind, int skip = 0, int take = 100,
         IReadOnlyCollection<string>? ids = null, string? sessionId = null, long? userInputId = null);
     IReadOnlyList<SearchMatch> ReadSessionChunks(int skip, int take, string? sessionId = null, int? chunk = null);

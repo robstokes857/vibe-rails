@@ -56,29 +56,49 @@ public sealed partial class SqliteSearchIndexStore(string databasePath, string s
     {
         Initialize();
         using var db = Open();
-        using var tx = db.BeginTransaction();
         var table = source ? "SearchSources" : "SearchChunks";
-        var versionColumn = source ? "ChunkVersion" : "ModelVersion";
-        using var read = Command(db, $"""
-            SELECT w.Id,w.Text,{(source ? "w.Title" : "''")},w.Hash
-            FROM {table} w
-            {(source ? "" : "JOIN SearchSources s ON s.Id=w.SourceId")}
-            JOIN SearchDocuments d ON d.Id={(source ? "w" : "s")}.DocumentId
-            WHERE d.Kind=$kind AND (w.{versionColumn} IS NULL OR w.{versionColumn}<>$version)
-                AND w.LeaseUntil<=$now AND w.RetryAt<=$now
-                {(source ? "" : "AND s.ChunkVersion=$chunkVersion")}
-            ORDER BY w.Attempts,w.Id LIMIT $count
-            """, ("$kind", kind), ("$version", version), ("$now", Now), ("$count", Math.Clamp(count, 1, 100)),
-            ("$chunkVersion", SearchIndexVersions.Chunks));
+        var now = Now;
+        (string, object?)[] parameters = [("$kind", kind), ("$version", version), ("$now", now),
+            ("$count", Math.Clamp(count, 1, 100)), ("$chunkVersion", SearchIndexVersions.Chunks)];
+        // An idle round finds nothing. A plain read answers that without taking the writer lock that
+        // BeginTransaction (BEGIN IMMEDIATE) would wait for and hold (VIBE-321).
+        using (var probe = Command(db, ClaimSql(source, probe: true), parameters))
+            if (probe.ExecuteScalar() is null) return [];
+        using var tx = db.BeginTransaction();
+        using var read = Command(db, ClaimSql(source), parameters);
         var rows = new List<SearchWork>();
         using (var reader = read.ExecuteReader())
             while (reader.Read()) rows.Add(new(reader.GetString(0), kind, reader.GetString(1), reader.GetString(2),
                 reader.GetString(3), Guid.NewGuid().ToString("N")));
         foreach (var row in rows)
             Execute(db, $"UPDATE {table} SET Lease=$lease,LeaseUntil=$until WHERE Id=$id",
-                ("$lease", row.Lease), ("$until", Now + LeaseMilliseconds), ("$id", row.Id));
+                ("$lease", row.Lease), ("$until", now + LeaseMilliseconds), ("$id", row.Id));
         tx.Commit();
         return rows;
+    }
+
+    /// <summary>
+    /// The claim query. <c>IS NULL OR &lt; OR &gt;</c> is the indexable spelling of "not this version":
+    /// each term is a range on IX_SearchSources_Work / IX_SearchChunks_Work, where <c>&lt;&gt;</c> made
+    /// SQLite read every source row, text included (VIBE-321). The unary <c>+</c> keeps the Kind and
+    /// chunker-version equalities from luring the planner into starting at every document of the kind.
+    /// Rows are the same as the <c>IS NULL OR &lt;&gt;</c> query it replaced; SearchClaimQueryTests
+    /// keeps that one as the reference and checks the plan.
+    /// </summary>
+    internal static string ClaimSql(bool source, bool probe = false)
+    {
+        var table = source ? "SearchSources" : "SearchChunks";
+        var version = source ? "w.ChunkVersion" : "w.ModelVersion";
+        return $"""
+            SELECT {(probe ? "1" : $"w.Id,w.Text,{(source ? "w.Title" : "''")},w.Hash")}
+            FROM {table} w
+            {(source ? "" : "JOIN SearchSources s ON s.Id=w.SourceId")}
+            JOIN SearchDocuments d ON d.Id={(source ? "w" : "s")}.DocumentId
+            WHERE ({version} IS NULL OR {version}<$version OR {version}>$version)
+                AND w.LeaseUntil<=$now AND w.RetryAt<=$now AND +d.Kind=$kind
+                {(source ? "" : "AND +s.ChunkVersion=$chunkVersion")}
+            {(probe ? "LIMIT 1" : "ORDER BY w.Attempts,w.Id LIMIT $count")}
+            """;
     }
 
     public bool Renew(SearchWork work, bool source)

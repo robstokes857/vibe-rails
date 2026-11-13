@@ -78,34 +78,48 @@ public sealed partial class SqliteSearchIndexStore
         VibeRails.DTOs.StorageJsonSerializerContext.Default.ListString);
 
     public IReadOnlyList<SearchMatch> Search(string kind, string query, float[]? embedding, int count,
-        string? projectScope = null, IReadOnlyCollection<string>? excluded = null)
+        string? projectScope = null, IReadOnlyCollection<string>? excluded = null, bool identityOnly = false,
+        CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         if (!File.Exists(databasePath)) return [];
         var matches = new Dictionary<string, SearchMatch>(StringComparer.Ordinal);
         using var db = Open(true);
+        // A cancelled search stops inside SQLite instead of finishing a scan nobody will read (VIBE-321).
+        using var interrupt = Interrupt(db, ct);
         var words = Regex.Matches(query, @"[\p{L}\p{N}]+")
             .Select(match => match.Value).Where(word => word.Length > 1 && !StopWords.Contains(word)).Distinct(StringComparer.OrdinalIgnoreCase).Take(40).ToArray();
         var fts = words.Length == 0 ? "\"\"" : string.Join(" OR ", words.Select(word => "\"" + word.Replace("\"", "\"\"") + "\""));
         // Exact identities and literal substrings supplement FTS. Full sources preserve phrases that
         // cross model chunk boundaries. All eligibility filters precede ranking and limits.
+        // Every Board source is a candidate, so Boards skip the text filter, and the inner select lowers
+        // each row's text once: OFFSET 0 keeps SQLite from flattening it into the scoring select, which
+        // would repeat lower() on the full text for the query and again for every word (VIBE-321).
+        // KeywordSearchQueryTests keeps the query this replaced as the reference.
+        var textFilter = kind == "board" ? "" : """
+            AND ($query='' OR instr(lower(coalesce(c.Text,s.Text)),lower($query))>0
+              OR s.rowid IN (SELECT rowid FROM SearchSources_fts WHERE SearchSources_fts MATCH $fts))
+            """;
+        // An exact-only lookup matches identities alone: score only the sources of those documents.
+        var identityFilter = identityOnly
+            ? $"AND d.Id IN (SELECT i.Id FROM SearchDocuments i WHERE i.Kind=$kind AND ({IdentityMatch("i")}))" : "";
         using var lexical = Command(db, $"""
             WITH candidates AS (
-                SELECT d.Id,s.Id AS SourceId,c.Id AS ChunkId,coalesce(c.Position,0) AS Position,
+                SELECT Id,SourceId,ChunkId,Position,
                     CASE WHEN $query='' THEN 0 ELSE
-                        3*(instr(lower(coalesce(c.Text,s.Text)),lower($query))>0)+
-                        6*(instr(lower(s.Title),lower($query))>0)+
-                        (SELECT count(*) FROM json_each($words) WHERE instr(lower(coalesce(c.Text,s.Text)),lower(value))>0)
-                    END AS score,
-                    CASE WHEN lower(d.Id)=lower($query) OR
-                        lower(json_extract(d.Metadata,'$.board.key'))=lower($query) OR
-                        lower(json_extract(d.Metadata,'$.board.displayId'))=lower($query) OR
-                        lower(json_extract(d.Metadata,'$.board.keyPrefix')||'-'||json_extract(d.Metadata,'$.board.number'))=lower($query) OR
-                        lower('VB-'||json_extract(d.Metadata,'$.board.number'))=lower($query) THEN 1 ELSE 0 END AS identityMatch
-                FROM SearchDocuments d JOIN SearchSources s ON s.DocumentId=d.Id
-                LEFT JOIN SearchChunks c ON d.Kind='session' AND c.SourceId=s.Id AND s.ChunkVersion=$chunks
-                WHERE {Eligibility}
-                  AND ($query='' OR instr(lower(coalesce(c.Text,s.Text)),lower($query))>0 OR d.Kind='board'
-                    OR s.rowid IN (SELECT rowid FROM SearchSources_fts WHERE SearchSources_fts MATCH $fts))
+                        3*(instr(body,lower($query))>0)+
+                        6*(instr(title,lower($query))>0)+
+                        (SELECT count(*) FROM json_each($words) WHERE instr(body,lower(value))>0)
+                    END AS score,identityMatch
+                FROM (
+                    SELECT d.Id,s.Id AS SourceId,c.Id AS ChunkId,coalesce(c.Position,0) AS Position,
+                        CASE WHEN $query='' THEN '' ELSE lower(coalesce(c.Text,s.Text)) END AS body,
+                        CASE WHEN $query='' THEN '' ELSE lower(s.Title) END AS title,
+                        CASE WHEN {IdentityMatch("d")} THEN 1 ELSE 0 END AS identityMatch
+                    FROM SearchDocuments d JOIN SearchSources s ON s.DocumentId=d.Id
+                    LEFT JOIN SearchChunks c ON d.Kind='session' AND c.SourceId=s.Id AND s.ChunkVersion=$chunks
+                    WHERE {Eligibility} {identityFilter} {textFilter}
+                    LIMIT -1 OFFSET 0)
             ), ranked AS (
                 SELECT *,row_number() OVER(PARTITION BY Id ORDER BY score DESC,Position) AS rank FROM candidates
             ) SELECT d.Metadata,substr(coalesce(c.Text,s.Text),max(1,coalesce(
@@ -117,8 +131,8 @@ public sealed partial class SqliteSearchIndexStore
             """, Parameters(kind, projectScope, excluded).Concat(new (string, object?)[] {
                 ("$query", query), ("$words", Strings(words)), ("$fts", fts), ("$count", count), ("$chunks", SearchIndexVersions.Chunks) }).ToArray());
         if (embedding is null || query.Length > 0)
-        using (var reader = lexical.ExecuteReader())
-            while (reader.Read())
+        using (var reader = Cancellable(lexical.ExecuteReader, ct))
+            while (Cancellable(reader.Read, ct))
             {
                 var doc = Document(reader.GetString(0));
                 matches[doc.Id] = new(doc, reader.GetString(1), reader.GetDouble(2), 0, reader.GetInt32(3));
@@ -128,6 +142,7 @@ public sealed partial class SqliteSearchIndexStore
             try
             {
                 using var vectors = BertVectorDatabase.Open(databasePath, readOnly: true);
+                using var vectorInterrupt = Interrupt(vectors, ct);
                 // Native sqlite-vec distance evaluation and SQL grouping avoid materializing vectors
                 // or letting a long document consume the hit budget. Project filtering happens first.
                 // One sequential pass over vec_search_chunks: joining it per chunk is a vec0 primary-key
@@ -151,8 +166,8 @@ public sealed partial class SqliteSearchIndexStore
                     """, Parameters(kind, projectScope, excluded).Concat(new (string, object?)[] {
                         ("$vector", BertVectorDatabase.Serialize(embedding)), ("$model", SearchIndexVersions.Model),
                         ("$chunks", SearchIndexVersions.Chunks), ("$threshold", kind == "board" ? .45 : -1), ("$count", count) }).ToArray());
-                using var reader = semantic.ExecuteReader();
-                while (reader.Read())
+                using var reader = Cancellable(semantic.ExecuteReader, ct);
+                while (Cancellable(reader.Read, ct))
                 {
                     var doc = Document(reader.GetString(0));
                     if (matches.TryGetValue(doc.Id, out var existing))
@@ -164,6 +179,27 @@ public sealed partial class SqliteSearchIndexStore
             { Serilog.Log.Warning(ex, "Search vectors unavailable; retaining keyword matches"); }
         }
         return matches.Values.ToArray();
+    }
+
+    /// <summary>Identity comparison for a document alias: id, stored key, display id, prefix-number and VB-number.</summary>
+    private static string IdentityMatch(string d) => $"""
+        lower({d}.Id)=lower($query) OR
+        lower(json_extract({d}.Metadata,'$.board.key'))=lower($query) OR
+        lower(json_extract({d}.Metadata,'$.board.displayId'))=lower($query) OR
+        lower(json_extract({d}.Metadata,'$.board.keyPrefix')||'-'||json_extract({d}.Metadata,'$.board.number'))=lower($query) OR
+        lower('VB-'||json_extract({d}.Metadata,'$.board.number'))=lower($query)
+        """;
+
+    /// <summary>Interrupts the connection's running statement when <paramref name="ct"/> is cancelled.</summary>
+    private static CancellationTokenRegistration Interrupt(SqliteConnection db, CancellationToken ct) =>
+        ct.CanBeCanceled ? ct.Register(static state => SQLitePCL.raw.sqlite3_interrupt(((SqliteConnection)state!).Handle), db) : default;
+
+    /// <summary>Reports an interrupted statement as the cancellation that caused it.</summary>
+    private static T Cancellable<T>(Func<T> step, CancellationToken ct)
+    {
+        try { return step(); }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == SQLitePCL.raw.SQLITE_INTERRUPT && ct.IsCancellationRequested)
+        { throw new OperationCanceledException("Search was cancelled.", ex, ct); }
     }
 
     private static string Eligibility => """
