@@ -738,7 +738,7 @@ test('history polling preserves expanded configuration, evidence and focused con
     await page.screenshot({path:testInfo.outputPath('saved-agent-history.png')});
 });
 
-test('ordered lane selections preserve gates and lock editing during writes',async({page})=>{
+test('ordered lane selections retain compatibility data and lock editing during writes',async({page})=>{
     const state=await setup(page);
     state.presets.push({id:'p1',name:'Review',cli:'codex',initialPrompt:'Review',enabled:true,revision:1},{id:'p2',name:'Test',cli:'codex',initialPrompt:'Test',enabled:true,revision:1});
     let saved,release;const pending=new Promise(resolve=>{release=resolve;});
@@ -749,9 +749,10 @@ test('ordered lane selections preserve gates and lock editing during writes',asy
     await page.evaluate(async()=>{const {mountLaunchLane}=await import('/js/modules/launch-lane-editor.js');const host=document.createElement('div');document.querySelector('#app-content').replaceChildren(host);mountLaunchLane(window.app,host,'lane');});
     await page.getByRole('button',{name:'Move Test up',exact:true}).click();
     await page.getByRole('button',{name:'Save lane settings',exact:true}).click();
-    await expect(page.locator('[data-lane-gate]').first()).toBeDisabled();
+    await expect(page.locator('[data-lane-gate]')).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'Move Review up',exact:true})).toBeDisabled();
     expect(saved).toMatchObject({revision:4,selections:[{definitionId:'p2',gate:'result'},{definitionId:'p1',gate:'review'}]});release();
-    await expect(page.locator('[data-lane-gate]').first()).toBeEnabled();
+    await expect(page.getByRole('button',{name:'Move Review up',exact:true})).toBeEnabled();
 });
 
 for (const [kind, name, scope] of [['vca', 'VCA check', 'working-tree'], ['code-quality', 'Code quality check', 'card']])
@@ -790,7 +791,8 @@ test(`lane picker adds ${kind} without running or saving the lane early`, async 
     expect(savedLane).toBeUndefined();
     expect(state.runs).toHaveLength(0);
     await page.locator('[data-lane-save]').click();
-    await expect.poll(() => savedLane).toMatchObject({ revision: 2, selections: [{ definitionId: 'vca', definitionType: 'action', gate: 'result' }] });
+    await expect.poll(() => savedLane).toMatchObject({ revision: 2, selections: [{ definitionId: 'vca', definitionType: 'action' }] });
+    expect(savedLane.selections[0]).not.toHaveProperty('gate');
     await page.evaluate(() => window.disposeLane());
     await expect(page.locator('.launch-lane-dropdown')).toHaveCount(0);
 });

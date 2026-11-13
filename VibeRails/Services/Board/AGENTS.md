@@ -225,9 +225,14 @@ See [the starter contract](ARCHITECTURE.md#new-board-review-defaults-vibe-23).
 
 ## Ordered and waiting lane Automations
 
-All lane Automations run in selected order, with no mode setting. Preserve explicit LLM pass/fail
-via `report_automation_step`, per-entry user skips and stop-before-continue behavior. Keep workflow
-snapshots and append-only receipts behind `IBoardStore`; do not infer approval from process exit.
+Current lane Agents and Actions run in selected order, with no continuation-result setting.
+`BoardLaunchWorkflow` waits for the previous process to end, then continues after any terminal
+outcome, even with a failed or missing report. Queued, claimed, running and uncertain processes
+hold the next entry. Preserve explicit LLM pass/fail via `report_automation_step`, per-entry user
+skips and stop-before-continue behavior. Keep workflow snapshots and append-only receipts behind
+`IBoardStore`; process completion permits the next run but does not approve a review.
+See the [current launch contract](../Launches/README.md). The Job details below describe the
+retained legacy path.
 The lane panel's Move up/down controls save the complete ordered selection with its revision.
 Pure reorders may retain paused or unavailable selections while omitting soft-deleted hidden Jobs;
 membership changes still validate every

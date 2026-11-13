@@ -90,7 +90,7 @@ export class BoardLaneAgents {
             <div class="board-lane-agents-heading-copy"><h2 id="board-lane-agents-title">Agents and Actions</h2><p>On entry to <strong>${escapeHtml(column.name)}</strong></p></div>
             <button type="button" class="board-lane-agents-action" data-agent-action="close" aria-label="Close lane panel">${icon('xmark')}</button>
         </header>
-        <p class="board-lane-agents-help">Runs top to bottom after a card stays here for 60 seconds. Each waits for the result you choose below.</p>
+        <p class="board-lane-agents-help">Runs top to bottom after a card stays here for 60 seconds. Each waits for the previous run to finish, regardless of its result.</p>
         <div data-lane-agents-content>Loading agents…</div>
         <section data-lane-running aria-label="Running agents" aria-live="polite"></section>`;
         this.anchor = button;

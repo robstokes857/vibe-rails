@@ -4437,13 +4437,14 @@ async function installLaunchFixture(page, { conflict = false } = {}) {
     return state;
 }
 
-for (const width of [320,375,768,1024]) test(`unified lane order and gates persist at ${width}px`,async({page},testInfo)=>{
+for (const width of [320,375,768,1024]) test(`unified lane order persists without continuation controls at ${width}px`,async({page},testInfo)=>{
     await page.setViewportSize({width,height:900});await openBoard(page);
     const state=await installLaunchFixture(page);
     const trigger=page.getByRole('button',{name:'Agents and Actions on entry to Ready',exact:true});await trigger.click();
     const panel=page.locator('.board-lane-agents-panel');
     await expect(panel.locator('[data-lane-add-choice] option[value="preset_quick"]')).toHaveCount(0);
-    await expect(panel.locator('[data-lane-index="1"] [data-lane-gate] option[value="review"]')).toHaveCount(0);
+    await expect(panel.locator('[data-lane-gate]')).toHaveCount(0);
+    await expect(panel).toContainText('Each waits for the previous run to finish, regardless of its result.');
     const up=panel.getByRole('button',{name:'Move Check up',exact:true});await up.focus();await up.press('Enter');
     await panel.getByRole('button',{name:'Save lane settings',exact:true}).click();
     await expect.poll(()=>state.writes.length).toBe(1);

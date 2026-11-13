@@ -774,6 +774,11 @@ The desktop footer (`.app-footer`) is hidden on every view. Put persistent statu
 
 #### Desktop lane run picker
 
+Lane Agents and Actions run in the displayed top-to-bottom order. Each waits for
+the previous process to finish, then continues regardless of its result. Show
+numbered rows with Up, Down and Remove controls; do not offer a continuation-result
+selector. Keep process outcomes and review results visible in run activity.
+
 The lane settings **Add to this lane** picker shows a decorative icon beside each
 agent, script or check, including the selected value. Reuse the provider artwork
 and filters for agents, the existing code icon for scripts, and the VibeRails

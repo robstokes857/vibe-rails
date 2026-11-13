@@ -75,7 +75,7 @@ public sealed class LaunchBoardStorageTests : IDisposable
     }
 
     [Fact]
-    public async Task FailedReviewOnOlderCard_DoesNotStarveNewerCardsSharedDefinition()
+    public async Task CompletedReviewsReleaseBothCardsRegardlessOfVerdict()
     {
         var runs = new LaunchStore($"Data Source={Path.Combine(root, "launches.db")};Pooling=False");
         var launches = new LaunchService(runs, Mock.Of<IAutomationScriptService>(), board);
@@ -105,14 +105,77 @@ public sealed class LaunchBoardStorageTests : IDisposable
 
         await new BoardLaunchWorkflow(board, runs, launches, null!).TickAsync(Ct);
 
-        var blocked = (await board.GetLaunchEventsAsync(root, older.Id, Ct))[1];
+        var continued = (await board.GetLaunchEventsAsync(root, older.Id, Ct))[1];
         var queued = (await board.GetLaunchEventsAsync(root, newer.Id, Ct))[1];
-        Assert.Null(blocked.RunId);
+        Assert.NotNull(continued.RunId);
         Assert.NotNull(queued.RunId);
         var run = (await runs.GetRunAsync(queued.RunId, Ct))!;
         Assert.Equal(next.Id, run.DefinitionId);
         Assert.Equal(newer.Id, run.Snapshot.Context.CardId);
         Assert.Equal("queued", run.Status);
+    }
+
+    [Theory]
+    [InlineData("failed")]
+    [InlineData("cancelled")]
+    [InlineData("timed-out")]
+    [InlineData("interrupted")]
+    [InlineData("succeeded")]
+    public async Task LaneRunsInOrderAfterAnyOutcomeAndWithoutAReportedResult(string outcome)
+    {
+        var runs = new LaunchStore($"Data Source={Path.Combine(root, "launches.db")};Pooling=False");
+        var launches = new LaunchService(runs, Mock.Of<IAutomationScriptService>(), board);
+        var first = (await launches.SavePresetAsync(null, new("Review", "", "codex", InitialPrompt: "Review"), Ct)).Preset;
+        var second = (await launches.SavePresetAsync(null, new("Work", "", "codex", InitialPrompt: "Work"), Ct)).Preset;
+        var third = (await launches.SavePresetAsync(null, new("Check", "", "codex", InitialPrompt: "Check"), Ct)).Preset;
+        await board.EnsureDefaultColumnsAsync(root, Ct);
+        var lane = (await board.GetColumnsAsync(root, Ct))[0];
+        await board.SaveLaunchLaneAsync(root, lane.Id, new([
+            new(first.Id, "preset", "review"), new(second.Id, "preset", "result"), new(third.Id, "preset", "process")], 0), Ct);
+        var card = await board.CreateCardAsync(root, new(lane.Id, "Card", "", null, "medium", null, [], false), Ct);
+        var workflow = new BoardLaunchWorkflow(board, runs, launches, null!);
+
+        await workflow.TickAsync(Ct);
+        Assert.All(await board.GetLaunchEventsAsync(root, card.Id, Ct), entry => Assert.Null(entry.RunId));
+        await using (var db = new SqliteConnection($"Data Source={Path.Combine(root, "board.db")};Pooling=False"))
+        {
+            await db.OpenAsync(Ct);
+            await using var due = db.CreateCommand();
+            due.CommandText = "UPDATE BoardLaunchEvents SET DueUnixMs=1;";
+            await due.ExecuteNonQueryAsync(Ct);
+        }
+
+        await workflow.TickAsync(Ct);
+        var entries = await board.GetLaunchEventsAsync(root, card.Id, Ct);
+        var firstRun = entries[0].RunId!;
+        Assert.NotNull(firstRun);
+        Assert.All(entries.Skip(1), entry => Assert.Null(entry.RunId));
+        var claim = (await runs.TryClaimAsync(firstRun, 3, 11, DateTime.UtcNow, Ct))!;
+        Assert.True(await runs.StartAsync(claim, "session_first", "Review", root, 11, DateTime.UtcNow, ct: Ct));
+        await board.ReportLaunchEventAsync(root, card.Id, entries[0].Id, "failed", "Review found issues", "session_first", null, ct: Ct);
+        await workflow.TickAsync(Ct);
+        Assert.All((await board.GetLaunchEventsAsync(root, card.Id, Ct)).Skip(1), entry => Assert.Null(entry.RunId));
+
+        Assert.True(await runs.CompleteAsync(claim, outcome, ct: Ct));
+        // A new scheduler instance must pick up the stored outcome without a settings save.
+        workflow = new BoardLaunchWorkflow(board, runs, launches, null!);
+        await workflow.TickAsync(Ct);
+        entries = await board.GetLaunchEventsAsync(root, card.Id, Ct);
+        Assert.Equal(outcome, entries[0].ProcessStatus);
+        Assert.Equal("failed", entries[0].Verdict);
+        var secondRun = (await runs.GetRunAsync(entries[1].RunId!, Ct))!;
+        Assert.NotNull(secondRun);
+        Assert.Null(entries[2].RunId);
+        await LaunchBoardValidation.ValidateAsync(board, secondRun, Ct);
+
+        claim = (await runs.TryClaimAsync(secondRun.Id, 3, 11, DateTime.UtcNow, Ct))!;
+        Assert.True(await runs.CompleteAsync(claim, "succeeded", ct: Ct));
+        await workflow.TickAsync(Ct);
+        entries = await board.GetLaunchEventsAsync(root, card.Id, Ct);
+        Assert.Null(entries[1].Verdict);
+        Assert.NotNull(entries[2].RunId);
+        Assert.Equal(firstRun, entries[0].RunId);
+        Assert.Equal(lane.Id, (await board.FindCardAsync(root, card.Id, Ct))!.ColumnId);
     }
 
     [Fact]

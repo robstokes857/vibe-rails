@@ -208,13 +208,34 @@ public sealed class LaunchTests : IDisposable
         Assert.Throws<LaunchValidationException>(() => LaunchOptionBuilder.Build(p with { Cli = LLM.Codex }));
     }
 
-    [Fact]
-    public void SuccessfulExitDoesNotPassResultOrReviewGate()
+    [Theory]
+    [InlineData("succeeded", true)]
+    [InlineData("failed", true)]
+    [InlineData("cancelled", true)]
+    [InlineData("timed-out", true)]
+    [InlineData("interrupted", true)]
+    [InlineData("queued", false)]
+    [InlineData("claimed", false)]
+    [InlineData("running", false)]
+    [InlineData("uncertain", false)]
+    [InlineData("unknown", false)]
+    public void LaneContinuationWaitsForProcessEndRegardlessOfGateOrVerdict(string status, bool releases)
     {
         var entry = new BoardLaunchEvent("event", Project, "card", "column", "board", "id", "preset", "review", 0, DateTime.UtcNow, true, "run", "succeeded", null, false, null);
+        foreach (var gate in new[] { "process", "result", "review" })
+        foreach (var verdict in new string?[] { null, "passed", "failed", "reviewing", "fixing" })
+        foreach (var skip in new[] { false, true })
+            Assert.Equal(releases, BoardLaunchWorkflow.ReleasesNext(entry with
+            {
+                ProcessStatus = status, Gate = gate, Verdict = verdict, SkipRequested = skip
+            }));
+    }
+
+    [Fact]
+    public void SkippingAnUnstartedLaneEntryReleasesItsSuccessor()
+    {
+        var entry = new BoardLaunchEvent("event", Project, "card", "column", "board", "id", "preset", "result", 0, DateTime.UtcNow, true, null, "queued", null, false, null);
         Assert.False(BoardLaunchWorkflow.ReleasesNext(entry));
-        Assert.True(BoardLaunchWorkflow.ReleasesNext(entry with { Verdict = "passed" }));
-        Assert.False(BoardLaunchWorkflow.ReleasesNext(entry with { Verdict = "passed", ProcessStatus = "running" }));
         Assert.True(BoardLaunchWorkflow.ReleasesNext(entry with { SkipRequested = true }));
     }
 

@@ -49,7 +49,7 @@ export function mountLaneAgentBody({
                     <div class="launch-run-actions">
                         ${run?.sessionId ? `<button type="button" class="btn btn-sm btn-link" data-lane-running-id="${escapeHtml(entry.id)}">Open session</button>` : ''}
                         ${!entry.skipRequested && entry.verdict !== 'passed' ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-lane-skip="${escapeHtml(entry.id)}">Stop and skip</button>` : ''}
-                        ${run && isRunFinished(run) && !entry.skipRequested && (run.status !== 'succeeded' || (entry.verdict !== 'passed' && entry.gate !== 'process')) ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-lane-retry="${escapeHtml(entry.id)}">Retry</button>` : ''}
+                        ${run && isRunFinished(run) && !entry.skipRequested && (run.status !== 'succeeded' || entry.verdict !== 'passed') ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-lane-retry="${escapeHtml(entry.id)}">Retry</button>` : ''}
                     </div>
                 </article>`
                     )

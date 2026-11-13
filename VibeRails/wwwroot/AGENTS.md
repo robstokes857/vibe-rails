@@ -89,12 +89,17 @@ Launch status update.
 Longer variable/worktree explanations live in a collapsed disclosure; touch targets stay 44px.
 Keep this list aligned with launch placeholder support; retired step tokens stay absent.
 
-`launch-lane-editor.js` keeps ordered definition IDs and process/result/review gates.
+`launch-lane-editor.js` keeps ordered definition IDs with no continuation-result
+selector. Each run waits for the previous process to finish, regardless of its
+outcome or reported verdict. Existing gate metadata round-trips for compatibility;
+new selections omit it. Run activity still shows process outcomes and reports.
 Its add picker uses the shared Tom Select helper, including search, viewport positioning,
 Escape and disposal. Menu options and the selected value reuse provider logos for agents,
 the code icon for scripts and the VibeRails mark for saved/new VCA and code-quality checks.
 VCA and code-quality checks can be created from this picker; creating
 a definition does not save the lane order or run it. The lane save remains revision-checked.
+The **Create an agent in AI Agents** link below the picker opens the AI Agents page
+through guarded app navigation, preserving the unsaved-lane confirmation and cleanup.
 New VCA checks use working-tree scope; new code-quality checks use card-linked commits.
 `board-lane-agent-body.js` polls current per-card lane progress, with explicit verdicts,
 retry, skip and session links. `board-card-automations.js` queues definitions with the

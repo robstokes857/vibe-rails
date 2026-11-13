@@ -3,7 +3,7 @@ import { LaunchApi } from './launch-api.js';
 import { launchPresentation } from './launch-presentation.js';
 import { boardBrandLogo } from './board-brand.js';
 
-/** Ordered definitions and explicit gates, shared by lane settings and the lane popup. */
+/** Ordered definitions, shared by lane settings and the lane popup. */
 export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
     const api = new LaunchApi(app),
         abort = new AbortController();
@@ -34,7 +34,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
             confirming = true;
             void confirmDialog({
                 title: 'Discard lane changes?',
-                message: 'Your unsaved run order and gates will be lost.',
+                message: 'Your unsaved lane changes will be lost.',
                 confirmLabel: 'Discard',
                 danger: true
             }).then((ok) => {
@@ -68,13 +68,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                         item.id === selection.definitionId &&
                         item.definitionType === selection.definitionType
                 );
-                const gates = [
-                    ['process', 'Process succeeds'],
-                    ['result', 'Explicit result passes']
-                ];
-                if (selection.definitionType === 'preset')
-                    gates.push(['review', 'Saved review passes']);
-                return `<div class="launch-lane-row" data-lane-index="${index}"><div class="launch-lane-title"><span class="launch-lane-number" aria-hidden="true">${index + 1}</span><strong>${escapeHtml(item?.name || 'Unavailable / retired selection')}</strong></div>${!item?.canRunAutomatically ? '<p class="text-warning">Unavailable for automatic runs. Remove or replace this selection.</p>' : ''}<label>Continue after<select class="form-select" data-lane-gate>${gates.map(([value, label]) => `<option value="${value}"${selection.gate === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label><div class="launch-run-actions"><button class="btn btn-sm btn-secondary" data-lane-move="-1"${index === 0 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} up"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Up</button><button class="btn btn-sm btn-secondary" data-lane-move="1"${index === selections.length - 1 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} down"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Down</button><button class="btn btn-sm btn-outline-danger" data-lane-remove>Remove</button></div></div>`;
+                return `<div class="launch-lane-row" data-lane-index="${index}"><div class="launch-lane-title"><span class="launch-lane-number" aria-hidden="true">${index + 1}</span><strong>${escapeHtml(item?.name || 'Unavailable / retired selection')}</strong></div>${!item?.canRunAutomatically ? '<p class="text-warning">Unavailable for automatic runs. Remove or replace this selection.</p>' : ''}<div class="launch-run-actions"><button class="btn btn-sm btn-secondary" data-lane-move="-1"${index === 0 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} up"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Up</button><button class="btn btn-sm btn-secondary" data-lane-move="1"${index === selections.length - 1 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} down"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Down</button><button class="btn btn-sm btn-outline-danger" data-lane-remove>Remove</button></div></div>`;
             })
             .join(
                 ''
@@ -85,7 +79,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
             )
             .join(
                 ''
-            )}</select></label><button class="btn btn-secondary" data-lane-add disabled>Add</button></div><div class="launch-lane-footer"><button class="btn btn-primary" data-lane-save>Save lane settings</button></div><p data-lane-error role="alert"></p>`;
+            )}</select></label><button class="btn btn-secondary" data-lane-add disabled>Add</button></div><div><a href="?view=ai-agents" class="btn btn-link btn-sm px-0" data-lane-manage-agents>Create an agent in AI Agents</a></div><div class="launch-lane-footer"><button class="btn btn-primary" data-lane-save>Save lane settings</button></div><p data-lane-error role="alert"></p>`;
         picker = enhanceSelectWithTomSelect(host.querySelector('[data-lane-add-choice]'), {
             placeholder: 'Choose an agent, script or check…',
             searchPlaceholder: 'Search agents, scripts and checks…',
@@ -138,19 +132,17 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                 host.querySelector('[data-lane-add]').disabled = busy || !event.target.value;
                 return;
             }
-            if (!busy && event.target.hasAttribute('data-lane-gate'))
-                selections[
-                    Number(
-                        event.target.closest('[data-lane-index]').dataset
-                            .laneIndex
-                    )
-                ].gate = event.target.value;
         },
         { signal: abort.signal }
     );
     host.addEventListener(
         'click',
         async (event) => {
+            if (event.target.closest('[data-lane-manage-agents]')) {
+                event.preventDefault();
+                app.navigate('ai-agents');
+                return;
+            }
             const button = event.target.closest('button');
             if (!button || busy) return;
             if (button.hasAttribute('data-lane-reload')) {
@@ -181,8 +173,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                 if (item) {
                     selections.push({
                         definitionId: item.id,
-                        definitionType: item.definitionType,
-                        gate: 'result'
+                        definitionType: item.definitionType
                     });
                     dirty = true;
                 }
@@ -244,13 +235,6 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                     unlock();
                 }
             }
-        },
-        { signal: abort.signal }
-    );
-    host.addEventListener(
-        'change',
-        (event) => {
-            if (!busy && event.target.hasAttribute('data-lane-gate')) dirty = true;
         },
         { signal: abort.signal }
     );

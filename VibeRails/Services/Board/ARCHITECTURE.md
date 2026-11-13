@@ -1421,6 +1421,17 @@ completed Automation hosts after their recording flush; saved recordings remain 
 
 ## Ordered lane workflows
 
+Current lane Agents and Actions use `BoardLaunchWorkflow` and the
+[launch contract](../Launches/README.md). They run top to bottom after the
+60-second entry delay and continue when each predecessor process ends, regardless
+of success, failure, cancellation, timeout, interruption or reported verdict.
+An active or uncertain process still holds the next entry. There is no
+continuation-result selector. Existing gate metadata and reports remain stored;
+process completion never fabricates a review pass. This applies to existing
+entries without resaving lane settings or changing the schema.
+
+The Job-based workflow details below describe the retained legacy path.
+
 Lane Automations always run in their selected top-to-bottom order for each card; there is no
 execution-mode setting. The 60-second settling period applies to entry, and each Job still allows
 one active run. Different cards may occupy different steps. A step releases its successor only

@@ -117,11 +117,11 @@ public sealed class BoardLaunchWorkflow(IBoardStore board, ILaunchStore runs, La
         entry.ProcessStatus is "succeeded" or "failed" or "cancelled" or "timed-out" or "interrupted"
         && (entry.Verdict is not null || entry.DefinitionType != "action" || !entry.Current);
 
+    /// <summary>Advance after the process ends, independently of its outcome or reported verdict.</summary>
     public static bool ReleasesNext(BoardLaunchEvent entry)
     {
         if (entry.SkipRequested && entry.RunId is null) return true;
-        if (entry.ProcessStatus is "queued" or "claimed" or "running" or "uncertain") return false;
-        return entry.SkipRequested || entry.ProcessStatus == "succeeded" && (entry.Verdict == "passed" || entry.Gate == "process");
+        return entry.ProcessStatus is "succeeded" or "failed" or "cancelled" or "timed-out" or "interrupted";
     }
 
     public async Task<bool> TryReportAsync(string project, string cardId, string workspace, BoardAuthor author,

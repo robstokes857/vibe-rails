@@ -223,10 +223,17 @@ automatic retry and no exactly-once guarantee for external side effects.
 Board assignments and pending entries remain behind `IBoardStore` in `board.db`.
 An entry commits a run first, then acknowledges it separately. Repeated delivery
 finds the same occurrence even after a definition edit. Ordered entries wait for
-successful predecessor processes and, for `result`/`review` gates, an explicit
-pass. Review passes require the reporting session's complete, current saved
-review. A process exit alone does not approve a review. User skips cancel active
-work before releasing successors. Lane configuration edits affect future entries.
+predecessor processes to end, then continue after success, failure, cancellation,
+timeout or interruption, regardless of the reported result. Queued, claimed,
+running and uncertain processes still hold their successors. The lane editor
+offers ordering only, with no continuation-result selector. Existing `gate`
+fields remain compatible storage/wire metadata and preserve legacy review
+attribution and validation, but never decide whether the next entry runs. New
+UI selections omit the field; no stored selections or history are converted.
+Review passes still require the reporting session's complete, current saved
+review when review validation applies. A process exit alone does not approve a
+review. User skips cancel active work before releasing successors. Lane
+configuration edits affect future entries.
 
 ## Cutover and compatibility
 
