@@ -62,12 +62,10 @@ import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
 import { cardDisplayId, cardLabel } from './board-card-label.js';
 import { agentMadeSummary, bindAgentProvenance } from './board-agent-provenance.js';
 import { cardIdentityHtml, ghostKeyHtml, ghostSettingHtml, ghostSummary, readGhostField } from './board-ghost.js';
-import { renderCommentHtml, toPlainPreview } from './board-text.js';
+import { boardTextOptions, renderCommentHtml, toPlainPreview } from './board-text.js';
 import { historySection, mountHistory } from './board-history.js';
 import { bindBoardReferences, canonicalSessionId } from './board-references.js';
-import { bindComposerPreview, boardTextOptions } from './board-composer-preview.js';
 import { bindPromptReferenceHighlights } from './prompt-reference-highlights.js';
-import { bindPromptImagePreviews } from './prompt-image-previews.js';
 import { promptVariableHelp, bindPromptVariableHelp } from './prompt-variable-help.js';
 import { bindBoardSpelling } from './board-spelling.js';
 import { createBoardImagePreviews } from './board-image-previews.js';
@@ -459,7 +457,6 @@ export class BoardController {
                 if (card.ghostReason !== detail.ghostReason) this.updateGhostState(editor, detail);
                 if (discussionChanged) {
                     this.renderCardDiscussion(editor, card);
-                    editor.querySelectorAll('[data-board-composer]').forEach(composer => composer._refreshPreview?.());
                 }
                 void this.cardAutomations?.refresh();
                 void this.cardReviews?.refresh();
@@ -2164,10 +2161,6 @@ export class BoardController {
             onSubmit,
             onAttach: (input, files) => this.attachImages(composer, input, card, files),
             bindHighlights: isDescription ? bindPromptReferenceHighlights : null,
-            bindPreview: input => isDescription
-                ? bindPromptImagePreviews(this.app, composer, card,
-                    (id, options) => BoardApi.getCardAttachmentContentAsync(card.id, id, options))
-                : bindComposerPreview(composer, input, card),
             bindReferences: input => bindBoardReferences(input, { app: this.app, host: composer, card,
             onLink: async item => {
                 if (item.kind === 'session' && card.sessions?.some(s => canonicalSessionId(s.id) === canonicalSessionId(item.session.id))) return;

@@ -64,9 +64,13 @@ test('board-api.js exposes the boards endpoints and passes the board id through'
     assert.match(source, /async function reorderBoardColumnsAsync\(orderedIds, boardId = null\)/);
 });
 
-test('description editing has no preview or Markdown toggle', () => {
+test('composers render nothing beneath their field and have no Markdown toggle', () => {
     const source = readFileSync(controllerPath, 'utf8');
     assert.doesNotMatch(source, /data-board-composer-preview|data-board-composer-toggle|data-board-markdown/);
+    for (const file of ['board-controller.js', 'ai-agents-controller.js', 'card-editor-composer.js', 'card-editor-attachments.js']) {
+        const text = readFileSync(path.resolve('VibeRails/wwwroot/js/modules', file), 'utf8');
+        assert.doesNotMatch(text, /data-board-composer-live|bindPreview|_refreshPreview|prompt-image-previews|board-composer-preview/, file);
+    }
 });
 
 test('a card with a live session marches its border and shows a larger dot', () => {
@@ -90,8 +94,11 @@ test('image previews use tracked object URLs supported by the VS Code webview CS
     assert.doesNotMatch(image, /FileReader|readAsDataURL|blobToDataUrl/);
     // The webview CSP lets blob: images through as well, for everything else that paints one.
     assert.match(readFileSync(webviewPath, 'utf8'), /`img-src \$\{webview\.cspSource\} https: data: blob:`/);
-    // The attachment list shows a thumbnail for small rasters (the same data: URL inline images use).
+    // The attachment list shows a thumbnail for small rasters (the same data: URL inline images use),
+    // including a pending upload's local data before Save.
     const controller = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/card-editor-attachments.js'), 'utf8');
     assert.match(controller, /const RASTER_DATA_URL_RE = \/\^data:image\\\/\(\?:png\|jpeg\|gif\|webp\);base64,\/i;/);
-    assert.match(controller, /<img class="board-attachment-thumb" src="\$\{escapeHtml\(attachment\.url\)\}"/);
+    assert.match(controller, /const image = String\(attachment\.url \|\| attachment\.dataUrl \|\| ''\);/);
+    assert.match(controller, /<img class="board-attachment-thumb" src="\$\{escapeHtml\(image\)\}"/);
+    assert.match(controller, /<div class="board-attachment-row">\$\{lead\(attachment\)\}/);
 });

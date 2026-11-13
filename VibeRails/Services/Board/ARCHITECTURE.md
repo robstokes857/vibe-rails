@@ -1398,10 +1398,10 @@ complete GUID after `!` reads session history; no recent-history page is fetched
 remain readable without conversion. Saved cards link selected
 sessions/commits immediately; draft cards queue them until Create. Card text carries reference
 syntax; no new schema or historical conversion is involved. `board-markdown.js` styles already
-escaped text and never permits raw HTML or arbitrary image sources. `board-composer-preview.js`
-provides live styles and small attachment previews for the comment composer. `board-image-previews.js` shares authenticated
-raster loading between composer panes and posted Comments, owns Blob URLs and cancellation,
-and allows a later render to retry a failed fetch.
+escaped text and never permits raw HTML or arbitrary image sources. Composers have no live
+preview; `boardTextOptions` in `board-text.js` is the option set for posted Comments.
+`board-image-previews.js` loads authenticated rasters for posted Comments, owns Blob URLs
+and cancellation, and allows a later render to retry a failed fetch.
 
 The card keeps current check summaries; detailed run/history/reviewer configuration is unmounted.
 The lane Agents dropdown can configure VCA or Code quality as an ordinary single-action Automation.

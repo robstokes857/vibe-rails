@@ -1,8 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BoardController } from '../../../VibeRails/wwwroot/js/modules/board-controller.js';
-import { boardTextOptions } from '../../../VibeRails/wwwroot/js/modules/board-composer-preview.js';
-import { renderCommentHtml } from '../../../VibeRails/wwwroot/js/modules/board-text.js';
+import { boardTextOptions, renderCommentHtml } from '../../../VibeRails/wwwroot/js/modules/board-text.js';
 import { renderCodeLinks } from '../../../VibeRails/wwwroot/js/modules/board-code-links.js';
 
 function harness() {

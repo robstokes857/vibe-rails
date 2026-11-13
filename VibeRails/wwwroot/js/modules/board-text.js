@@ -140,6 +140,12 @@ export function renderCommentHtml(text, { attachments = [], sessions = [], commi
     return work;
 }
 
+/** One option set for a card's rendered text: its attachments, linked sessions and commits. */
+export function boardTextOptions(card) {
+    return { attachments: [...(card?.attachments || []), ...(card?.pendingAttachments || []).map(a => ({ ...a, url: a.dataUrl }))],
+        sessions: card?.sessions || [], commits: card?.commits || [], markdown: true };
+}
+
 /**
  * Plain-text preview for a card tile / list row: strips the little syntax we
  * support so a fenced block does not leak backticks into a one-line summary.

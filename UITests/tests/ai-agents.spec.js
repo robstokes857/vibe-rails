@@ -521,7 +521,7 @@ for(const width of [320,375,768,1024])test(`editor footer and single scroller at
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
 const file=name=>({name,mimeType:'image/png',buffer:png});
 
-for (const width of [375, 1280]) test(`attached images preview inside the prompt before and after saving at ${width}px`, async ({ page }, testInfo) => {
+for (const width of [375, 1280]) test(`attached images are listed in Attachments, not under the prompt, at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 });
     const state = await setup(page);
     const dataUrl = await page.evaluate(() => {
@@ -545,29 +545,29 @@ for (const width of [375, 1280]) test(`attached images preview inside the prompt
     await editor.getByLabel('Name', { exact: true }).fill('Image references');
     await prompt.fill('Please use @src/example.cs and this layout at {{time}}.');
     await editor.locator('[data-board-composer-file]').setInputFiles({ name: 'layout.png', mimeType: 'image/png', buffer });
-    const previews = editor.getByRole('group', { name: 'Attached image previews' });
-    const thumbnail = previews.getByRole('button', { name: 'Preview layout.png', exact: true });
-    await expect(thumbnail).toBeVisible();
-    await expect.poll(() => thumbnail.locator('img').evaluate(img => img.naturalWidth)).toBe(360);
+    const pending = editor.locator('[data-board-attachments] .board-attachment-row', { hasText: 'layout.png' });
+    await pending.scrollIntoViewIfNeeded();
+    await expect.poll(() => pending.locator('img.board-attachment-thumb').evaluate(img => img.naturalWidth)).toBe(360);
+    // The prompt stays one native field; the image is listed only under Attachments.
+    const beneath = editor.locator('[data-board-composer] :is(img, .prompt-image-previews, [data-board-composer-live])');
+    await expect(beneath).toHaveCount(0);
     expect(reads).toEqual([]);
-    const draft = await prompt.inputValue();
-    await thumbnail.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath(`prompt-image-${width}.png`) });
-    await thumbnail.click();
+    await editor.locator('[data-launch-save]').click();
+    await expect.poll(() => state.presets[0]?.initialPrompt).toContain('attachment:att_0');
+    const saved = await prompt.inputValue();
+    await editor.locator('[data-board-view-attachment="att_0"]').click();
     const viewer = page.getByRole('dialog', { name: 'Attachment preview', exact: true });
     await expect.poll(() => viewer.locator('img').evaluate(img => img.naturalWidth)).toBe(360);
     await viewer.getByRole('button', { name: 'Close attachment', exact: true }).click();
-    await expect(prompt).toHaveValue(draft);
-    await editor.locator('[data-launch-save]').click();
-    await expect.poll(() => state.presets[0]?.initialPrompt).toContain('attachment:att_0');
-    await expect.poll(() => thumbnail.locator('img').evaluate(img => img.naturalWidth)).toBe(360);
+    await expect(prompt).toHaveValue(saved);
+    expect(reads.length).toBeGreaterThan(0);
     expect(reads.every(path => path.includes('/presets/preset_0/attachments/att_0/content'))).toBe(true);
     expect(await editor.locator('.prompt-reference-mirror').textContent()).toBe(await prompt.inputValue() + '\u200b');
     await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
     await page.getByRole('button', { name: 'Image references', exact: true }).click();
-    await expect.poll(() => thumbnail.locator('img').evaluate(img => img.naturalWidth)).toBe(360);
-    await expect(editor.locator('[data-board-composer-live]')).toHaveCount(0);
-    expect(await previews.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await expect(prompt).toHaveValue(saved);
+    await expect(beneath).toHaveCount(0);
 });
 
 for (const width of [320, 375, 768, 1024, 1440]) test(`catalog follows the shared design at ${width}px`, async ({ page }, testInfo) => {
@@ -868,11 +868,11 @@ test('removing a staged file also removes its unsaved inline reference', async (
     await page.locator('.vb-page-actions').getByRole('button', { name: 'Create agent', exact: true }).click();
     await page.locator('[data-board-composer-file]').setInputFiles(file('remove.png'));
     await expect(page.locator('[data-board-composer-input]')).toHaveValue(/attachment:pending_/);
-    await expect(page.getByRole('button', { name: 'Preview remove.png', exact: true })).toBeVisible();
+    await expect(page.locator('[data-board-attachments]')).toContainText('remove.png');
     await page.locator('[data-board-remove-pending]').click();
     await expect(page.locator('[data-board-composer-input]')).not.toHaveValue(/pending_/);
     await expect(page.locator('[data-board-remove-pending]')).toHaveCount(0);
-    await expect(page.locator('.prompt-image-previews')).toBeHidden();
+    await expect(page.locator('[data-board-attachments]')).not.toContainText('remove.png');
 });
 
 test('save locks the enhanced provider and a failed run preserves disabled controls', async ({ page }) => {

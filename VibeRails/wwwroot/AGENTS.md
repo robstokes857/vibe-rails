@@ -59,11 +59,9 @@ no run history, project scope or Board lane binding, and are never posted to `/r
 inside the native prompt with the same font metrics. Its non-interactive mirror preserves
 literal source, selection, Undo and caret suggestions; composition and forced colors use
 native text. Mount highlighting before spelling, and dispose the wrappers in reverse order.
-`prompt-image-previews.js` shows only attached raster thumbnails beneath Agent prompts and
-Board card descriptions, inside the composer. Pending images use their local data; saved
-images use the owner's content loader and existing Blob cleanup. Click or keyboard activation
-opens the attachment viewer.
-Attachment changes refresh thumbnails without repeating the message text.
+The composer renders nothing beneath its field: no live preview and no thumbnail strip.
+Attached images appear only in the Attachments section, which shows thumbnails for inline
+image data (pending uploads included) and opens saved files in the attachment viewer.
 
 Board cards and definitions call `card-editor.js` for the two-column shell, one scroller
 and persistent footer, `card-editor-composer.js` for the native composer, and
@@ -857,10 +855,10 @@ Attachments section. `.board-editor-scroll` is the one viewport overflow owner.
 **Board text (VIBE-34)** uses escape-first rendering in `board-text.js`. Markdown
 styles include headings, emphasis, strikethrough, lists/tasks, quotes and HTTP(S) links;
 `board-markdown.js` emits fixed markup only after escaping and parking code/reference fragments.
-Raw HTML and external image URLs never become active markup. Posted comments and the comment
-composer share `boardTextOptions` (Markdown enabled, attachments, sessions, commits). The comment
-composer shows a live preview with small raster thumbnails. `board-image-previews.js` owns authenticated large-image
-loads for composers and posted Comments, including cancellation, Blob URL disposal and retry on
+Raw HTML and external image URLs never become active markup. Posted comments render with
+`boardTextOptions` (Markdown enabled, attachments, sessions, commits); the comment composer is a
+plain field with no live preview. `board-image-previews.js` owns authenticated large-image
+loads for posted Comments, including cancellation, Blob URL disposal and retry on
 the next render after a failed fetch. New-card image tokens use temporary IDs rewritten after
 upload; failed saves preserve the unfinished queue. Markdown attachments have a separate
 read-only Preview/Source viewer; TXT previews as source.

@@ -52,10 +52,13 @@ export function createEditorAttachments({
         const count = editor.querySelector('[data-board-count="attachments"]');
         if (count)
             count.textContent = String(attachments.length + pending.length);
-        const lead = (attachment) =>
-            RASTER_DATA_URL_RE.test(String(attachment.url || ''))
-                ? `<img class="board-attachment-thumb" src="${escapeHtml(attachment.url)}" alt="" loading="lazy">`
+        // Pending uploads carry their data URL, so a new image shows here before Save.
+        const lead = (attachment) => {
+            const image = String(attachment.url || attachment.dataUrl || '');
+            return RASTER_DATA_URL_RE.test(image)
+                ? `<img class="board-attachment-thumb" src="${escapeHtml(image)}" alt="" loading="lazy">`
                 : '<i class="fa-solid fa-file" aria-hidden="true"></i>';
+        };
         host.innerHTML =
             attachments
                 .map(
@@ -73,7 +76,7 @@ export function createEditorAttachments({
                 pending
                     .map(
                         (attachment, index) => `
-            <div class="board-attachment-row"><span class="board-side-copy"><span class="board-side-title">${escapeHtml(attachment.name)}</span>
+            <div class="board-attachment-row">${lead(attachment)}<span class="board-side-copy"><span class="board-side-title">${escapeHtml(attachment.name)}</span>
                 <span class="board-side-sub">${fileSize(attachment.bytes)} · Uploads when you save</span></span>
                 <button type="button" class="btn btn-sm btn-outline-secondary board-attachment-remove" data-board-remove-pending="${index}" aria-label="Remove ${escapeHtml(attachment.name)}"><i class="fa-solid fa-xmark" aria-hidden="true"></i> Remove</button>
             </div>`
@@ -85,9 +88,6 @@ export function createEditorAttachments({
     function changed() {
         if (!current()) return;
         render();
-        editor
-            .querySelectorAll('[data-board-composer]')
-            .forEach((composer) => composer._refreshPreview?.());
         onChanged?.();
     }
 

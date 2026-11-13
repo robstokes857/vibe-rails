@@ -91,7 +91,7 @@ npx playwright test --config playwright.board.config.js
 Uses the real frontend with mocked board APIs to verify compact board controls, description
 image rendering/editing/upload/deletion, save/reopen, running-agent controls, and desktop/narrow layouts.
 Description coverage includes shared inline reference highlighting, compact variable shortcuts,
-caret placement and Undo, plus pending/saved image thumbnails and the attachment viewer.
+caret placement and Undo, plus image thumbnails in the Attachments list and the attachment viewer.
 It starts a temporary static server and never touches the machine's board database.
 
 `board-picker.spec.js` holds a board-switch response and pauses the browser clock to cover
@@ -122,8 +122,8 @@ conflicts, navigation guards, staged-upload retries, caret placement, history pr
 Action fields, schedules and layouts at 320/375/768/1024px. Prompt-variable shortcuts cover
 click/keyboard insertion, selection replacement, undo and saved literal placeholders.
 Inline reference tests cover native caret alignment, source preservation, escaping, spelling,
-composition and forced colors. Image previews cover pending files, saving/reopening and
-the owner-specific attachment viewer on desktop and narrow screens.
+composition and forced colors. Image tests cover Attachments-list thumbnails for pending files,
+saving/reopening and the owner-specific attachment viewer on desktop and narrow screens.
 Library-script tests (VIBE-311) serve `/api/v1/python-scripts` from `state.scripts`: catalog
 rows beside script Actions, Sign and Remove, signed scripts under the agents in Quick actions,
 and an unreadable library (`state.failScripts`) leaving the agents listed.

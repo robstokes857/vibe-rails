@@ -1188,26 +1188,26 @@ for (const width of [1440, 390]) {
 }
 
 for (const width of [1440, 390]) {
-    test(`Markdown is always enabled and Description has no preview at ${width}px`, async ({ page }, testInfo) => {
+    test(`Markdown is always enabled and composers have no preview at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         await page.addInitScript(() => localStorage.setItem('viberails.board.markdown', 'off'));
-        await openBoard(page);
+        const text = '# Heading\n**bold** and *italic*\n- [x] checked\n' + DESCRIPTION;
+        await openBoard(page, { onCard: card => {
+            card.comments = [{ id: 'markdown_comment', body: text, author: { kind: 'user', label: 'You' }, createdAt: card.createdAt }];
+        } });
         await page.getByText('Description images', { exact: true }).click();
         const description = page.locator('[data-board-composer="description"]');
         await expect(description.locator('textarea')).toBeVisible();
-        await expect(description.locator('[data-board-composer-live], [data-board-composer-preview], [data-board-composer-toggle]')).toHaveCount(0);
         await expect(page.getByRole('button', { name: 'Markdown', exact: true })).toHaveCount(0);
-        const text = '# Heading\n**bold** and *italic*\n- [x] checked\n' + DESCRIPTION;
         await description.locator('textarea').fill(text);
         const composer = page.locator('[data-board-composer="comment"]');
         await composer.locator('textarea').fill(text);
-        const live = composer.locator('[data-board-composer-live]');
-        await expect(live.locator('h1')).toHaveText('Heading');
-        await expect(live.locator('strong')).toHaveText('bold');
-        await expect(live.locator('img')).toBeVisible();
-        const image = await live.locator('img').boundingBox();
-        expect(image.width).toBeLessThanOrEqual(120);
-        expect(image.height).toBeLessThanOrEqual(80);
+        // Each composer is one native field: nothing renders beneath the text, images included.
+        await expect(page.locator('[data-board-composer] :is([data-board-composer-live], [data-board-composer-preview], [data-board-composer-toggle], .prompt-image-previews, img)')).toHaveCount(0);
+        const posted = page.locator('[data-board-comments] [data-board-comment-body]');
+        await expect(posted.locator('h1')).toHaveText('Heading');
+        await expect(posted.locator('strong')).toHaveText('bold');
+        await expect(posted.locator('img[data-board-image]')).toHaveCount(1);
         expect(await page.evaluate(() => window.__injected)).toBeUndefined();
         await composer.scrollIntoViewIfNeeded();
         await page.screenshot({ path: testInfo.outputPath(`composer-${width}.png`) });
@@ -1299,12 +1299,12 @@ test('remote image comments refresh their metadata and preserve composer drafts'
     const image = page.locator('[data-board-comments] [data-board-image="remote-image"]');
     await expect(image).toHaveAttribute('src', /^blob:/);
     await expect.poll(() => image.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
-    const thumbnail = page.locator('[data-board-composer="description"] [data-board-image="remote-image"]');
-    await expect.poll(() => thumbnail.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
-    expect(reads).toBe(2); // One cached load for each of the two preview surfaces.
+    // Comments are the only preview surface; the composers stay plain text.
+    await expect(page.locator('[data-board-composer] [data-board-image]')).toHaveCount(0);
+    expect(reads).toBe(1);
     await page.evaluate(() => window.app.boardController.refreshSessionActivity());
-    await expect(thumbnail).toHaveAttribute('src', /^blob:/);
-    expect(reads).toBe(2);
+    await expect(image).toHaveAttribute('src', /^blob:/);
+    expect(reads).toBe(1);
     await expect(page.locator('[data-board-comments] [data-board-ref-commit]')).toHaveAttribute('title', 'Remote commit');
     await expect(page.locator('[data-board-attachments]')).toContainText('Remote.png');
     await expect(page.locator('[data-board-commits]')).toContainText('Remote commit');
@@ -1341,9 +1341,13 @@ test('purpose filters keep relevant agent comments, attention and unsaved drafts
 
 test('reference search routes GUIDs directly, finds card sessions and attaches commits without saving drafts', async ({ page }) => {
     let current;
-    await openBoard(page, { onCard: card => { current = card; } });
     const session = { id: '12345678-1234-1234-1234-123456789abc', displayName: 'Earlier investigation', workingDirectory: 'C:/board-fixture', cli: 'codex', createdAt: '2026-10-05T15:30:00Z', active: false };
     const commit = { sha: 'abcdef0123456789abcdef0123456789abcdef01', shortSha: 'abcdef0', message: 'Fix the issue' };
+    await openBoard(page, { onCard: card => {
+        current = card;
+        card.comments.push({ id: 'reference_comment', author: { kind: 'user', label: 'You' }, createdAt: card.createdAt,
+            body: '#' + commit.sha + ' !' + session.id.replaceAll('-', '').toUpperCase() });
+    } });
     let fileReads = 0, cardReads = 0, historyReads = 0, sessionLinks = 0, commitLinks = 0;
     await page.route('**/api/v1/board/files?*', route => { fileReads++; return route.fulfill({ json: { files: [] } }); });
     await page.route('**/api/v1/chatHistory/*', route => { historyReads++; expect(route.request().url()).toContain(session.id); return route.fulfill({ json: session }); });
@@ -1386,12 +1390,10 @@ test('reference search routes GUIDs directly, finds card sessions and attaches c
     await expect(input).toHaveValue('#' + commit.sha + ' ');
     expect(commitLinks).toBe(1);
     await expect(page.locator('#board-card-title')).toHaveValue('Keep this draft');
-    const comment = page.locator('[data-board-composer="comment"]');
-    await comment.locator('textarea').fill('#' + commit.sha);
-    await expect(comment.locator('[data-board-composer-live] [data-board-ref-commit]')).toBeVisible();
+    const posted = page.locator('[data-board-comments]');
+    await expect(posted.locator('[data-board-ref-commit]')).toBeVisible();
     await page.evaluate(() => { window.app.boardController.openSessionReplay = session => { window.__openedReferenceSession = session; }; });
-    await comment.locator('textarea').fill('!' + session.id.replaceAll('-', '').toUpperCase());
-    await comment.locator('[data-board-composer-live] [data-board-ref-session]').click();
+    await posted.locator('[data-board-ref-session]').click();
     expect(await page.evaluate(() => window.__openedReferenceSession.id)).toBe(session.id);
 });
 
@@ -1538,7 +1540,7 @@ for (const width of [320, 375, 768, 1024, 1280]) test(`Board descriptions share 
     await expect(mirror.locator('[data-prompt-reference="variable"]')).toHaveText('{{date}}');
 });
 
-for (const width of [375, 1280]) test(`draft image previews survive creation at ${width}px`, async ({ page }, testInfo) => {
+for (const width of [375, 1280]) test(`draft images are listed in Attachments and survive creation at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 950 });
     const requests = await openBoard(page, { inlineImages: false });
     await page.getByRole('button', { name: 'Create card', exact: true }).click();
@@ -1546,56 +1548,27 @@ for (const width of [375, 1280]) test(`draft image previews survive creation at 
     const composer = page.locator('[data-board-composer="description"]');
     await composer.locator('textarea').fill('Use this layout with @src/example.cs at {{date}}.');
     await composer.locator('[data-board-composer-file]').setInputFiles({ name: 'draft.png', mimeType: 'image/png', buffer: Buffer.from(IMAGE.split(',')[1], 'base64') });
-    const previews = composer.getByRole('group', { name: 'Attached image previews' });
-    const thumbnail = previews.getByRole('button', { name: 'Preview draft.png', exact: true });
-    await expect.poll(() => thumbnail.locator('img').evaluate(img => img.naturalWidth)).toBe(1);
+    const pending = page.locator('[data-board-attachments] .board-attachment-row', { hasText: 'draft.png' });
+    await expect(pending).toContainText('Uploads when you save');
+    await pending.scrollIntoViewIfNeeded();
+    await expect.poll(() => pending.locator('img.board-attachment-thumb').evaluate(img => img.naturalWidth)).toBe(1);
+    // The description stays one native field; the image is listed only under Attachments.
+    await expect(composer.locator(':is(img, .prompt-image-previews, [data-board-composer-live])')).toHaveCount(0);
     expect(requests.filter(r => r.path.includes('/attachments/'))).toEqual([]);
-    await thumbnail.focus();
-    await thumbnail.press('Enter');
-    const viewer = page.getByRole('dialog', { name: 'Attachment preview', exact: true });
-    await expect.poll(() => viewer.locator('img').evaluate(img => img.naturalWidth)).toBe(1);
-    await viewer.getByRole('button', { name: 'Close attachment', exact: true }).click();
-    await expect(thumbnail).toBeFocused();
-    await expect(page.locator('[data-board-attachments]')).toContainText('draft.png');
     await expect(composer.locator('textarea')).toHaveValue(/attachment:pending_/);
     await page.screenshot({ path: testInfo.outputPath(`board-pending-image-${width}.png`) });
     await page.locator('[data-board-save-card]').click();
-    // Saved metadata omits inline data; the preview must use the Board-owned content loader.
+    // Saved metadata omits inline data; the viewer must use the Board-owned content loader.
     await page.getByText('Draft image', { exact: true }).click();
     await expect(composer.locator('textarea')).not.toHaveValue(/attachment:pending_/);
-    await expect.poll(() => thumbnail.locator('img').evaluate(img => img.naturalWidth)).toBe(1);
-    expect(requests.some(r => r.path === '/api/v1/board/cards/card_created/attachments/att_uploaded/content')).toBe(true);
-    await thumbnail.click();
+    await page.locator('[data-board-view-attachment="att_uploaded"]').click();
+    const viewer = page.getByRole('dialog', { name: 'Attachment preview', exact: true });
     await expect.poll(() => viewer.locator('img').evaluate(img => img.naturalWidth)).toBe(1);
+    expect(requests.some(r => r.path === '/api/v1/board/cards/card_created/attachments/att_uploaded/content')).toBe(true);
     await viewer.getByRole('button', { name: 'Close attachment', exact: true }).click();
-    expect(await previews.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
     await page.locator('[data-board-remove-attachment="att_uploaded"]').click();
     await page.getByRole('button', { name: 'Delete', exact: true }).last().click();
-    await expect(thumbnail).toHaveCount(0);
-});
-
-test('large inline rasters use authenticated content and release Blob URLs on close', async ({ page }) => {
-    await openBoard(page, { onCard: card => { card.attachments[0].url = ''; } });
-    let reads = 0;
-    await page.route('**/api/v1/board/cards/card_test/attachments/att_image/content', route => {
-        reads++; expect(route.request().headers().viberails_tab).toBe('board-fixture');
-        return route.fulfill({ contentType: 'application/octet-stream', body: Buffer.from(IMAGE.split(',')[1], 'base64') });
-    });
-    await page.evaluate(() => {
-        window.__blobUrls = []; window.__revokedUrls = [];
-        const create = URL.createObjectURL, revoke = URL.revokeObjectURL;
-        URL.createObjectURL = blob => { const url = create(blob); window.__blobUrls.push(url); return url; };
-        URL.revokeObjectURL = url => { window.__revokedUrls.push(url); revoke(url); };
-    });
-    await page.getByText('Description images', { exact: true }).click();
-    const composer = page.locator('[data-board-composer="comment"]');
-    await composer.locator('textarea').fill(DESCRIPTION);
-    const image = composer.locator('[data-board-composer-live] img');
-    await expect(image).toHaveAttribute('src', /^blob:/);
-    await expect.poll(() => image.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
-    expect(reads).toBeGreaterThan(0);
-    await page.evaluate(() => window.app.closeModal());
-    expect(await page.evaluate(() => window.__blobUrls.every(url => window.__revokedUrls.includes(url)))).toBe(true);
+    await expect(page.locator('[data-board-view-attachment="att_uploaded"]')).toHaveCount(0);
 });
 
 test('posted Comments load authenticated raster previews and release them on close', async ({ page }) => {
@@ -1619,15 +1592,17 @@ test('posted Comments load authenticated raster previews and release them on clo
     const image = page.locator('[data-board-comments] img[data-board-image]');
     await image.scrollIntoViewIfNeeded();
     await expect.poll(() => image.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
-    const thumbnail = page.locator('[data-board-composer="description"] img[data-board-image]');
-    await expect.poll(() => thumbnail.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
-    expect(reads).toBe(2); // The description and Comments each own their cached preview.
+    expect(reads).toBe(1); // Only Comments render the image; the description stays plain text.
     await page.evaluate(() => window.app.closeModal());
     expect(await page.evaluate(() => window.__blobUrls.length > 0 && window.__blobUrls.every(url => window.__revokedUrls.includes(url)))).toBe(true);
 });
 
 test('a failed authenticated preview can retry without reopening the card', async ({ page }) => {
-    await openBoard(page, { onCard: card => { card.attachments[0].url = ''; card.comments = []; card.commentCount = 0; } });
+    await openBoard(page, { onCard: card => {
+        card.description = '';
+        card.attachments[0].url = '';
+        card.comments = [{ id: 'image_comment', body: DESCRIPTION, author: { kind: 'user', label: 'You' }, createdAt: card.createdAt }];
+    } });
     let reads = 0;
     await page.route('**/api/v1/board/cards/card_test/attachments/att_image/content', route => {
         reads++;
@@ -1636,16 +1611,22 @@ test('a failed authenticated preview can retry without reopening the card', asyn
     });
     const failed = page.waitForResponse(response => response.url().endsWith('/attachments/att_image/content') && response.status() === 503);
     await page.getByText('Description images', { exact: true }).click();
-    const composer = page.locator('[data-board-composer="comment"]');
-    await composer.locator('textarea').fill(DESCRIPTION);
     await failed;
-    await composer.locator('textarea').fill(DESCRIPTION + '\nRetry');
-    const image = composer.locator('[data-board-composer-live] img');
-    await expect.poll(() => image.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
+    // A later render of Comments retries the failed image. Changing the filter re-renders them;
+    // keep toggling until the failed request has settled and a retry lands.
+    const filter = page.locator('[data-board-comment-filter]');
+    const image = page.locator('[data-board-comments] img[data-board-image]');
+    let choice = 'all';
+    await expect.poll(async () => {
+        if (await image.evaluate(img => img.complete && img.naturalWidth > 0)) return true;
+        choice = choice === 'all' ? 'human' : 'all';
+        await filter.selectOption(choice);
+        return false;
+    }).toBe(true);
     expect(reads).toBe(2);
 });
 
-test('posting a comment clears its live preview along with the input', async ({ page }) => {
+test('posting a comment clears the input and shows it in Comments', async ({ page }) => {
     let current;
     await openBoard(page, { onCard: card => { current = card; } });
     await page.route('**/api/v1/board/cards/card_test/comments', route => {
@@ -1656,10 +1637,9 @@ test('posting a comment clears its live preview along with the input', async ({ 
     await page.getByText('Description images', { exact: true }).click();
     const composer = page.locator('[data-board-composer="comment"]');
     await composer.locator('textarea').fill('**posted**');
-    await expect(composer.locator('[data-board-composer-live] strong')).toHaveText('posted');
+    await expect(composer.locator('[data-board-composer-live], strong')).toHaveCount(0);
     await composer.locator('textarea').press('Control+Enter');
     await expect(composer.locator('textarea')).toHaveValue('');
-    await expect(composer.locator('[data-board-composer-live]')).toBeEmpty();
     await expect(page.locator('[data-board-comments] strong')).toContainText('posted');
 });
 

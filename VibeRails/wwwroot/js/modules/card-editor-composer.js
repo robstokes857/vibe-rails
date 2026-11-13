@@ -2,14 +2,13 @@ import { escapeHtml } from './utils.js';
 import { wrapSelectionAsCode } from './board-text.js';
 import { bindBoardSpelling } from './board-spelling.js';
 
-/** Shared native input. Owners provide references, previews and attachment persistence. */
+/** Shared native input. Owners provide references and attachment persistence; nothing renders beneath the field. */
 export function composerMarkup({
     name,
     value = '',
     placeholder = '',
     disabled = false,
     submitLabel = '',
-    livePreview = name === 'comment',
     label = name
 }) {
     const off = disabled ? ' disabled' : '';
@@ -28,7 +27,6 @@ export function composerMarkup({
             </div>
                 <textarea class="form-control board-composer-input" data-board-composer-input aria-label="${escapeHtml(label)}"
                 placeholder="${escapeHtml(placeholder)}" rows="3" spellcheck="true"${off}>${escapeHtml(value)}</textarea>
-                ${livePreview ? '<div class="board-comment-body board-composer-live" data-board-composer-live aria-label="Live preview"></div>' : ''}
             <input type="file" hidden data-board-composer-file multiple>
             <div class="board-composer-busy" data-board-composer-busy hidden>Adding files…</div>
             ${
@@ -48,8 +46,7 @@ export function bindCardComposer(
         onSubmit = null,
         onAttach = null,
         bindHighlights = null,
-        bindReferences = null,
-        bindPreview = null
+        bindReferences = null
     } = {}
 ) {
     if (!composer) return () => {};
@@ -75,7 +72,6 @@ export function bindCardComposer(
     listen(input, 'input', autoGrow);
     if (bindHighlights) disposers.push(bindHighlights(input));
     disposers.push(bindBoardSpelling(input));
-    if (bindPreview) disposers.push(bindPreview(input));
     if (bindReferences) disposers.push(bindReferences(input));
     // Sized now rather than on the next frame: an occluded page never gets one,
     // and the description box would open at its one-line default.

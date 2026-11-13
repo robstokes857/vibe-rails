@@ -32,7 +32,6 @@ import { openLaunchTerminal, waitForNativeLaunch } from './launch-terminal.js';
 import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
 import { promptVariableHelp, bindPromptVariableHelp } from './prompt-variable-help.js';
 import { bindPromptReferenceHighlights } from './prompt-reference-highlights.js';
-import { bindPromptImagePreviews } from './prompt-image-previews.js';
 
 const field = (label, name, value = '', type = 'text') =>
     `<label class="launch-field">${label}<input class="form-control" type="${type}" data-launch-field="${name}" value="${escapeHtml(value)}"></label>`;
@@ -635,7 +634,6 @@ export class AiAgentsController {
             disposers.push(
                 bindCardComposer(composer, {
                     bindHighlights: bindPromptReferenceHighlights,
-                    bindPreview: () => bindPromptImagePreviews(this.app, composer, definition, content),
                     onAttach: (input, files) =>
                         panel.addFiles(composer, input, files),
                     bindReferences: (input) =>
@@ -789,7 +787,6 @@ export class AiAgentsController {
                         );
                         panel.render();
                         prompt.dispatchEvent(new Event('input', { bubbles: true }));
-                        editor.querySelector('[data-board-composer]')._refreshPreview?.();
                     }
                     body.initialPrompt = prompt.value;
                     body.expectedRevision = definition.revision || 0;
@@ -798,9 +795,6 @@ export class AiAgentsController {
                 Object.assign(definition, isPreset ? result.preset : result);
                 if (isPreset) {
                     panel.render();
-                    editor
-                        .querySelector('[data-board-composer]')
-                        ._refreshPreview?.();
                     if (result.affectedBindings?.length)
                         report(
                             `${result.affectedBindings.length} automatic binding(s) are now ineligible. They remain saved.`

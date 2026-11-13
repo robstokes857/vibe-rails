@@ -354,17 +354,18 @@ Board cards and AI Agent definitions share the desktop card-editor shell and con
 wide main content, narrow settings sidebar, a divider, one shared scroller and a separate
 persistent footer. Main content is the name/title, directly editable prompt/description,
 existing attachment controls, then Comments (Board) or Run history (definitions).
-Agent prompts and Board card descriptions stay as editable source without a duplicate live preview.
+Agent prompts, Board card descriptions and comments use one native editable field.
+Nothing renders beneath the text: no live preview, rendered copy or thumbnail strip.
 Inside the native prompt field, file (`@`), card/session (`!`), commit (`#`) and
 `{{...}}` variable references use purple text, a subtle purple fill and an inset
 outline. Keep the exact source text and the field's font metrics so typing, caret
 placement, selection and Undo remain native. Decoration is non-interactive and
 hidden from assistive technology; code examples remain plain. Use ordinary native
 text during IME composition and in forced-color mode.
-Attached raster images appear as labelled, keyboard-accessible thumbnails inside
-the prompt editor beneath the text. Clicking opens the existing attachment viewer.
-Show pending uploads immediately, preserve previews after saving, and wrap thumbnails
-on narrow screens. Never repeat the message text or fetch arbitrary image URLs.
+Attached files, images included, appear only in the Attachments section. A row shows
+a thumbnail when the image data is already in the page, including a pending upload
+before Save. Saved files open in the existing attachment viewer. Never fetch arbitrary
+image URLs.
 Typed caret suggestions provide file, card, session and variable references; no
 Preview/Write/Edit mode switch is needed. Agent prompts and Board card descriptions
 list supported `{{...}}` variables as compact secondary buttons below the input.

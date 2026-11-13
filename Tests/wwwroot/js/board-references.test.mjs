@@ -1,9 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { findBoardReferenceToken, referenceSearchKind, canonicalSessionId, referenceCanBrowse, referenceEmptyNote, bindBoardReferences } from '../../../VibeRails/wwwroot/js/modules/board-references.js';
-import { renderCommentHtml } from '../../../VibeRails/wwwroot/js/modules/board-text.js';
+import { boardTextOptions, renderCommentHtml } from '../../../VibeRails/wwwroot/js/modules/board-text.js';
 import { BoardApi } from '../../../VibeRails/wwwroot/js/modules/board-api.js';
-import { bindComposerPreview, boardTextOptions } from '../../../VibeRails/wwwroot/js/modules/board-composer-preview.js';
 import { BoardController } from '../../../VibeRails/wwwroot/js/modules/board-controller.js';
 
 test('reference prefixes keep files separate and only complete GUIDs look up sessions', () => {
@@ -285,17 +284,4 @@ test('posted comments always render Markdown alongside session and commit refere
     assert.match(host.innerHTML, /<strong>bold<\/strong>/);
     assert.match(host.innerHTML, /! Fix login/);
     assert.match(host.innerHTML, /title="Repair the form"/);
-});
-
-test('comment previews update with typing and dispose their listener', () => {
-    const live = { innerHTML: '', querySelectorAll: () => [] };
-    const composer = { querySelector: selector => selector === '[data-board-composer-live]' ? live : null };
-    const input = new EventTarget(); input.value = '**first**';
-    const dispose = bindComposerPreview(composer, input, {});
-    assert.match(live.innerHTML, /<strong>first<\/strong>/);
-    input.value = '**next**'; input.dispatchEvent(new Event('input'));
-    assert.match(live.innerHTML, /<strong>next<\/strong>/);
-    dispose();
-    input.value = '**disposed**'; input.dispatchEvent(new Event('input'));
-    assert.doesNotMatch(live.innerHTML, /disposed/);
 });
