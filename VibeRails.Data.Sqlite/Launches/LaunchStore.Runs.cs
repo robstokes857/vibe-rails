@@ -38,8 +38,10 @@ public sealed partial class LaunchStore
             if (!await reader.ReadAsync(ct) || reader.GetString(1) is "queued" or "claimed" or "running" or "uncertain")
                 throw new LaunchConflictException("Only a finished run can be retried.");
             var original = JsonSerializer.Deserialize(reader.GetString(0), StorageJsonSerializerContext.Default.LaunchSnapshot)!;
-            // The caller can supply a fresh occurrence identity, but cannot change any retry input.
+            // The caller supplies only a fresh occurrence identity. Apply presentation policy to
+            // the authoritative original; never trust the caller to replace its execution inputs.
             snapshot = original with { Context = original.Context with { OccurrenceId = snapshot.Context.OccurrenceId } };
+            snapshot = snapshot.WithCurrentTerminalPresentation();
             LaunchValidation.ValidateSnapshot(snapshot);
         }
         // Validate the definition the run will actually execute: a retry's is the source run's, swapped

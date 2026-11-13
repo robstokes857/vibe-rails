@@ -1,7 +1,7 @@
 import { getEnabledLlmItems, mountLlmPicker, setLlmPickerValue } from './pickers/llm-picker.js';
 import { parseLlmSelection } from './utils.js';
 import { LaunchApi } from './launch-api.js';
-import { openLaunchTerminal } from './launch-terminal.js';
+import { waitForNativeLaunch } from './launch-terminal.js';
 import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
 
 const LAST_AGENT_KEY = 'viberails.projectHealth.fixAgent';
@@ -66,12 +66,13 @@ export async function launchProjectHealthFix(app, { title, prompt, workingDirect
             if (!resolved || resolved.canceled || signal?.aborted) return false;
             const run = await api.run(selection.presetId, 'preset', {
                 promptPrefix: prompt, initialPrompt: resolved.initialPrompt,
-                expectedRevision: preset.revision, nativeTerminal: false
+                expectedRevision: preset.revision, nativeTerminal: true
             });
-            const opened = await openLaunchTerminal(app, api, run, { signal });
-            if (!opened && !signal?.aborted)
-                app.showToast('Could not open terminal', 'Check the run in AI Agents before retrying; it may still be queued.', 'warning');
-            return opened;
+            const started = await waitForNativeLaunch(api, run, { signal });
+            if (signal?.aborted) return false;
+            if (started.status === 'running' || started.status === 'succeeded') return true;
+            app.showToast('Could not open terminal', started.error || 'Check the run in AI Agents before retrying; it may still be queued.', 'warning');
+            return false;
         }
         if (typeof app.terminalController?.launchInFocus !== 'function') {
             throw new Error('The terminal is unavailable. Reload the page and try again.');

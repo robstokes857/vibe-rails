@@ -1768,7 +1768,7 @@ for (const width of [320, 375, 768, 1024, 1440]) {
     });
 }
 
-test('saved agent file fix waits for a terminal and preserves the reader on failed startup', async ({ page }) => {
+test('saved agent file fix waits for a native terminal and preserves the reader on failed startup', async ({ page }) => {
     await installQualityApi(page);
     await page.route('**/api/v1/presets/review', route => route.fulfill({ json: {
         id: 'review', name: 'Review agent', initialPrompt: 'Review this file.', revision: 7
@@ -1778,7 +1778,7 @@ test('saved agent file fix waits for a terminal and preserves the reader on fail
     await page.route('**/api/v1/runs', route => {
         requests.push(route.request().postDataJSON());
         return route.fulfill({ json: succeeds
-            ? { id: 'run-2', status: 'running', tabId: 'tab-2', sessionId: 'session-2' }
+            ? { id: 'run-2', status: 'running', tabId: null, sessionId: 'session-2' }
             : { id: 'run-1', status: 'failed' } });
     });
     await openQuality(page);
@@ -1793,13 +1793,13 @@ test('saved agent file fix waits for a terminal and preserves the reader on fail
     await modal.getByRole('button', { name: 'Open fix terminal', exact: true }).click();
     await expect(modal.locator('[data-quality-action-status]')).toBeVisible();
     expect(requests[0]).toMatchObject({ definitionId: 'review', expectedRevision: 7,
-        initialPrompt: 'Review this file.', nativeTerminal: false });
+        initialPrompt: 'Review this file.', nativeTerminal: true });
     expect(requests[0].promptPrefix).toContain(PAYMENT_PATH);
     expect(await page.evaluate(() => window.__adopted)).toEqual([]);
     succeeds = true;
     await modal.getByRole('button', { name: 'Open fix terminal', exact: true }).click();
     await expect(modal).toHaveCount(0);
-    expect(await page.evaluate(() => window.__adopted)).toEqual(['tab-2']);
+    expect(await page.evaluate(() => window.__adopted)).toEqual([]);
 });
 
 test('saved agent prompt cancellation returns to file quality without starting a run', async ({ page }) => {

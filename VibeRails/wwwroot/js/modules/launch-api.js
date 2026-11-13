@@ -61,7 +61,7 @@ export class LaunchApi {
             promptPrefix = null,
             initialPrompt = null,
             expectedRevision = null,
-            nativeTerminal = false
+            nativeTerminal = type === 'preset'
         } = {}
     ) {
         return this.call('runs', 'POST', {

@@ -201,17 +201,18 @@ test('native startup errors are shown and repeated clicks do not enqueue duplica
     await expect(page.locator('[data-launch-editor]')).toHaveCount(0);
 });
 
-test('terminal picker retains the in-app terminal launch path', async ({ page }) => {
+test('legacy terminal focus requests still launch saved agents natively', async ({ page }) => {
     const state = await setup(page);
     state.presets.push({ id: 'agent', name: 'Test agent', cli: 'codex', initialPrompt: 'Work', enabled: true, revision: 1 });
-    state.runUpdate = { status: 'running', sessionId: 'session', tabId: 'tab' };
+    state.runUpdate = { status: 'running', sessionId: 'session', tabId: null };
     await page.evaluate(async () => {
         window.adoptedTabs = [];
         window.app.terminalController.adoptLaunchedTab = async id => { window.adoptedTabs.push(id); return true; };
-        await window.app.aiAgentsController.launch('agent', 'preset', { focusTerminal: true });
+        await window.app.aiAgentsController.launch('agent', 'preset', { focusTerminal: true, nativeTerminal: false });
     });
-    expect(state.requests.find(r => r.path === '/api/v1/runs' && r.method === 'POST').body.nativeTerminal).toBe(false);
-    expect(await page.evaluate(() => window.adoptedTabs)).toEqual(['tab']);
+    expect(state.requests.find(r => r.path === '/api/v1/runs' && r.method === 'POST').body.nativeTerminal).toBe(true);
+    expect(await page.evaluate(() => window.adoptedTabs)).toEqual([]);
+    await expect(page.getByText('Started in a native terminal.', { exact: true })).toBeVisible();
     await expect(page.locator('[data-launch-editor]')).toHaveCount(0);
 });
 

@@ -1519,7 +1519,7 @@ export class TerminalManager {
         const selectionForMeta = selection || (!tab?.state?.hasActiveSession ? tab?.state?.selection : null);
         const meta = this.getSelectionMeta(selectionForMeta);
         if (String(selectionForMeta || '').startsWith('preset:')) {
-            await this.app.aiAgentsController.launch(selectionForMeta.split(':')[1], 'preset', { focusTerminal: true });
+            await this.app.aiAgentsController.launch(selectionForMeta.split(':')[1], 'preset');
             return;
         }
         if (String(selectionForMeta || '').startsWith('env:')) {

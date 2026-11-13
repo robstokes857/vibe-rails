@@ -242,7 +242,7 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
             }
         }
         LaunchValidation.ValidateSnapshot(snapshot);
-        return snapshot;
+        return snapshot.WithCurrentTerminalPresentation();
     }
 
     public async Task ValidateSnapshotAsync(LaunchSnapshot snapshot, CancellationToken ct = default)

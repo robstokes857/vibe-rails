@@ -5,7 +5,9 @@
 The current launch model uses global presets and single typed Actions in
 `~/.vibe_rails/launches.db`, automatically initialized in Debug and Release.
 `LaunchService` snapshots admissions, `LaunchDispatcher` owns atomic execution
-claims, and `LaunchScheduler` runs only in an open root backend. Board assignments
+claims, and `LaunchScheduler` runs only in an open root backend. Board launches
+use in-app terminals; all non-Board preset admissions and retries use native terminals,
+regardless of caller presentation flags. Script/check presentation is unchanged. Assignments
 and ordered entries remain behind `IBoardStore`; recordings stay in the session
 store. Retired Environment/Job definitions are retained without adoption or
 execution. Historical sections describing their launch paths are superseded by

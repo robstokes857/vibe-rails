@@ -154,7 +154,7 @@ public class LaunchRoutesTests
             Assert.Equal(HttpStatusCode.OK, runResponse.StatusCode);
             var run = (await runResponse.Content.ReadFromJsonAsync<LaunchRun>(ct))!;
             Assert.Null(run.ClaimToken);
-            Assert.False(run.Snapshot.Context.NativeTerminal);
+            Assert.True(run.Snapshot.Context.NativeTerminal);
             using var nativeResponse = await SendAsync(HttpMethod.Post, url + "/api/v1/runs",
                 new LaunchRequest(saved.Preset.Id, NativeTerminal: true), ct);
             Assert.Equal(HttpStatusCode.OK, nativeResponse.StatusCode);

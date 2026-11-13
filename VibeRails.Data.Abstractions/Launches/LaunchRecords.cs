@@ -61,6 +61,15 @@ public sealed record LaunchSnapshot(LaunchExecutionContext Context, LaunchPreset
     public string DefinitionId => Preset?.Id ?? Action!.Id;
     public string DefinitionType => Preset is null ? "action" : "preset";
     public long Revision => Preset?.Revision ?? Action!.Revision;
+
+    /// <summary>Applies the destination policy for a new run while preserving its execution inputs.</summary>
+    public LaunchSnapshot WithCurrentTerminalPresentation()
+    {
+        if (Preset is null) return this;
+        // Manual card runs have a card ID; Board managers can launch without a card yet.
+        var fromBoard = Context.TriggerKind is "board" or "board-lane" || Context.CardId is not null;
+        return this with { Context = Context with { NativeTerminal = !fromBoard } };
+    }
 }
 
 /// <summary>Process outcome and explicit check/review evidence are intentionally distinct.</summary>

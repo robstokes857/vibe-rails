@@ -44,7 +44,63 @@ public sealed class NativeLaunchTests : IDisposable
             ? (await service.SaveActionAsync(root, null, new("Script", "", "script", new("check.py", JobScriptRuntime.Python, [])), Ct)).Id
             : (await service.SavePresetAsync(null, new("Agent", "", "codex", InitialPrompt: "Work"), Ct)).Preset.Id;
         return await service.EnqueueAsync(script ? "action" : "preset", id,
-            new(root, root, "manual", Guid.NewGuid().ToString("N"), ComposedPrompt: "Work", ContextIncluded: true, NativeTerminal: true), Ct);
+            new(root, root, "manual", Guid.NewGuid().ToString("N"), ComposedPrompt: "Work", ContextIncluded: true, NativeTerminal: script), Ct);
+    }
+
+    [Theory]
+    [InlineData("manual", null, false, true)]
+    [InlineData("manual", null, true, true)]
+    [InlineData("schedule", null, false, true)]
+    [InlineData("before-commit", null, false, true)]
+    [InlineData("after-commit", null, false, true)]
+    [InlineData("board", null, true, false)]
+    [InlineData("board", "card", true, false)]
+    [InlineData("board-lane", "card", true, false)]
+    [InlineData("manual", "card", true, false)]
+    public async Task PresetDestinationFollowsBoardOriginInsteadOfCallerPreference(
+        string trigger, string? card, bool requestedNative, bool expectedNative)
+    {
+        var service = new LaunchService(store, scripts.Object);
+        var preset = (await service.SavePresetAsync(null, new("Agent", "", "codex", InitialPrompt: "Work"), Ct)).Preset;
+        var run = await service.EnqueueAsync("preset", preset.Id,
+            new(root, root, trigger, "destination", CardId: card, NativeTerminal: requestedNative), Ct);
+        Assert.Equal(expectedNative, run.Snapshot.Context.NativeTerminal);
+        Assert.Equal(expectedNative, (await store.GetRunAsync(run.Id, Ct))!.Snapshot.Context.NativeTerminal);
+    }
+
+    [Fact]
+    public async Task QuickLaunchAlsoDefaultsToNativeButScriptPresentationIsPreserved()
+    {
+        var service = new LaunchService(store, scripts.Object);
+        var preset = (await service.SavePresetAsync(null, new("Quick launch", "", "codex"), Ct)).Preset;
+        var quick = await service.EnqueueAsync("preset", preset.Id, new(root, root, "manual", "quick"), Ct);
+        Assert.True(quick.Snapshot.Context.NativeTerminal);
+        var action = await service.SaveActionAsync(root, null, new("Script", "", "script", new("check.py", JobScriptRuntime.Python, [])), Ct);
+        var script = await service.EnqueueAsync("action", action.Id, new(root, root, "manual", "script"), Ct);
+        Assert.False(script.Snapshot.Context.NativeTerminal);
+    }
+
+    [Theory]
+    [InlineData("manual", false, true)]
+    [InlineData("board", true, false)]
+    public async Task RetryUsesCurrentDestinationPolicyWithoutRewritingOriginalInputs(
+        string trigger, bool originalNative, bool expectedNative)
+    {
+        var service = new LaunchService(store, scripts.Object);
+        var preset = (await service.SavePresetAsync(null, new("Agent", "", "codex", InitialPrompt: "Original prompt"), Ct)).Preset;
+        // A retained snapshot from an older version may have used the other presentation.
+        var original = await store.EnqueueAsync(new(new(LaunchService.ProjectKey(root), root, trigger, "original",
+            NativeTerminal: originalNative), preset), ct: Ct);
+        var claim = (await store.TryClaimAsync(original.Id, 3, Environment.ProcessId, DateTime.UtcNow, Ct))!;
+        await store.CompleteAsync(claim, "failed", ct: Ct);
+        await service.SavePresetAsync(preset.Id, new("Agent", "", "codex", InitialPrompt: "Changed prompt", ExpectedRevision: preset.Revision), Ct);
+
+        var retry = await service.RetryAsync(root, original.Id, Ct);
+
+        Assert.Equal(expectedNative, retry.Snapshot.Context.NativeTerminal);
+        Assert.Equal(original.Id, retry.SourceRunId);
+        Assert.Equal("Original prompt", retry.Snapshot.Preset!.InitialPrompt);
+        Assert.Equal(originalNative, (await store.GetRunAsync(original.Id, Ct))!.Snapshot.Context.NativeTerminal);
     }
 
     [Theory]

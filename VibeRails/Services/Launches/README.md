@@ -96,7 +96,7 @@ the existing local-user project resolver.
 | `POST /presets/{id}/retire`, `POST /actions/{id}/retire` | `{expectedRevision}`; retains history and attachments |
 | `GET /trigger-bindings` | Current-project bindings; optional `definitionId` |
 | `POST /trigger-bindings`, `PUT /trigger-bindings/{id}` | `SaveBindingRequest`; `enabled:false` disables |
-| `POST /runs` | `{definitionId,definitionType,occurrenceId?,nativeTerminal?}`; queues latest revision; native defaults to false |
+| `POST /runs` | `{definitionId,definitionType,occurrenceId?,nativeTerminal?}`; queues latest revision; presets always use native terminals outside Board; Actions retain the requested presentation (default false) |
 | `GET /runs` | Optional `definitionId`, `before` and `limit` (1–100); `{runs,nextCursor}` |
 | `GET /runs/{id}` | Project-scoped immutable inputs and current process state |
 | `POST /runs/{id}/resolve` | `{confirmedStopped:true}` after inspecting an uncertain launch and stopping surviving descendants; rejects live/unverifiable recorded owners, ends as interrupted, never retries |
@@ -122,9 +122,13 @@ and become ineligible. Existing queued Agent snapshots retain their own prompt.
 The picker key for a preset is `preset:<stable-id>:<cli>`; `base:<cli>` remains
 available. Start saved definitions through `/runs`; observe the run's `tabId`
 and `sessionId` to navigate to its terminal. A successful enqueue is not a
-successful process. Native runs have no tab ID: the catalog and Quick actions request
-`nativeTerminal:true`, leave the current view open and poll for startup or failure.
-Terminal-picker and existing VS Code requests retain their in-app terminal behavior.
+successful process. Native runs have no tab ID. All non-Board preset launches, including
+the catalog, Quick actions, terminal picker, VS Code, Quality/Rules fixes, schedules and
+Git events, use native terminals. UI callers leave the current view open and poll for
+startup or failure. `LaunchService` enforces the destination even for callers that request
+`nativeTerminal:false`. Board managers, card runs (including the manual trigger) and lane
+agents use in-app terminals, even if a caller requests native presentation. Scripts and
+checks retain their existing presentation; signed library scripts use their private window.
 Synchronous Board launches return a conflict and cancel
 their queue entry when capacity is unavailable, so manager registration cannot
 be deferred past the caller's launch transaction.
@@ -155,8 +159,10 @@ using disposable data and fixed PowerShell commands; see its README.
 
 Admission snapshots definition revision, options, composed prompt template,
 attachment IDs, trigger occurrence, project and Board context. Editing changes
-future admissions only. Retry copies the source snapshot and links `sourceRunId`;
-Run now reads the latest definition. Both reject retired/disabled definitions and
+future admissions only. Retry copies the source execution inputs and links `sourceRunId`,
+applying the current Board/native presentation policy to the new preset run without
+changing the original record. The store applies that policy after loading the authoritative
+retry source. Run now reads the latest definition. Both reject retired/disabled definitions and
 unsupported inputs. `{{step:...}}` is rejected on save, admission, retry and
 execution, including old queued payloads. Supported ordinary substitutions run
 once in the executing child; its exact final prompt is recorded before spawn.

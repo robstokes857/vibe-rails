@@ -37,6 +37,14 @@ test('acknowledged native runs need no further polling', async () => {
     }
 });
 
+test('closing the owner stops native startup polling without another request', async () => {
+    const abort = new AbortController();
+    const queued = { id: 'native', status: 'queued' };
+    const waiting = waitForNativeLaunch({ call() { assert.fail('read after close'); } }, queued, { signal: abort.signal });
+    abort.abort();
+    assert.equal(await waiting, queued);
+});
+
 test('queued tab is not adopted before its session starts', async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const adopted = [];

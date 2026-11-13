@@ -808,11 +808,14 @@ a quiet border and 12px padding. Keep Run visible beside long names, including o
 narrow screens. Place **Manage AI Agents** in a quieter footer after a separator.
 The trigger references the popover with `aria-controls` and `aria-haspopup="dialog"`;
 ordinary buttons support Tab, and Escape closes it and returns focus to the trigger.
-Run from the catalog or Quick actions starts the saved definition in a native OS
-terminal and leaves the current page open. It does not open the definition editor.
+Saved Agents and Quick Launches open a native OS terminal for every non-Board launch,
+including the catalog, Quick actions, terminal picker, VS Code, Quality/Rules fixes,
+schedules and Git events. Keep the current page open rather than navigating to an
+in-app terminal or opening the definition editor. Board-launched agents, including
+card runs, lane agents and managers, use in-app terminals.
 Run on a library script opens its private, minimizable script terminal on the current page.
 Show launch progress and failures explicitly; queued work must not be reported as
-already running. Terminal-picker launches retain their in-app terminal behavior.
+already running. Script and check execution keeps its existing presentation.
 
 #### Top bar account
 

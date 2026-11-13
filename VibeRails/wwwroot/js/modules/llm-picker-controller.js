@@ -684,7 +684,7 @@ export class LlmPickerController {
 
         if (item.key.startsWith('preset:')) {
             this._closeCustomizationModal({ restoreFocus:false });
-            await this.app.aiAgentsController.launch(item.key.split(':')[1], 'preset', { focusTerminal: true });
+            await this.app.aiAgentsController.launch(item.key.split(':')[1], 'preset');
             return;
         }
         if (!item.key.startsWith('base:')) {

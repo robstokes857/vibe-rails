@@ -1,12 +1,13 @@
 import { isRunFinished } from './launch-api.js';
 
 /** Observe actual native startup; enqueue alone does not mean a process has started. */
-export async function waitForNativeLaunch(api, initial) {
+export async function waitForNativeLaunch(api, initial, { signal } = {}) {
     let run = initial;
-    for (let attempt = 0; attempt < 30; attempt++) {
+    for (let attempt = 0; attempt < 30 && !signal?.aborted; attempt++) {
         if (run.status === 'running' || isRunFinished(run) || run.status === 'uncertain') return run;
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        run = await api.call(`runs/${encodeURIComponent(run.id)}`);
+        await waitForPoll(signal);
+        if (signal?.aborted) return run;
+        run = await api.call(`runs/${encodeURIComponent(run.id)}`, 'GET', null, { signal });
     }
     return run;
 }
@@ -21,15 +22,7 @@ export async function openLaunchTerminal(app, api, initial, { signal } = {}) {
             return true;
         }
         if (isRunFinished(run) || run.status === 'uncertain') return false;
-        await new Promise((resolve) => {
-            const done = () => {
-                clearTimeout(timer);
-                signal?.removeEventListener('abort', done);
-                resolve();
-            };
-            const timer = setTimeout(done, 1000);
-            signal?.addEventListener('abort', done, { once: true });
-        });
+        await waitForPoll(signal);
         if (signal?.aborted) return false;
         run = await api.call(
             `runs/${encodeURIComponent(run.id)}`,
@@ -39,4 +32,16 @@ export async function openLaunchTerminal(app, api, initial, { signal } = {}) {
         );
     }
     return false;
+}
+
+function waitForPoll(signal) {
+    return new Promise((resolve) => {
+        const done = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', done);
+            resolve();
+        };
+        const timer = setTimeout(done, 1000);
+        signal?.addEventListener('abort', done, { once: true });
+    });
 }

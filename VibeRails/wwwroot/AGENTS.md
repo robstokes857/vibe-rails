@@ -21,7 +21,10 @@ launches pass through the dashboard prompt resolver; Action runs can queue in th
 **Run** in the catalog and top-bar Quick actions requests `nativeTerminal:true` and
 opens a native OS terminal without opening the editor or navigating. Report actual
 startup/failure from the run status; enqueue alone is not successful execution.
-Calls with `focusTerminal:true` retain the existing VibeRails terminal-tab flow.
+All non-Board saved preset launches use native terminals, including terminal-picker,
+VS Code and Quality/Rules launches. Legacy `focusTerminal:true` and `nativeTerminal:false`
+requests cannot switch a saved preset back to an in-app tab. Board launches stay in-app;
+script/check presentation and signed library script windows retain their existing flow.
 
 The catalog presents Agents, Quick Launches and Scripts with the shared surface and
 empty-state styles. **Create script** opens the script-only Action editor; existing checks

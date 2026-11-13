@@ -142,7 +142,8 @@ public sealed class LaunchReviewFollowUpTests : IDisposable
         var title = $"{card.DisplayId} · Card";
         var run = await Service(board).EnqueueAsync("preset", preset.Id, new(repo, repo, "board", "board:title",
             BoardId: card.BoardId, CardId: card.Id, ContextIncluded: true, ComposedPrompt: "Work", SessionOrigin: origin,
-            SessionTitle: title), Ct);
+            SessionTitle: title, NativeTerminal: true), Ct);
+        Assert.False(run.Snapshot.Context.NativeTerminal);
         var session = Guid.NewGuid().ToString();
         StartTerminalRequest? started = null;
         var tabs = new Mock<ITerminalTabHostService>();

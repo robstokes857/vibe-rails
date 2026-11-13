@@ -227,6 +227,7 @@ export class AiAgentsController {
         type = 'preset',
         { focusTerminal = false, promptPrefix = null, nativeTerminal = !focusTerminal } = {}
     ) {
+        if (type === 'preset') nativeTerminal = true;
         if (this.launching.has(id)) return;
         this.launching.add(id);
         try {

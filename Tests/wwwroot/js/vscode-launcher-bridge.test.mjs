@@ -40,7 +40,7 @@ test('typed preset launches resolve templates in the shared browser flow and Act
     f.send({ command: 'launchDefinition', definitionType: 'action', definitionId: 'action_1' });
     f.send({ command: 'launchQueued', definitionType: 'action', definitionId: 'action_1' });
     await settled();
-    assert.deepEqual(f.calls, [['launch', 'preset_1', 'preset', { focusTerminal: true }], ['editor', 'action', 'action_1']]);
+    assert.deepEqual(f.calls, [['launch', 'preset_1', 'preset'], ['editor', 'action', 'action_1']]);
 });
 
 test('each host command reaches the same code path the nav flyout uses', async () => {
