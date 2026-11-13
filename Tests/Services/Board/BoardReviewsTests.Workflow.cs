@@ -71,7 +71,7 @@ public sealed partial class BoardReviewsTests
     }
 
     [Fact]
-    public async Task WorkflowReviewRequiresExplicitPassAndSuccessfulProcessCompletion()
+    public async Task WorkflowReviewRetainsExplicitPassAndWaitsForProcessCompletion()
     {
         var f = await NewWorkflow();
         var report = await SavePass(f);
@@ -87,13 +87,18 @@ public sealed partial class BoardReviewsTests
     [Theory]
     [InlineData("succeeded", false)]
     [InlineData("failed", true)]
-    public async Task ProcessSuccessWithoutVerdictAndPassWithFailedProcessBothBlock(string outcome, bool report)
+    public async Task CompletedReviewAdvancesAndRetryPreservesTheNextRun(string outcome, bool report)
     {
         var f = await NewWorkflow();
         if (report) await SavePass(f);
         await f.Runs.CompleteAsync(f.Claim, outcome, outcome == "succeeded" ? 0 : 1, ct: Ct);
         await f.Workflow.TickAsync(Ct);
-        Assert.Empty(await f.Runs.GetActiveRunsAsync(Ct));
+        var next = Assert.Single(await f.Runs.GetActiveRunsAsync(Ct));
+        Assert.NotEqual(f.Run.Id, next.Id);
+        Assert.Equal("Next", next.Snapshot.Preset!.Name);
+        var completed = (await store.GetLaunchEventsAsync(repo, card.Id, Ct)).Single(e => e.Id == f.Entry);
+        Assert.Equal(outcome, completed.ProcessStatus);
+        Assert.Equal(report ? "passed" : null, completed.Verdict);
         var retry = await f.Launches.RetryAsync(repo, f.Run.Id, Ct);
         Assert.Equal(f.Run.Id, retry.SourceRunId);
         var entry = (await store.GetLaunchEventsAsync(repo, card.Id, Ct)).Single(e => e.Id == f.Entry);
@@ -102,7 +107,7 @@ public sealed partial class BoardReviewsTests
         await store.ReportLaunchEventAsync(repo, card.Id, f.Entry, "skipped", "User skip", null, null, true, Ct);
         await f.Workflow.TickAsync(Ct);
         Assert.Equal("cancelled", (await f.Runs.GetRunAsync(retry.Id, Ct))!.Status);
-        Assert.Single(await f.Runs.GetActiveRunsAsync(Ct));
+        Assert.Equal(next.Id, Assert.Single(await f.Runs.GetActiveRunsAsync(Ct)).Id);
     }
 
     [Theory]
