@@ -282,9 +282,12 @@ direct saved-environment sessions use the current Environment purpose when posti
 comments are never reclassified. The DTO and sync portable-field allowlist carry the metadata.
 Filters preserve attention comments regardless of purpose. No schema change or historical backfill.
 
-Completion instructions explicitly order report → handoff → intended movement → complete_board_agent
-→ end_agent_session → final response. Wait for any required review before ending your own session.
-Standalone Automation Workers get the self-exit guidance without requiring Board tools or a card.
+Automation and delegated Agent workflow completion instructions explicitly order report → handoff
+→ intended movement (when owned by that role) → complete_board_agent → end_agent_session → final
+response. Wait for any required work, review or approval before ending your own session. Ordinary
+interactive card work/review sessions still report completion, but self-close remains optional;
+a pending user answer is not task completion. Standalone Automation Workers and native Agent runs
+get self-exit guidance without requiring Board tools or a card; native Quick Launches do not.
 See the [terminal contract](../Terminal/AGENTS.md#agent-self-completion-and-terminal-menu-vibe-49).
 
 The lane add form has a separate body and type/Automation selectors. Lane VCA/Code quality additions

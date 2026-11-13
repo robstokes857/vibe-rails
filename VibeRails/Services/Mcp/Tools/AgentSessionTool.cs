@@ -25,7 +25,7 @@ public sealed class AgentSessionTool
     public const string TabTokenVariable = "VIBERAILS_AGENT_CONTROL_TAB_TOKEN";
 
     [McpServerTool]
-    [Description("When completely finished, schedule your own PTY and its child processes to close in 30 seconds. First save all reports, comments and handoffs, make intended card moves, and call complete_board_agent. Call this last, then send your final response; do not start more work or wait for another agent afterward. Safe to repeat: the original deadline stays. No target argument; cannot end another session. Recordings are retained. This is an intentional normal terminal exit, not a review approval.")]
+    [Description("Schedule your own PTY and its child processes to close in 30 seconds when this session should end. Available to every VibeRails terminal session; finishing an interactive task does not by itself require closing the terminal. Follow the user's request or the launch's auto-close instructions. Before using it, save all required reports, comments and handoffs, make intended card moves, and call complete_board_agent if linked to a card. Call this last, then send your final response; do not start more work or wait for another agent afterward. Safe to repeat: the original deadline stays. No target argument; cannot end another session. Recordings are retained. This is an intentional normal terminal exit, not a review approval.")]
     public async Task<string> EndAgentSession(CancellationToken cancellationToken = default)
     {
         var session = readEnvironment(LocalToolApiContext.CurrentSessionIdVariable);

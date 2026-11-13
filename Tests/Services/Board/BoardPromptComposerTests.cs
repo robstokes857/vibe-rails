@@ -180,6 +180,22 @@ public sealed class BoardPromptComposerTests
     }
 
     [Fact]
+    public void OrdinaryWorkAndReviewPromptsDoNotAskTheSessionToClose()
+    {
+        foreach (var intent in new[] { "work", "code_review", "chat" })
+        {
+            var prompt = BoardPromptComposer.Compose(Card(), "Build", "codex", null, intent: intent);
+            Assert.DoesNotContain("end_agent_session", prompt);
+            Assert.DoesNotContain("Before exiting", prompt);
+            if (intent != "chat")
+            {
+                Assert.Contains("complete_board_agent", prompt);
+                Assert.Contains("a pending question is not task completion", prompt);
+            }
+        }
+    }
+
+    [Fact]
     public void AutomationCompletionIsExplicitForBoardAndStandaloneWorkers()
     {
         foreach (var purpose in new[] { "code_review", "testing", "building", "deploying" })

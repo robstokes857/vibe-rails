@@ -7,7 +7,7 @@ namespace VibeRails.Services.Mcp.Tools;
 
 public sealed partial class BoardTool
 {
-    [McpServerTool, Description("Report that this agent has finished its work, with a final summary and outcome. Call after posting your handoff and moving the card. A VibeRails terminal retains its first session report; then call end_agent_session LAST to close its PTY. A desktop MCP client must name the card; its summary is saved as an internal Board comment and its connection's desktop activity ends. Stateless HTTP shares an app-name activity mark that expires after 90 seconds of inactivity or when the card closes. Does not move cards or complete remaining Automation actions.")]
+    [McpServerTool, Description("Report that this agent has finished its work, with a final summary and outcome. Call after posting your handoff and making any intended card moves. A VibeRails terminal retains its first session report. Reporting completion does not itself close the terminal or require it to close. A desktop MCP client must name the card; its summary is saved as an internal Board comment and its connection's desktop activity ends. Stateless HTTP shares an app-name activity mark that expires after 90 seconds of inactivity or when the card closes. Does not move cards or complete remaining Automation actions.")]
     public async Task<string> CompleteBoardAgent(
         [Description("Final result and validation, up to 4,000 characters.")] string summary,
         [Description("succeeded | failed | cancelled. Defaults to succeeded.")] string outcome = "succeeded",
@@ -45,7 +45,7 @@ public sealed partial class BoardTool
             var report = await service.CompleteAgentAsync(target.Project, target.CardId!, sessionId, outcome, summary, cancellationToken);
             return report is null
                 ? "FAIL: this session is not linked to that card. Use attach_board_session before reporting its completion."
-                : $"Agent {report.SessionId} reported {report.Outcome} at {report.CompletedUtc:O}.\n{report.Summary}\nYou may now exit. Automation actions and terminal cleanup finish independently.";
+                : $"Agent {report.SessionId} reported {report.Outcome} at {report.CompletedUtc:O}.\n{report.Summary}\nCompletion recorded. Automation actions and terminal cleanup finish independently.";
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (Exception ex) when (ex is not OperationCanceledException) { return Fail("report agent completion", ex); }

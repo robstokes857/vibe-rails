@@ -5,6 +5,7 @@ using VibeRails.Data.Sqlite;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Launches;
+using VibeRails.Services;
 using VibeRails.Services.Board;
 using VibeRails.Services.Cli;
 using VibeRails.Services.Jobs;
@@ -66,6 +67,38 @@ public sealed class NativeLaunchTests : IDisposable
             new(root, root, trigger, "destination", CardId: card, NativeTerminal: requestedNative), Ct);
         Assert.Equal(expectedNative, run.Snapshot.Context.NativeTerminal);
         Assert.Equal(expectedNative, (await store.GetRunAsync(run.Id, Ct))!.Snapshot.Context.NativeTerminal);
+    }
+
+    [Fact]
+    public void NativeAgentPromptKeepsOverridesAndAddsCompletionGuidance()
+    {
+        var preset = new LaunchPreset("preset", "Agent", "", LLM.Codex, new(), [], "Saved {{git_branch}}",
+            true, 1, DateTime.UtcNow, DateTime.UtcNow);
+        var snapshot = new LaunchSnapshot(new(root, root, "manual", "run", NativeTerminal: true), preset);
+        foreach (var context in new[]
+        {
+            snapshot.Context,
+            snapshot.Context with { PromptOverride = "Override {{git_branch}}" },
+            snapshot.Context with { ComposedPrompt = "Context and task {{git_branch}}", PromptOverride = "Ignored override" }
+        })
+        {
+            var prompt = NativeLaunchRunner.ComposePrompt(snapshot with { Context = context });
+            Assert.StartsWith("This is a standalone Agent run in a native terminal.", prompt);
+            Assert.Contains("end_agent_session as your last tool call", prompt);
+            Assert.Contains("Do not call it while work or an approval you need is still pending", prompt);
+            Assert.EndsWith(context.ComposedPrompt ?? context.PromptOverride ?? preset.InitialPrompt, prompt);
+        }
+    }
+
+    [Fact]
+    public void NativeQuickLaunchDoesNotGetCompletionGuidance()
+    {
+        var preset = new LaunchPreset("preset", "Quick Launch", "", LLM.Codex, new(), [], null,
+            true, 1, DateTime.UtcNow, DateTime.UtcNow);
+        var snapshot = new LaunchSnapshot(new(root, root, "manual", "run", NativeTerminal: true), preset);
+        Assert.Null(NativeLaunchRunner.ComposePrompt(snapshot));
+        Assert.Equal("Ready to help", NativeLaunchRunner.ComposePrompt(snapshot with
+        { Context = snapshot.Context with { ComposedPrompt = "Ready to help" } }));
     }
 
     [Fact]

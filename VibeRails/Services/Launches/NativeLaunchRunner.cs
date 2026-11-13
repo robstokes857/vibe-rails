@@ -39,7 +39,7 @@ public static class NativeLaunchRunner
             var context = run.Snapshot.Context;
             var card = context.CardId is null ? null : await board.FindCardAsync(context.ProjectPath, context.CardId, ct);
             var prompt = await scoped.GetRequiredService<IPromptPlaceholderService>().ResolveLaunchAsync(
-                context.ComposedPrompt ?? context.PromptOverride ?? preset.InitialPrompt,
+                ComposePrompt(run.Snapshot),
                 new(context.WorkingDirectory, EnvironmentName: preset.Name, BoardCardKey: card?.Key), ct);
             var execution = new LaunchExecution(store, service, run, board);
             return await scoped.GetRequiredService<TerminalRunner>().RunCliWithWebAsync(
@@ -63,5 +63,12 @@ public static class NativeLaunchRunner
             Serilog.Log.Warning(ex, "[Launches] Native launch failed for {RunId}", id);
             return 1;
         }
+    }
+
+    /// <summary>Native Agent runs close after their assignment; blank-prompt Quick Launches remain interactive.</summary>
+    internal static string? ComposePrompt(LaunchSnapshot snapshot)
+    {
+        var template = snapshot.Context.ComposedPrompt ?? snapshot.Context.PromptOverride ?? snapshot.Preset!.InitialPrompt;
+        return snapshot.Preset!.Kind == "agent" ? BoardPromptComposer.ComposeNativeAgentPrompt(template) : template;
     }
 }

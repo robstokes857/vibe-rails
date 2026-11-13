@@ -87,15 +87,21 @@ public static class BoardPromptComposer
         "Critical, high and medium-high findings block completion; fix them. "
         + "Medium-low and low findings are non-blocking notes: the worker may fix now or defer to a backlog card. Reference the original card/finding there; link the backlog key in the original card's comment and handoff. These notes alone need no re-review. ";
     internal const string AgentCompletionGuidance =
-        "Before exiting, call complete_board_agent with your outcome and summary after the handoff and card moves. "
+        "When your assigned work is finished, call complete_board_agent with your outcome and summary after the handoff and card moves. "
         + "To wait for a triggered agent, poll get_board_agent_status every 10 seconds for pending entries, run outcomes and completion reports. "
         + "Poll get_board_reviews every 10 seconds; read the report with reviewId and check scope. Fix agreed blockers; document disagreements with evidence. "
         + ReviewFindingGuidance
         + "Success without a report means report missing, never approved. "
-        + "When completely finished (including any review you are waiting for), call end_agent_session LAST, then send your final response. It closes only your own PTY and child processes after 30 seconds, retaining recordings. Do not start more work after calling it. ";
+        + "If work is waiting on the user's answer or approval, keep the session open and wait for that response; a pending question is not task completion. ";
+    internal const string AutomationCompletionGuidance =
+        "When completely finished (including any review you are waiting for), call end_agent_session LAST, then send your final response. It closes only your own PTY and child processes after 30 seconds, retaining recordings. Do not start more work after calling it. ";
 
     internal static string ComposeStandaloneAutomationPrompt(string? workerPrompt) =>
-        "This is an Automation Worker session. When your review, testing, build, deployment or other assigned work is completely finished, save all required results and handoffs, then call end_agent_session as your last tool call. Send your final response immediately; your PTY closes 30 seconds later so the workflow can continue. Do not call it while work or an approval you need is still pending.\n\n" + workerPrompt;
+        "This is an Automation Worker session. " + StandaloneCompletionGuidance + "\n\n" + workerPrompt;
+    internal static string ComposeNativeAgentPrompt(string? agentPrompt) =>
+        "This is a standalone Agent run in a native terminal. " + StandaloneCompletionGuidance + "\n\n" + agentPrompt;
+    private const string StandaloneCompletionGuidance =
+        "When your review, testing, build, deployment or other assigned work is completely finished, save all required results and handoffs, then call end_agent_session as your last tool call. Send your final response immediately; your PTY closes 30 seconds later so the workflow can continue. Do not call it while work or an approval you need is still pending.";
     internal const string ReviewEvidenceGuidance =
         "You are the code review agent. Purpose: Code review. Expected output: a durable review on the originating card through begin_board_review and save_board_review, in addition to any destinations explicitly requested by the user. "
         + "Before reviewing code, call begin_board_review to capture the actual checkout, base/head or explicit change scope and dirty changes where applicable. A card is not automatically a Git diff boundary: identify the intended changes, and surface ambiguous scope as Incomplete instead of attributing unrelated edits to this card. "
@@ -103,7 +109,7 @@ public static class BoardPromptComposer
         + "Review pragmatically: prioritize correctness, security and data-loss risks with concrete evidence. Keep style preferences, speculative concerns and optional refactors as non-blocking suggestions; severity follows demonstrated impact. Label each finding's severity and clearly separate blocking findings from non-blocking notes in the report. ";
     internal const string ReviewGuidance = ReviewEvidenceGuidance
         + "Next action: use judgment and the user's Board workflow. Read get_board_card and list_board_columns for lane context and destination Automations. Save the review and handoff before moving, then report the move. Humans and LLMs decide movement; a lane named Done alone is not permission to merge or publish. "
-        + "Finish explicitly: save_board_review, add_board_comment with the handoff, make any intended lane move, complete_board_agent, then end_agent_session as your last tool call. The PTY closes 30 seconds later; send your final response immediately. ";
+        + "Finish explicitly: save_board_review, add_board_comment with the handoff, make any intended lane move, then complete_board_agent. ";
 
     /// <summary>
     /// Adds the Board workflow to a card-triggered Worker without replacing its instructions.
@@ -119,7 +125,7 @@ public static class BoardPromptComposer
         + "This is an Automation-launched agent. Keep your progress logs, decisions, validation results and final handoff in Comments using add_board_comment on every card this Automation is working against. Attach any additional cards with attach_board_session and name each target explicitly when commenting. Do not leave the only copy in terminal output: the Automation terminal closes after completion; its recording remains available. "
         + (managedWorkflow ? "Read the user's context from get_board_card. The manager owns lane movement and closure. "
             : "Before moving, save your handoff, check destination Automations with list_board_columns, then report the move. Read the user's context from get_board_card. ")
-        + JiraGuidance + AdoGuidance + (managedWorkflow ? ManagedWorkflowGuidance : WorkflowGuidance) + AttentionGuidance + (managedWorkflow ? "" : AgentCompletionGuidance)
+        + JiraGuidance + AdoGuidance + (managedWorkflow ? ManagedWorkflowGuidance : WorkflowGuidance) + AttentionGuidance + (managedWorkflow ? "" : AgentCompletionGuidance + AutomationCompletionGuidance)
         + (userContext.Length == 0 ? "" : "\n\n" + userContext)
         + "\n\n" + (workerPrompt ?? "")
         + (managedWorkflow ? "\n\nAgent workflow Automation role: complete only your assigned step. Save required review evidence, report_automation_step with passed or failed and its summary, then save your handoff, complete_board_agent and end_agent_session LAST. Leave movement and closure to the manager; do not wait for later lane steps." : "");

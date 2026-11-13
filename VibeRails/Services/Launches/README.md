@@ -147,7 +147,11 @@ For a native run, the root claims capacity and uses the existing OS-terminal lau
 to invoke `--launch-run <id> --workdir <dir>` as separate argv. That execution child
 starts no root scheduler. It validates the immutable snapshot again and owns normal
 session recording, cancellation and deadlines. Presets use the native console/PTY
-path; Actions stream their captured output to the console and the recording. No
+path; prompt-bearing Agents receive explicit instructions to save their results and call
+`end_agent_session` after completing their assignment. `NativeLaunchRunner` adds this guidance
+before placeholder resolution and recording the final prompt, preserving the snapshot's
+composed prompt/override precedence. Native Quick Launches receive no auto-close instruction.
+Actions stream their captured output to the console and the recording. No
 legacy Job or Environment is created. Native mode is an additive snapshot JSON
 field, with no schema change. A native claim unacknowledged after 30 seconds is
 atomically sealed only if execution has not started; a late child then cannot spawn.

@@ -45,7 +45,10 @@ public sealed class BoardAgentCompletionTests : IDisposable
         await repository.CreateSessionAsync(session, "codex", null, root, Environment.ProcessId);
         await store.LinkSessionAsync(root, card.Id, session, "tab", "base:codex", "codex", "Reviewer", "automation", Ct);
         await store.AddCommentAsync(root, card.Id, BoardAuthor.Agent("Reviewer", "codex", session), "Checking regressions", Ct);
-        Assert.Contains("reported succeeded", await tool.CompleteBoardAgent("Tests passed", cancellationToken: Ct));
+        var completion = await tool.CompleteBoardAgent("Tests passed", cancellationToken: Ct);
+        Assert.Contains("reported succeeded", completion);
+        Assert.DoesNotContain("You may now exit", completion);
+        Assert.DoesNotContain("end_agent_session", completion);
         Assert.Contains("Tests passed", await tool.CompleteBoardAgent("This retry cannot rewrite the result", "failed", cancellationToken: Ct));
         Assert.Null((await repository.GetSessionByIdAsync(session, Ct))!.EndedUTC);
         if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())

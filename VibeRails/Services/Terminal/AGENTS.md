@@ -41,6 +41,13 @@ repository. Its local checkout location is developer-specific.
 ### Agent self-completion and terminal menu (VIBE-49)
 
 `end_agent_session` schedules only the calling CLI's current PTY for closure after 30 seconds.
+It remains available to every managed terminal session. Ordinary card work/review prompts and
+`complete_board_agent` do not tell the agent to close after reporting completion; a pending user
+answer or approval should leave the conversation open. Lane Automation and standalone native
+Agent prompts explicitly request closure after all assigned work and handoffs are finished.
+Native Quick Launches do not receive that instruction. The initial Board nudge only asks for a
+ready-to-help reply. These prompt distinctions do not restrict the MCP capability or change the
+existing inactivity cleanup below.
 Reports, handoffs, card moves and `complete_board_agent` must precede it; it is the last tool
 call before the final response. `AgentSessionEndScheduler` is process-local, repeats retain the
 first deadline, and `CompleteAgentSessionAsync` rechecks the exact session under the lifecycle
