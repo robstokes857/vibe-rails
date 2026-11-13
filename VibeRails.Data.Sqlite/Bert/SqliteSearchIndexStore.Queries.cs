@@ -191,11 +191,11 @@ public sealed partial class SqliteSearchIndexStore
         """;
 
     /// <summary>Interrupts the connection's running statement when <paramref name="ct"/> is cancelled.</summary>
-    private static CancellationTokenRegistration Interrupt(SqliteConnection db, CancellationToken ct) =>
+    internal static CancellationTokenRegistration Interrupt(SqliteConnection db, CancellationToken ct) =>
         ct.CanBeCanceled ? ct.Register(static state => SQLitePCL.raw.sqlite3_interrupt(((SqliteConnection)state!).Handle), db) : default;
 
     /// <summary>Reports an interrupted statement as the cancellation that caused it.</summary>
-    private static T Cancellable<T>(Func<T> step, CancellationToken ct)
+    internal static T Cancellable<T>(Func<T> step, CancellationToken ct)
     {
         try { return step(); }
         catch (SqliteException ex) when (ex.SqliteErrorCode == SQLitePCL.raw.SQLITE_INTERRUPT && ct.IsCancellationRequested)

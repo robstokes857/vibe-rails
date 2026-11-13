@@ -320,7 +320,8 @@ export class BoardController {
             const [boards, columns, page] = await Promise.all([
                 BoardApi.getBoardsAsync({ signal: abort.signal }),
                 BoardApi.getBoardColumnsAsync(boardId, { signal: abort.signal }),
-                BoardApi.getBoardCardPageAsync(boardId, filters, { signal: abort.signal })
+                // Tiles need only a description excerpt; the editor reads the full card (VIBE-321).
+                BoardApi.getBoardCardPageAsync(boardId, filters, { signal: abort.signal, excerpt: true })
             ]);
             if (!current()) return;
             if (!boards.some(board => board.id === boardId)) { await this.refresh(); return; }
@@ -332,7 +333,7 @@ export class BoardController {
                     // request also recounts the whole board, so 30 at a time cost three times more.
                     const response = await BoardApi.getBoardCardPageAsync(boardId, filters, {
                         columnId: lane.columnId, offset: lane.nextOffset,
-                        continuationToken: lane.continuationToken, signal: abort.signal,
+                        continuationToken: lane.continuationToken, signal: abort.signal, excerpt: true,
                         pageSize: Math.min(100, (loaded.get(lane.columnId) || 0) - lane.nextOffset)
                     });
                     if (!current()) return;
@@ -1193,7 +1194,7 @@ export class BoardController {
         if (button) { button.disabled = true; button.textContent = 'Loading…'; }
         try {
             const response = await BoardApi.getBoardCardPageAsync(boardId, this.state.filters, {
-                columnId, offset: lane.nextOffset, continuationToken: lane.continuationToken, signal: request.signal
+                columnId, offset: lane.nextOffset, continuationToken: lane.continuationToken, signal: request.signal, excerpt: true
             });
             if (!isCurrent()) return;
             const next = response.lanes?.find(item => item.columnId === columnId);
@@ -1392,7 +1393,7 @@ export class BoardController {
                 ? requestedBoardId : this.pickBoardId(boards);
             const [columns, page] = await Promise.all([
                 BoardApi.getBoardColumnsAsync(boardId),
-                BoardApi.getBoardCardPageAsync(boardId, this.state.filters, { signal: abort.signal })
+                BoardApi.getBoardCardPageAsync(boardId, this.state.filters, { signal: abort.signal, excerpt: true })
             ]);
             if (!isCurrent()) return;
             this.state.boards = boards;

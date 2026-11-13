@@ -181,6 +181,11 @@ test('background refresh re-reads loaded history in the fewest requests and neve
     assert.equal(h.requests.length, 6, 'three follow-up requests instead of eight, and none past what was loaded');
     assert.equal(h.controller.cardPage.lanes[0].nextOffset, 250);
     assert.equal(new URL(h.requests[2].url, 'http://local').searchParams.get('pageSize'), '30', 'the first page is unchanged');
+    // VIBE-321: tiles need only a description excerpt; the editor reads the full card.
+    const pages = h.requests.filter(item => item.url.includes('/cards?'));
+    assert.equal(pages.length, 4);
+    for (const request of pages)
+        assert.equal(new URL(request.url, 'http://local').searchParams.get('excerpt'), 'true', request.url);
 });
 
 test('background snapshots are discarded after navigation, paging, dragging or filter changes', async () => {

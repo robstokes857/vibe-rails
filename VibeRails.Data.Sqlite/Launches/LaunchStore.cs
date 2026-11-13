@@ -53,6 +53,15 @@ public sealed partial class LaunchStore : ILaunchStore
                 """;
             command.ExecuteNonQuery();
         });
+        // VIBE-321: a card's launch runs (GetBoardRunsAsync) read json_extract over every run of the
+        // project; this expression index answers them directly (289 ms -> 0.1 ms at 10,000 runs).
+        SqliteMigrationRunner.Apply(db, "launches", 5, MigrationKind.Additive, (migration, tx) =>
+        {
+            using var command = migration.CreateCommand();
+            command.Transaction = tx;
+            command.CommandText = "CREATE INDEX IX_LaunchRuns_Card ON Runs(ProjectPath, json_extract(Snapshot,'$.context.cardId'), Sequence DESC);";
+            command.ExecuteNonQuery();
+        });
         SqliteConnectionFactory.EnsureWalMode(db);
     }
 

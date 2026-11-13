@@ -210,13 +210,19 @@ public static partial class BoardRoutes
 
         // ---------------------------------------------------------------- cards
 
+        // excerpt=true (paged only): descriptions are cut to what a lane tile's preview needs (VIBE-321).
         app.MapGet("/api/v1/board/cards", (IBoardService board, string? boardId, int? pageSize, string? columnId,
             int? offset, string? continuationToken, string? q, string? assignee, string? type, string? priority, string? tag,
-            string? origin, bool? ghost, CancellationToken cancellationToken) =>
-            RunAsync(async () => Results.Ok(pageSize is int size
-                ? await board.GetCardsPageAsync(Project(), new BoardCardPageQuery(size, columnId, offset ?? 0,
-                    q, assignee, type, priority, tag, continuationToken, origin, ghost), cancellationToken, boardId)
-                : await board.GetCardsAsync(Project(), cancellationToken, boardId))))
+            string? origin, bool? ghost, bool? excerpt, CancellationToken cancellationToken) =>
+            RunAsync(async () =>
+            {
+                if (pageSize is not int size) return Results.Ok(await board.GetCardsAsync(Project(), cancellationToken, boardId));
+                var page = await board.GetCardsPageAsync(Project(), new BoardCardPageQuery(size, columnId, offset ?? 0,
+                    q, assignee, type, priority, tag, continuationToken, origin, ghost), cancellationToken, boardId);
+                return Results.Ok(excerpt == true
+                    ? page with { Cards = page.Cards.Select(card => card with { Description = BoardCardExcerpt.For(card.Description) }).ToList() }
+                    : page);
+            }))
             .WithName("GetBoardCards");
 
         app.MapPost("/api/v1/board/cards", (IBoardService board, CreateBoardCardRequest request, CancellationToken cancellationToken) =>

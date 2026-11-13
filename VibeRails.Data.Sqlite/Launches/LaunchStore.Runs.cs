@@ -106,15 +106,18 @@ public sealed partial class LaunchStore
         return runs;
     }
 
+    /// <summary>A card's runs. The json_extract expression must stay identical to IX_LaunchRuns_Card's.</summary>
+    internal const string BoardRunsSql = $"""
+        SELECT {RunColumns} FROM Runs WHERE ProjectPath=$project AND json_extract(Snapshot,'$.context.cardId')=$card
+            AND ($run IS NULL OR Id=$run) AND ($session IS NULL OR SessionId=$session)
+        ORDER BY Sequence DESC LIMIT 50 OFFSET $offset;
+        """;
+
     public async Task<IReadOnlyList<LaunchRun>> GetBoardRunsAsync(string project, string cardId, int offset = 0, string? runId = null, string? sessionId = null, CancellationToken ct = default)
     {
         if (offset is < 0 or > 1_000_000) throw new LaunchValidationException("Invalid run offset.");
         using var db = Open();
-        using var cmd = Command(db, $"""
-            SELECT {RunColumns} FROM Runs WHERE ProjectPath=$project AND json_extract(Snapshot,'$.context.cardId')=$card
-                AND ($run IS NULL OR Id=$run) AND ($session IS NULL OR SessionId=$session)
-            ORDER BY Sequence DESC LIMIT 50 OFFSET $offset;
-            """, null, ("$project", project), ("$card", cardId), ("$run", runId), ("$session", sessionId), ("$offset", offset));
+        using var cmd = Command(db, BoardRunsSql, null, ("$project", project), ("$card", cardId), ("$run", runId), ("$session", sessionId), ("$offset", offset));
         using var reader = await cmd.ExecuteReaderAsync(ct);
         List<LaunchRun> runs = [];
         while (await reader.ReadAsync(ct)) runs.Add(ReadRun(reader));

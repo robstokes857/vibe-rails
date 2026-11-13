@@ -81,32 +81,35 @@ public sealed class KeywordSearchQueryTests : IDisposable
     }
 
     [Fact]
+    public void ACancelledTokenStopsTheSearchBeforeItStarts()
+    {
+        Seed(new Random(9), documents: 5);
+        var index = new SqliteSearchIndexStore(SearchPath, Path.Combine(root, "state.db"));
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Assert.Throws<OperationCanceledException>(() => index.Search("board", "needle", null, 10, ct: cancelled.Token));
+    }
+
+    [Fact]
     public void ACancelledTokenInterruptsTheRunningStatement()
     {
-        Seed(new Random(9), documents: 150, textLength: 6000);
-        var index = new SqliteSearchIndexStore(SearchPath, Path.Combine(root, "state.db"));
-        using (var cancelled = new CancellationTokenSource())
-        {
-            cancelled.Cancel();
-            Assert.Throws<OperationCanceledException>(() => index.Search("board", "needle", null, 10, ct: cancelled.Token));
-        }
-
+        // The helpers Search wraps around both of its statements. A statement that runs for many
+        // seconds makes this deterministic: the cancel always lands while SQLite is stepping it.
+        // A dedicated thread, not the thread pool, which can start a task late under a full test run.
+        SearchDatabaseSchema.Ensure(SearchPath);
+        using var db = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = SearchPath, Pooling = false }.ToString());
+        db.Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<2000000000) SELECT count(*) FROM n";
+        using var source = new CancellationTokenSource();
+        using var interrupt = SqliteSearchIndexStore.Interrupt(db, source.Token);
+        var canceller = new Thread(() => { Thread.Sleep(50); source.Cancel(); }) { IsBackground = true };
         var timer = Stopwatch.StartNew();
-        index.Search("board", "needle alpha beta gamma deploy migration", null, int.MaxValue, ct: Ct);
-        var duration = timer.Elapsed;
-        // Cancel at points spread across one full query until one lands inside SQLite.
-        var interrupted = false;
-        for (var attempt = 1; attempt <= 40 && !interrupted; attempt++)
-        {
-            using var source = new CancellationTokenSource();
-            var delay = duration * attempt / 45;
-            // Timer callbacks are too coarse on Windows (about 15 ms); spin for the delay instead.
-            var canceller = Task.Run(() => { var wait = Stopwatch.StartNew(); while (wait.Elapsed < delay) Thread.SpinWait(20); source.Cancel(); });
-            try { index.Search("board", "needle alpha beta gamma deploy migration", null, int.MaxValue, ct: source.Token); }
-            catch (OperationCanceledException ex) { interrupted = ex.InnerException is SqliteException { SqliteErrorCode: 9 }; }
-            canceller.Wait(Ct);
-        }
-        Assert.True(interrupted, $"no cancellation interrupted a {duration.TotalMilliseconds:F0} ms query");
+        canceller.Start();
+        var cancelledError = Assert.Throws<OperationCanceledException>(() => SqliteSearchIndexStore.Cancellable(cmd.ExecuteScalar, source.Token));
+        Assert.Equal(9, Assert.IsType<SqliteException>(cancelledError.InnerException).SqliteErrorCode);
+        Assert.True(timer.Elapsed < TimeSpan.FromSeconds(30), $"took {timer.Elapsed}");
+        canceller.Join();
     }
 
     /// <summary>The lexical query this replaced, verbatim apart from the inlined eligibility clause.</summary>

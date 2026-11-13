@@ -1239,6 +1239,27 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CardPages_CanCarryTileExcerpts_WhileTheCardKeepsItsWholeDescription()
+    {
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        var ct = TestContext.Current.CancellationToken;
+        await store.EnsureDefaultColumnsAsync(_project, ct);
+        var description = string.Join('\n', Enumerable.Range(0, 500).Select(line => $"Line {line} of a long description"));
+        var card = await store.CreateCardAsync(_project, new NewBoardCard(null, "Long", description, null, "medium", null, [], false), ct);
+
+        using var excerpted = await GetJsonAsync("/api/v1/board/cards?pageSize=30&excerpt=true");
+        var tile = excerpted.RootElement.GetProperty("cards").EnumerateArray().Single(item => item.GetProperty("id").GetString() == card.Id)
+            .GetProperty("description").GetString()!;
+        Assert.Equal(BoardCardExcerpt.For(description), tile);
+        Assert.True(tile.Length < description.Length / 10);
+        using var full = await GetJsonAsync("/api/v1/board/cards?pageSize=30");
+        Assert.Equal(description, full.RootElement.GetProperty("cards").EnumerateArray()
+            .Single(item => item.GetProperty("id").GetString() == card.Id).GetProperty("description").GetString());
+        using var detail = await GetJsonAsync($"/api/v1/board/cards/{card.Id}");
+        Assert.Equal(description, detail.RootElement.GetProperty("description").GetString());
+    }
+
+    [Fact]
     public async Task JiraUnlinkRequiresBothCredentialsAndProjectOwnership_AndKeepsTheBoard()
     {
         var ct = TestContext.Current.CancellationToken;

@@ -515,6 +515,12 @@ statistics and filter choices include unloaded cards. `IBoardStore.GetCardsPageA
 these through one deferred read snapshot without schema changes. Omitting `pageSize` retains
 the original unpaged response for older clients and MCP consumers.
 
+`excerpt=true` (paged responses only, VIBE-321) cuts each summary's description to what a lane
+tile's 110-character preview needs (`BoardCardExcerpt`: at least 600 visible characters, ending
+at a line break, never inside a fenced block; control characters or one very long line keep the
+whole text). The Board view asks for it on every page and poll; the editor always reads the
+full card, and client-side description filtering runs only on unpaged responses.
+
 ## VB-25: one session working multiple cards (2026-09-21)
 
 An agent calls `attach_board_session(card: "VB-24")` to add its current VibeRails session to

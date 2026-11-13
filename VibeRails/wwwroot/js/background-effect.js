@@ -101,15 +101,29 @@
         return performanceMode?.isEnabled?.() === true;
     }
 
+    // VIBE-321: a decorative background does not need the display's refresh rate. Draw about 30 times
+    // a second and advance the particles by the 60 Hz steps that elapsed, so they keep their speed.
+    const FRAME_INTERVAL_MS = 1000 / 30;
+    const STEP_MS = 1000 / 60;
+    const MAX_STEPS = 4;
+
     let rafId = null;
     let isAnimating = false;
+    let lastFrameAt = null;
 
-    function renderFrame() {
+    // The terminal focus view covers the canvas with an opaque panel; only a few pixels of gap show it.
+    function isCoveredByView() {
+        return document.documentElement.classList.contains('vb-terminal-focus-active');
+    }
+
+    function renderFrame(steps = 1) {
         ctx.clearRect(0, 0, width, height);
-        
+
         for (let i = 0; i < particles.length; i++) {
             const p1 = particles[i];
-            p1.update();
+            for (let step = 0; step < steps; step++) {
+                p1.update();
+            }
             p1.draw();
 
             for (let j = i + 1; j < particles.length; j++) {
@@ -130,21 +144,29 @@
         }
     }
 
-    function animate() {
+    function animate(timestamp) {
         if (!isAnimating) {
             return;
         }
 
-        renderFrame();
+        if (lastFrameAt === null) {
+            lastFrameAt = timestamp;
+            renderFrame();
+        } else if (timestamp - lastFrameAt >= FRAME_INTERVAL_MS - 1) {
+            const steps = Math.min(MAX_STEPS, Math.max(1, Math.round((timestamp - lastFrameAt) / STEP_MS)));
+            lastFrameAt = timestamp;
+            renderFrame(steps);
+        }
         rafId = requestAnimationFrame(animate);
     }
 
     function startAnimation() {
-        if (isAnimating || isBackgroundDisabled() || document.hidden) {
+        if (isAnimating || isBackgroundDisabled() || document.hidden || isCoveredByView()) {
             return;
         }
 
         isAnimating = true;
+        lastFrameAt = null;
         rafId = requestAnimationFrame(animate);
     }
 
@@ -159,7 +181,8 @@
     function updateAnimationState() {
         canvas.style.display = isBackgroundDisabled() ? 'none' : '';
 
-        if (isBackgroundDisabled() || document.hidden) {
+        // A covered canvas keeps its last frame and resumes when the view changes.
+        if (isBackgroundDisabled() || document.hidden || isCoveredByView()) {
             stopAnimation();
         } else {
             startAnimation();
@@ -186,6 +209,11 @@
 
     document.addEventListener('visibilitychange', updateAnimationState);
     performanceMode?.subscribe?.(() => updateAnimationState());
+    // Views toggle their layout classes on <html> (app.js applyViewLayoutState).
+    new MutationObserver(updateAnimationState).observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['class']
+    });
 
     resize();
     particles = Array.from({ length: config.count }, () => new Particle());

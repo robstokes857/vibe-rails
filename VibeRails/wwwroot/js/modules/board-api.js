@@ -259,9 +259,11 @@ async function getBoardCardActivityAsync(boardId, cardIds, extra = {}) {
 }
 
 // pageSize is 30 for what the user pages through. The background poll asks for up to 100 (the
-// server's own cap) when it re-reads cards that are already on screen.
-async function getBoardCardPageAsync(boardId, filters = {}, { columnId, offset = 0, continuationToken, signal, pageSize = 30 } = {}) {
+// server's own cap) when it re-reads cards that are already on screen. excerpt asks for
+// descriptions cut to what a lane tile's preview needs; the editor always reads the full card.
+async function getBoardCardPageAsync(boardId, filters = {}, { columnId, offset = 0, continuationToken, signal, pageSize = 30, excerpt = false } = {}) {
     const params = new URLSearchParams({ pageSize: String(Math.min(100, Math.max(1, Math.trunc(pageSize) || 30))) });
+    if (excerpt) params.set('excerpt', 'true');
     for (const [key, value] of Object.entries(filters)) {
         if (value) params.set(key, value);
     }

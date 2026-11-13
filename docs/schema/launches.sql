@@ -14,6 +14,9 @@ CREATE INDEX IX_LaunchBindings_Due ON TriggerBindings(Enabled, NextRunUTC);
 -- index IX_LaunchRuns_Active
 CREATE INDEX IX_LaunchRuns_Active ON Runs(Status, Sequence);
 
+-- index IX_LaunchRuns_Card
+CREATE INDEX IX_LaunchRuns_Card ON Runs(ProjectPath, json_extract(Snapshot,'$.context.cardId'), Sequence DESC);
+
 -- index IX_LaunchRuns_History
 CREATE INDEX IX_LaunchRuns_History ON Runs(ProjectPath, DefinitionId, Sequence DESC);
 
