@@ -99,8 +99,14 @@ test('partial failures retain selected IDs beyond the first page and retry never
     state.failures.add('card-35');
     await page.getByRole('button', { name: 'Select cards', exact: true }).click();
     await checkbox(page, 0).check();
-    await page.getByRole('button', { name: /Load more/ }).click();
+    // Scrolling a lane loads its next page. Since VIBE-322 that page is appended and the last one
+    // removes Load more, so a click on the button would race the scroll that brings it into view.
+    await page.locator('.board-lane-list[data-column-id="done"]').evaluate(list => {
+        list.scrollTop = list.scrollHeight;
+        list.dispatchEvent(new Event('scroll'));
+    });
     await expect(page.locator('[data-board-card-select]')).toHaveCount(36);
+    await expect(page.getByRole('button', { name: /Load more/ })).toHaveCount(0);
     await expect(selected(page)).toHaveText('1 selected');
     await checkbox(page, 35).check();
     await deleteSelected(page).click();
