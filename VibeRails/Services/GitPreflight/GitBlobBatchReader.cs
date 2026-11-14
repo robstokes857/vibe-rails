@@ -19,8 +19,9 @@ namespace VibeRails.Services.GitPreflight;
 /// stdin, and only one blob is held at once, never larger than the caller's limit. Ids are checked
 /// to be hex before they are written, so a request cannot carry a newline into the line protocol.
 ///
-/// The process is started on the first read, through <see cref="GitCli.CreateStartInfo"/> like
-/// every other git launch. Its stdin is the request channel and is closed on disposal, which is
+/// The process is started on the first read through <see cref="GitCli.CreateStartInfo"/>. This
+/// interactive protocol is the sole exception to the one-shot GitCommandRunner lifecycle.
+/// Its stdin is the request channel and is closed on disposal, which is
 /// what ends the process. A read that fails, times out or desynchronizes the stream stops the
 /// process and returns null; the next read starts a fresh one, so one bad blob costs only that
 /// blob, as a failed per-file spawn did. Cancelling the caller's token stops the process and

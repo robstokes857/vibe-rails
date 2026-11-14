@@ -18,7 +18,6 @@ public sealed record GitCliResult(int ExitCode, string StdOut, string StdErr, bo
 public static class GitCli
 {
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
-    public static readonly TimeSpan KillGracePeriod = TimeSpan.FromSeconds(2);
     public static readonly TimeSpan DrainBound = TimeSpan.FromSeconds(2);
 
     /// <summary>Runs git, optionally retaining only a bounded prefix of each output stream.</summary>
@@ -38,85 +37,22 @@ public static class GitCli
         IReadOnlyDictionary<string, string>? environment = null,
         ReadOnlyMemory<byte>? standardInput = null)
     {
-        if (maxOutputChars is < 0)
-            throw new ArgumentOutOfRangeException(nameof(maxOutputChars));
-
-        using var process = new Process { StartInfo = CreateStartInfo(workingDirectory, arguments, environment) };
-
-        try
-        {
-            process.Start();
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            return new GitCliResult(-1, string.Empty, ex.Message, TimedOut: false);
-        }
-
-        // The output drains start before anything is written to stdin: git can answer while it is
-        // still reading, and once its output pipe fills it stops reading, so a write made before
-        // anyone reads would never finish.
-        using var drainCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var stdoutTask = ReadOutputAsync(process.StandardOutput, maxOutputChars, drainCts.Token);
-        var stderrTask = ReadOutputAsync(process.StandardError, maxOutputChars, drainCts.Token);
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(timeout ?? DefaultTimeout);
-
-        // Hand git its input, then a closed stdin. Without redirection the child inherits this process's
-        // stdin, which for the stdio MCP server is the agent's live JSON-RPC pipe (never at EOF); any
-        // git that consults it would block until the kill-on-timeout. An EOF here severs that. VB-14.
-        await WriteStandardInputAsync(process, standardInput, timeoutCts.Token);
-
-        var timedOut = false;
-        try
-        {
-            await process.WaitForExitAsync(timeoutCts.Token);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            timedOut = true;
-            TryKill(process);
-        }
-        catch (OperationCanceledException)
-        {
-            TryKill(process);
-            drainCts.Cancel();
-            Observe(stdoutTask);
-            Observe(stderrTask);
-            throw;
-        }
-
-        if (!process.HasExited)
-        {
-            await Task.WhenAny(
-                process.WaitForExitAsync(CancellationToken.None),
-                Task.Delay(KillGracePeriod, CancellationToken.None));
-            if (!process.HasExited)
-            {
-                timedOut = true;
-                drainCts.Cancel();
-            }
-        }
-
-        var stdoutComplete = CompleteOutputAsync(stdoutTask);
-        var stderrComplete = CompleteOutputAsync(stderrTask);
-        var stdout = await stdoutComplete;
-        var stderr = await stderrComplete;
-        timedOut |= stdout.TimedOut || stderr.TimedOut;
-        return new GitCliResult(process.HasExited ? process.ExitCode : -1, stdout.Text, stderr.Text, timedOut);
+        var result = await GitCommandRunner.RunTextAsync(workingDirectory, arguments, cancellationToken,
+            timeout, maxOutputChars, environment, standardInput);
+        return new GitCliResult(result.ExitCode, result.StdOut, result.StdErr, result.TimedOut);
     }
 
     /// <summary>
-    /// The one launch contract for every git child in the process: <see cref="GitCli"/>,
-    /// <see cref="GitProcessRunner"/>, the staged-snapshot provider, the hook's message cleaner and
-    /// the code map's file catalog. <c>GitCliTests</c> sweeps the source for any other git launch.
-    /// Callers must close the redirected stdin after writing any explicit input, including when
-    /// there is no input to write.
+    /// Shared launch settings for <see cref="GitCommandRunner"/> and the sole process-lifecycle
+    /// exception, the interactive GitBlobBatchReader. All one-shot callers use the runner, which
+    /// closes stdin through CliWrap after any explicit bytes and bounds output draining after exit.
+    /// The batch reader keeps stdin open for requests until disposal. <c>GitCliTests</c> enforces
+    /// these two consumers; do not start another process directly from these settings.
     /// </summary>
     /// <remarks>
+    /// The runner applies these settings through CliWrap's process-configuration hook to retain
+    /// the actual ArgumentList. CliWrap owns pipe IO and forceful cancellation, while the runner
+    /// arms DrainBound at process exit because a descendant can retain the output handles.
     /// Two guards, both required.
     /// <para>
     /// Stdin is always redirected. A git child that inherits this process's stdin pipe blocks at
@@ -180,76 +116,6 @@ public static class GitCli
     }
 
     /// <summary>
-    /// Writes any explicit input and then always closes stdin. Called after the output drains have
-    /// started. A git that closes its end early (it exited, or the deadline killed it) ends the write
-    /// instead of failing the run; its exit code, stderr or the timeout say why.
-    /// </summary>
-    private static async Task WriteStandardInputAsync(Process process, ReadOnlyMemory<byte>? standardInput, CancellationToken deadline)
-    {
-        try
-        {
-            if (standardInput is { IsEmpty: false } input)
-            {
-                // A pipe write need not observe cancellation once it has started, so the deadline
-                // kills git instead and the broken pipe ends the write.
-                using var killOnDeadline = deadline.Register(static state => TryKill((Process)state!), process);
-                await process.StandardInput.BaseStream.WriteAsync(input, deadline);
-            }
-        }
-        catch (IOException) { /* git closed its end; the exit code says why */ }
-        catch (OperationCanceledException) { /* the deadline killed git; the wait below reports the timeout */ }
-        finally
-        {
-            try { process.StandardInput.Close(); }
-            catch { /* the write end still closes when the process is disposed, so git still gets EOF */ }
-        }
-    }
-
-    private static async Task<string> ReadOutputAsync(StreamReader reader, int? maxChars, CancellationToken cancellationToken)
-    {
-        if (maxChars is not { } limit)
-            return await reader.ReadToEndAsync(cancellationToken);
-
-        var buffer = new char[4096];
-        var output = new StringBuilder(Math.Min(limit, buffer.Length));
-        int read;
-        while ((read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken)) > 0)
-        {
-            var keep = Math.Min(read, limit - output.Length);
-            if (keep > 0)
-                output.Append(buffer, 0, keep);
-        }
-        return output.ToString();
-    }
-
-    private static async Task<(string Text, bool TimedOut)> CompleteOutputAsync(Task<string> outputTask)
-    {
-        try
-        {
-            return (await outputTask.WaitAsync(DrainBound), false);
-        }
-        catch (TimeoutException)
-        {
-            Observe(outputTask);
-            return (string.Empty, true);
-        }
-        catch (OperationCanceledException)
-        {
-            Observe(outputTask);
-            return (string.Empty, true);
-        }
-    }
-
-    private static void Observe(Task task)
-    {
-        _ = task.ContinueWith(
-            static t => _ = t.Exception,
-            CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-    }
-
-    /// <summary>
     /// Walks up from <paramref name="startPath"/> to the directory containing <c>.git</c>. In a
     /// linked worktree or submodule <c>.git</c> is a file (a gitdir pointer), so both forms count.
     /// Pure filesystem — no process is spawned.
@@ -267,18 +133,5 @@ public static class GitCli
             current = parent.FullName;
         }
         return null;
-    }
-
-    private static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-                process.Kill(entireProcessTree: true);
-        }
-        catch
-        {
-            // Best effort: a git process that outlives the timeout is reported as timed out either way.
-        }
     }
 }

@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -696,38 +695,16 @@ public sealed class RepositoryCodeGraph
     /// <summary>Git's NUL-separated list of tracked and untracked, non-ignored files.</summary>
     private static async Task<string> ReadCatalogAsync(string root, CancellationToken cancellationToken)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(CatalogTimeout);
-        using var process = new Process { StartInfo = GitCli.CreateStartInfo(
-            root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]) };
-        process.Start();
-        Task<string>? error = null;
-        try
-        {
-            // EOF on stdin at once: an inherited stdin hangs git inside the stdio MCP host (VB-14).
-            try { process.StandardInput.Close(); }
-            catch { /* the write end still closes when the process is disposed, so git still gets EOF */ }
-            // Drain stderr so a chatty git cannot fill its pipe and stall the catalog read.
-            error = process.StandardError.ReadToEndAsync(timeout.Token);
-            var buffer = new char[MaxCatalogChars + 1];
-            var count = await process.StandardOutput.ReadBlockAsync(buffer.AsMemory(), timeout.Token);
-            if (count == buffer.Length) throw new InvalidOperationException("Repository file catalog exceeds the map limit.");
-            await process.WaitForExitAsync(timeout.Token);
-            await error;
-            if (process.ExitCode != 0) throw new InvalidOperationException("Could not read repository files for the code map.");
-            return new string(buffer, 0, count);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            // Our own timeout fired rather than the caller giving up: report it as a bound, not a server fault.
+        var result = await GitCommandRunner.RunTextAsync(root,
+            ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], cancellationToken,
+            CatalogTimeout, MaxCatalogChars, killOnOutputLimit: true);
+        if (result.OutputLimitExceeded)
+            throw new InvalidOperationException("Repository file catalog exceeds the map limit.");
+        if (result.TimedOut)
             throw new InvalidOperationException(
                 "Reading the repository file catalog took longer than " + CatalogTimeout.TotalMinutes + " minutes.");
-        }
-        finally
-        {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
-            // The drain task outlives a failed read; observe it so its fault never escapes unhandled.
-            if (error is not null) _ = error.ContinueWith(static task => _ = task.Exception, TaskScheduler.Default);
-        }
+        if (result.ExitCode != 0)
+            throw new InvalidOperationException("Could not read repository files for the code map.");
+        return result.StdOut;
     }
 }

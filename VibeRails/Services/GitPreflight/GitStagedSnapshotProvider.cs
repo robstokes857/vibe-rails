@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using MintLint;
@@ -1759,139 +1758,9 @@ public sealed partial class GitStagedSnapshotProvider : IGitStagedSnapshotProvid
         TimeSpan? timeoutOverride = null,
         ReadOnlyMemory<byte>? standardInput = null)
     {
-        using var process = new Process { StartInfo = GitCli.CreateStartInfo(workingDirectory, arguments) };
-
-        process.Start();
-        // Drain stdout and stderr before writing stdin. Git can answer while it is still reading
-        // (cat-file --batch does), and once its output pipe fills it stops reading, so a write
-        // made before anyone reads would never finish.
-        await using var output = new MemoryStream();
-        var copyTask = CopyStandardOutputAsync(
-            process.StandardOutput.BaseStream,
-            output,
-            maximumOutputBytes,
-            cancellationToken);
-        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(timeoutOverride ?? GitTimeout);
-        var timedOut = false;
-        var outputLimitExceeded = false;
-        try
-        {
-            await WriteStandardInputAsync(process, standardInput, timeoutCts.Token);
-            var waitTask = process.WaitForExitAsync(timeoutCts.Token);
-            var completed = await Task.WhenAny(waitTask, copyTask);
-            if (completed == copyTask)
-            {
-                outputLimitExceeded = await copyTask;
-                if (outputLimitExceeded)
-                {
-                    TryKill(process);
-                }
-            }
-
-            await waitTask;
-            outputLimitExceeded |= await copyTask;
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            timedOut = true;
-            TryKill(process);
-            await ObserveCopyTaskAsync(copyTask);
-        }
-        catch (OperationCanceledException)
-        {
-            TryKill(process);
-            await ObserveCopyTaskAsync(copyTask);
-            throw;
-        }
-
-        var stdErr = await errorTask;
-        return new BinaryGitResult(
-            process.HasExited ? process.ExitCode : -1,
-            output.ToArray(),
-            stdErr,
-            timedOut,
-            outputLimitExceeded);
-    }
-
-    /// <summary>
-    /// Writes any explicit input and then always sends EOF. Call only after the output drains
-    /// have started. A git that closes its end early (it exited, or the deadline killed it) ends
-    /// the write instead of failing the run; its exit code, stderr or the deadline say why.
-    /// </summary>
-    private static async Task WriteStandardInputAsync(
-        Process process,
-        ReadOnlyMemory<byte>? standardInput,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            if (standardInput is { IsEmpty: false } input)
-            {
-                // A pipe write need not observe cancellation once it has started, so the deadline
-                // kills git instead and the broken pipe ends the write.
-                using var killOnDeadline = cancellationToken.Register(
-                    static state => TryKill((Process)state!),
-                    process);
-                await process.StandardInput.BaseStream.WriteAsync(input, cancellationToken);
-            }
-        }
-        catch (IOException)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-        }
-        finally
-        {
-            // Always send EOF. Inheriting the MCP server's live JSON-RPC stdin can wedge Git even
-            // when this particular command is not intended to read input.
-            try { process.StandardInput.Close(); }
-            catch (IOException) { /* the pipe is already broken, so git has its EOF */ }
-        }
-    }
-
-    private static async Task<bool> CopyStandardOutputAsync(
-        Stream source,
-        Stream destination,
-        int? maximumOutputBytes,
-        CancellationToken cancellationToken)
-    {
-        var buffer = new byte[81_920];
-        var written = 0L;
-        while (true)
-        {
-            var read = await source.ReadAsync(buffer, cancellationToken);
-            if (read == 0)
-            {
-                return false;
-            }
-
-            if (maximumOutputBytes is int limit && written + read > limit)
-            {
-                var allowed = Math.Max(0, limit - written);
-                if (allowed > 0)
-                {
-                    await destination.WriteAsync(buffer.AsMemory(0, (int)allowed), cancellationToken);
-                }
-
-                return true;
-            }
-
-            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-            written += read;
-        }
-    }
-
-    private static async Task ObserveCopyTaskAsync(Task<bool> copyTask)
-    {
-        try
-        {
-            await copyTask;
-        }
-        catch (Exception exception) when (exception is IOException or OperationCanceledException)
-        {
-            // The process was killed for timeout/cancellation; its stdout pipe may close abruptly.
-        }
+        var result = await GitCommandRunner.RunBinaryAsync(workingDirectory, arguments, cancellationToken,
+            timeoutOverride ?? GitTimeout, maximumOutputBytes, standardInput);
+        return new BinaryGitResult(result.ExitCode, result.Bytes, result.StdErr, result.TimedOut, result.OutputLimitExceeded);
     }
 
     private static void EnsureSucceeded(TextGitResult result, string operation, string directory)
@@ -1906,21 +1775,6 @@ public sealed partial class GitStagedSnapshotProvider : IGitStagedSnapshotProvid
         {
             throw new InvalidOperationException(
                 $"Git failed to {operation} in {directory}: {result.StdErr.Trim()}");
-        }
-    }
-
-    private static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch
-        {
-            // Preserve the original cancellation or timeout.
         }
     }
 

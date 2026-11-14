@@ -33,7 +33,21 @@
     <ProjectReference Include="..\MintLint\MintLint.csproj" />
     <ProjectReference Include="..\TokenSaver\TokenSaver.csproj" />
     <ProjectReference Include="..\VibeRails\VibeRails.csproj" />
+    <ProjectReference Include="headless\GitProcessFixture\GitProcessFixture.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+
+  <Target Name="CopyGitProcessFixture" AfterTargets="Build">
+    <MSBuild Projects="headless\GitProcessFixture\GitProcessFixture.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework)">
+      <Output TaskParameter="TargetOutputs" ItemName="GitProcessFixtureTarget" />
+    </MSBuild>
+    <PropertyGroup>
+      <GitProcessFixtureDirectory>@(GitProcessFixtureTarget->'%(RootDir)%(Directory)')</GitProcessFixtureDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+      <GitProcessFixtureFiles Include="$(GitProcessFixtureDirectory)**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(GitProcessFixtureFiles)" DestinationFiles="@(GitProcessFixtureFiles->'$(OutDir)GitProcessFixture\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
 
   <!-- Needed to host the in-process MCP server (Kestrel + MapMcp) inside the
        MCP HTTP-handshake integration test. -->

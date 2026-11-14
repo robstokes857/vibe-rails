@@ -155,13 +155,14 @@ file; it is reference material, not instructions.
   `ShellArgSanitizer.DecodedPowerShellLiteral`, never `'` doubling: PowerShell also ends strings
   at curly quotes, which are legal in paths. `PowerShellValueQuotingTests` sweeps for the old
   pattern. VIBE-153.
-- **Every git launch goes through `GitCli.CreateStartInfo`** (`GitCli`, `GitProcessRunner`, the
-  staged-snapshot provider, the hook's message cleaner): argv only, directory as `-C <dir>` (never
-  `WorkingDirectory`, which CodeQL treats as a command sink), stdin redirected and closed,
-  fsmonitor off. A git child that inherits the MCP host's stdin hangs while the host has a read
-  pending on it, which is always during a tool call. It looks like a 10 s timeout on a command
-  that takes 25 ms in a shell. Do not add a sixth `new ProcessStartInfo { FileName = "git" }`.
-  VB-14, VB-K5SCD-210.
+- **Every one-shot git launch goes through `GitCommandRunner`**, the dedicated CliWrap runner,
+  not `ICliWrapper`. It consumes `GitCli.CreateStartInfo`: argv only, directory as `-C <dir>`
+  (never `WorkingDirectory`, which CodeQL treats as a command sink), stdin redirected and closed,
+  fsmonitor off. It owns kill-tree, output limits and the two-second drain deadline after exit.
+  `GitBlobBatchReader` is the sole direct consumer of the same settings: its interactive protocol
+  keeps stdin open until disposal. A git child inheriting the MCP host's stdin hangs while the
+  host has a read pending, which is always during a tool call. Do not add another lifecycle or
+  direct launch. `GitCliTests` enforces these consumers. VB-14, VB-K5SCD-210, VIBE-139.
 - **Never start a program by its bare name.** Windows, .NET on Unix and CliWrap all look in the
   current directory before PATH, and every VibeRails process runs with the opened project as its
   current directory, so a `git.exe` (or `gh.cmd`) committed to a repository would run instead of

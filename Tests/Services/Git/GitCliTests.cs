@@ -170,6 +170,23 @@ public sealed class GitCliTests : IDisposable
         Assert.Empty(offenders);
     }
 
+    [Fact]
+    public void OnlyRunnerAndInteractiveBatchReaderConsumeLaunchSettings()
+    {
+        var source = Path.Combine(FindRepositoryRoot(), "VibeRails");
+        var allowed = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Services/Git/GitCommandRunner.cs",
+            "Services/GitPreflight/GitBlobBatchReader.cs"
+        };
+        var consumers = Directory.EnumerateFiles(source, "*.cs", SearchOption.AllDirectories)
+            .Where(path => !path.Split(Path.DirectorySeparatorChar).Any(part => part is "bin" or "obj"))
+            .Where(path => Regex.IsMatch(File.ReadAllText(path), @"\bGitCli\.CreateStartInfo\s*\("))
+            .Select(path => Path.GetRelativePath(source, path).Replace('\\', '/'))
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.True(allowed.SetEquals(consumers), string.Join("\n", consumers));
+    }
+
     private static string FindRepositoryRoot()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)

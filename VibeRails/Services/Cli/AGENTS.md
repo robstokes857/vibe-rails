@@ -4,7 +4,7 @@ The one place that knows how to spin up a process. Injectable, logged, and delib
 general-purpose: Environment Steps are its first consumer, but nothing about it is step-shaped.
 
 If you are about to write `Process.Start`, `new ProcessStartInfo`, or `Cli.Wrap(...)` anywhere in
-this app, use this instead.
+this app, use this instead. Git plumbing uses the dedicated `GitCommandRunner` described below.
 
 ## The two methods
 
@@ -25,7 +25,7 @@ also have to catch them.
 ```csharp
 // "Run a thing and read the output" — the step Test button, and anything like it.
 var result = await _cli.RunAsync(
-    new CliRequest("git", ["status", "--porcelain"], workDir),
+    new CliRequest("dotnet", ["--version"], workDir),
     line => { console.WriteLine(line.Text); return ValueTask.CompletedTask; },
     ct);
 
@@ -85,4 +85,13 @@ would otherwise read as success on a stale zero.
 
 ## Later migrations
 
-`GitProcessRunner` and `ShellService` are the obvious next consumers. Neither has moved yet.
+Git's one-shot calls now use `Services/Git/GitCommandRunner`, a separate CliWrap runner. Do not
+route them through `ICliWrapper`: git uses `-C <dir>` instead of `WorkingDirectory` (CodeQL #52),
+and review captures must not log every plumbing command at Information. The runner keeps
+`GitCli.CreateStartInfo` settings, closes stdin, kills the tree on timeout or a hard output cap,
+and limits output draining after process exit to two seconds. Ordinary text caps retain a prefix
+and drain the rest. Caller cancellation throws; process failures are results.
+
+`GitBlobBatchReader` remains the sole direct-process exception because its request/response
+protocol keeps stdin open across reads. `ShellService` and visible-window launches remain outside
+this migration.
