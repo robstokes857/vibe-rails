@@ -434,6 +434,10 @@ public sealed class BoardAdoStoreTests : IDisposable
             DROP TABLE BoardAdoConnections;
             DELETE FROM SchemaMigrations WHERE Component IN ('board-ado', 'board-ado-delivery');
             """);
+        // The change stamp (VIBE-322) came after board-ado, and dropping the tables dropped its triggers on them.
+        await ExecuteAsync(string.Concat(BoardStore.ChangeStampTables.SelectMany(table => new[] { "Insert", "Update", "Delete" }
+            .Select(operation => $"DROP TRIGGER IF EXISTS BoardChangeStamp_{table}_{operation};")))
+            + "DROP TABLE BoardChangeStamp; DELETE FROM SchemaMigrations WHERE Component = 'board-change-stamp';");
         var older = await SchemaAsync();
         Assert.DoesNotContain(older, o => o.Key.Contains("Ado", StringComparison.Ordinal));
 

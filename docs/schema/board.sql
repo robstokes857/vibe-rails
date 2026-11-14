@@ -179,6 +179,9 @@ CREATE TABLE BoardCardSessions ( SessionId TEXT PRIMARY KEY, CardId TEXT NOT NUL
 -- table BoardCards
 CREATE TABLE BoardCards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Number INTEGER NOT NULL, ColumnId TEXT NOT NULL REFERENCES BoardColumns(Id), Position INTEGER NOT NULL, Title TEXT NOT NULL, Description TEXT NOT NULL DEFAULT '', Assignee TEXT NULL, Priority TEXT NOT NULL DEFAULT 'medium', Type TEXT NOT NULL DEFAULT 'task', Points INTEGER NULL, Tags TEXT NOT NULL DEFAULT '[]', Blocked INTEGER NOT NULL DEFAULT 0, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL, Flagged INTEGER NOT NULL DEFAULT 0, CardKey TEXT, DeletedUTC TEXT, DisplayId TEXT, AgentMade INTEGER NOT NULL DEFAULT 0, AgentMadeBy TEXT, AgentMadeSessionId TEXT, WorkflowMode TEXT, ManagerSelection TEXT, ManagerOptionsJson TEXT, Pinned INTEGER, RemoteCreated INTEGER, PostProcessed INTEGER NOT NULL DEFAULT 1, GhostReason TEXT, UNIQUE(ProjectPath, Number) );
 
+-- table BoardChangeStamp
+CREATE TABLE BoardChangeStamp(Id INTEGER PRIMARY KEY CHECK (Id = 1), Stamp INTEGER NOT NULL);
+
 -- table BoardChecks
 CREATE TABLE BoardChecks ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, RunId TEXT NOT NULL, ActionId TEXT NOT NULL, StartedUTC TEXT NOT NULL, EndedUTC TEXT NULL, SummaryJson TEXT NOT NULL, ResultJson TEXT NULL, EvidenceJson TEXT, UNIQUE(CardId, RunId, ActionId) );
 
@@ -370,6 +373,222 @@ CREATE TRIGGER BoardCards_Workflow_Insert BEFORE INSERT ON BoardCards BEGIN UPDA
 
 -- trigger BoardCards_Workflow_Move
 CREATE TRIGGER BoardCards_Workflow_Move BEFORE UPDATE OF ColumnId ON BoardCards WHEN OLD.ColumnId <> NEW.ColumnId BEGIN UPDATE BoardLaneWorkflows SET Current = 0 WHERE CardId = NEW.Id AND Current = 1; INSERT INTO BoardLaneWorkflows (Id, CardId, ColumnId, CreatedUnixMs) SELECT lower(hex(randomblob(16))), NEW.Id, NEW.ColumnId, CAST(unixepoch('subsec') * 1000 AS INTEGER) WHERE EXISTS (SELECT 1 FROM BoardLaneAutomations WHERE ColumnId = NEW.ColumnId AND JobId IS NOT NULL); INSERT INTO BoardLaneWorkflowSteps (WorkflowId, JobId, Position) SELECT w.Id, a.JobId, 0 FROM BoardLaneWorkflows w JOIN BoardLaneAutomations a ON a.ColumnId = w.ColumnId WHERE w.CardId = NEW.Id AND w.Current = 1 AND a.JobId IS NOT NULL UNION ALL SELECT w.Id, a.JobId, a.Position FROM BoardLaneWorkflows w JOIN BoardLaneAdditionalAutomations a ON a.ColumnId = w.ColumnId WHERE w.CardId = NEW.Id AND w.Current = 1; END;
+
+-- trigger BoardChangeStamp_BoardAdditionalCardSessions_Delete
+CREATE TRIGGER BoardChangeStamp_BoardAdditionalCardSessions_Delete AFTER DELETE ON BoardAdditionalCardSessions BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardAdditionalCardSessions_Insert
+CREATE TRIGGER BoardChangeStamp_BoardAdditionalCardSessions_Insert AFTER INSERT ON BoardAdditionalCardSessions BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardAdditionalCardSessions_Update
+CREATE TRIGGER BoardChangeStamp_BoardAdditionalCardSessions_Update AFTER UPDATE ON BoardAdditionalCardSessions BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardAdoConnections_Delete
+CREATE TRIGGER BoardChangeStamp_BoardAdoConnections_Delete AFTER DELETE ON BoardAdoConnections BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardAdoConnections_Insert
+CREATE TRIGGER BoardChangeStamp_BoardAdoConnections_Insert AFTER INSERT ON BoardAdoConnections BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardAdoConnections_Update
+CREATE TRIGGER BoardChangeStamp_BoardAdoConnections_Update AFTER UPDATE ON BoardAdoConnections BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardAdoDeliveries_Delete
+CREATE TRIGGER BoardChangeStamp_BoardAdoDeliveries_Delete AFTER DELETE ON BoardAdoDeliveries BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardAdoDeliveries_Insert
+CREATE TRIGGER BoardChangeStamp_BoardAdoDeliveries_Insert AFTER INSERT ON BoardAdoDeliveries BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardAdoDeliveries_Update
+CREATE TRIGGER BoardChangeStamp_BoardAdoDeliveries_Update AFTER UPDATE ON BoardAdoDeliveries BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardAdoLinks_Delete
+CREATE TRIGGER BoardChangeStamp_BoardAdoLinks_Delete AFTER DELETE ON BoardAdoLinks BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardAdoLinks_Insert
+CREATE TRIGGER BoardChangeStamp_BoardAdoLinks_Insert AFTER INSERT ON BoardAdoLinks BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardAdoLinks_Update
+CREATE TRIGGER BoardChangeStamp_BoardAdoLinks_Update AFTER UPDATE ON BoardAdoLinks BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardAttachments_Delete
+CREATE TRIGGER BoardChangeStamp_BoardAttachments_Delete AFTER DELETE ON BoardAttachments BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardAttachments_Insert
+CREATE TRIGGER BoardChangeStamp_BoardAttachments_Insert AFTER INSERT ON BoardAttachments BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardAttachments_Update
+CREATE TRIGGER BoardChangeStamp_BoardAttachments_Update AFTER UPDATE ON BoardAttachments BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCardLinks_Delete
+CREATE TRIGGER BoardChangeStamp_BoardCardLinks_Delete AFTER DELETE ON BoardCardLinks BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCardLinks_Insert
+CREATE TRIGGER BoardChangeStamp_BoardCardLinks_Insert AFTER INSERT ON BoardCardLinks BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCardLinks_Update
+CREATE TRIGGER BoardChangeStamp_BoardCardLinks_Update AFTER UPDATE ON BoardCardLinks BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCardOptions_Delete
+CREATE TRIGGER BoardChangeStamp_BoardCardOptions_Delete AFTER DELETE ON BoardCardOptions BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCardOptions_Insert
+CREATE TRIGGER BoardChangeStamp_BoardCardOptions_Insert AFTER INSERT ON BoardCardOptions BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCardOptions_Update
+CREATE TRIGGER BoardChangeStamp_BoardCardOptions_Update AFTER UPDATE ON BoardCardOptions BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCardSessions_Delete
+CREATE TRIGGER BoardChangeStamp_BoardCardSessions_Delete AFTER DELETE ON BoardCardSessions BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCardSessions_Insert
+CREATE TRIGGER BoardChangeStamp_BoardCardSessions_Insert AFTER INSERT ON BoardCardSessions BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCardSessions_Update
+CREATE TRIGGER BoardChangeStamp_BoardCardSessions_Update AFTER UPDATE ON BoardCardSessions BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCards_Delete
+CREATE TRIGGER BoardChangeStamp_BoardCards_Delete AFTER DELETE ON BoardCards BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCards_Insert
+CREATE TRIGGER BoardChangeStamp_BoardCards_Insert AFTER INSERT ON BoardCards BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCards_Update
+CREATE TRIGGER BoardChangeStamp_BoardCards_Update AFTER UPDATE ON BoardCards BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCodeLinks_Delete
+CREATE TRIGGER BoardChangeStamp_BoardCodeLinks_Delete AFTER DELETE ON BoardCodeLinks BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCodeLinks_Insert
+CREATE TRIGGER BoardChangeStamp_BoardCodeLinks_Insert AFTER INSERT ON BoardCodeLinks BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCodeLinks_Update
+CREATE TRIGGER BoardChangeStamp_BoardCodeLinks_Update AFTER UPDATE ON BoardCodeLinks BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardColumns_Delete
+CREATE TRIGGER BoardChangeStamp_BoardColumns_Delete AFTER DELETE ON BoardColumns BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardColumns_Insert
+CREATE TRIGGER BoardChangeStamp_BoardColumns_Insert AFTER INSERT ON BoardColumns BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardColumns_Update
+CREATE TRIGGER BoardChangeStamp_BoardColumns_Update AFTER UPDATE ON BoardColumns BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardComments_Delete
+CREATE TRIGGER BoardChangeStamp_BoardComments_Delete AFTER DELETE ON BoardComments BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardComments_Insert
+CREATE TRIGGER BoardChangeStamp_BoardComments_Insert AFTER INSERT ON BoardComments BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardComments_Update
+CREATE TRIGGER BoardChangeStamp_BoardComments_Update AFTER UPDATE ON BoardComments BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCommitSnapshots_Delete
+CREATE TRIGGER BoardChangeStamp_BoardCommitSnapshots_Delete AFTER DELETE ON BoardCommitSnapshots BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCommitSnapshots_Insert
+CREATE TRIGGER BoardChangeStamp_BoardCommitSnapshots_Insert AFTER INSERT ON BoardCommitSnapshots BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCommitSnapshots_Update
+CREATE TRIGGER BoardChangeStamp_BoardCommitSnapshots_Update AFTER UPDATE ON BoardCommitSnapshots BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCommits_Delete
+CREATE TRIGGER BoardChangeStamp_BoardCommits_Delete AFTER DELETE ON BoardCommits BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCommits_Insert
+CREATE TRIGGER BoardChangeStamp_BoardCommits_Insert AFTER INSERT ON BoardCommits BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardCommits_Update
+CREATE TRIGGER BoardChangeStamp_BoardCommits_Update AFTER UPDATE ON BoardCommits BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardContextSamples_Delete
+CREATE TRIGGER BoardChangeStamp_BoardContextSamples_Delete AFTER DELETE ON BoardContextSamples BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardContextSamples_Insert
+CREATE TRIGGER BoardChangeStamp_BoardContextSamples_Insert AFTER INSERT ON BoardContextSamples BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardContextSamples_Update
+CREATE TRIGGER BoardChangeStamp_BoardContextSamples_Update AFTER UPDATE ON BoardContextSamples BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardDeletedComments_Delete
+CREATE TRIGGER BoardChangeStamp_BoardDeletedComments_Delete AFTER DELETE ON BoardDeletedComments BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardDeletedComments_Insert
+CREATE TRIGGER BoardChangeStamp_BoardDeletedComments_Insert AFTER INSERT ON BoardDeletedComments BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardDeletedComments_Update
+CREATE TRIGGER BoardChangeStamp_BoardDeletedComments_Update AFTER UPDATE ON BoardDeletedComments BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardHandoffs_Delete
+CREATE TRIGGER BoardChangeStamp_BoardHandoffs_Delete AFTER DELETE ON BoardHandoffs BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardHandoffs_Insert
+CREATE TRIGGER BoardChangeStamp_BoardHandoffs_Insert AFTER INSERT ON BoardHandoffs BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardHandoffs_Update
+CREATE TRIGGER BoardChangeStamp_BoardHandoffs_Update AFTER UPDATE ON BoardHandoffs BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardJiraConnections_Delete
+CREATE TRIGGER BoardChangeStamp_BoardJiraConnections_Delete AFTER DELETE ON BoardJiraConnections BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardJiraConnections_Insert
+CREATE TRIGGER BoardChangeStamp_BoardJiraConnections_Insert AFTER INSERT ON BoardJiraConnections BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardJiraConnections_Update
+CREATE TRIGGER BoardChangeStamp_BoardJiraConnections_Update AFTER UPDATE ON BoardJiraConnections BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardJiraDeliveries_Delete
+CREATE TRIGGER BoardChangeStamp_BoardJiraDeliveries_Delete AFTER DELETE ON BoardJiraDeliveries BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardJiraDeliveries_Insert
+CREATE TRIGGER BoardChangeStamp_BoardJiraDeliveries_Insert AFTER INSERT ON BoardJiraDeliveries BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardJiraDeliveries_Update
+CREATE TRIGGER BoardChangeStamp_BoardJiraDeliveries_Update AFTER UPDATE ON BoardJiraDeliveries BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardJiraLinks_Delete
+CREATE TRIGGER BoardChangeStamp_BoardJiraLinks_Delete AFTER DELETE ON BoardJiraLinks BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardJiraLinks_Insert
+CREATE TRIGGER BoardChangeStamp_BoardJiraLinks_Insert AFTER INSERT ON BoardJiraLinks BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardJiraLinks_Update
+CREATE TRIGGER BoardChangeStamp_BoardJiraLinks_Update AFTER UPDATE ON BoardJiraLinks BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardProjectKeys_Delete
+CREATE TRIGGER BoardChangeStamp_BoardProjectKeys_Delete AFTER DELETE ON BoardProjectKeys BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardProjectKeys_Insert
+CREATE TRIGGER BoardChangeStamp_BoardProjectKeys_Insert AFTER INSERT ON BoardProjectKeys BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardProjectKeys_Update
+CREATE TRIGGER BoardChangeStamp_BoardProjectKeys_Update AFTER UPDATE ON BoardProjectKeys BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardReviews_Delete
+CREATE TRIGGER BoardChangeStamp_BoardReviews_Delete AFTER DELETE ON BoardReviews BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardReviews_Insert
+CREATE TRIGGER BoardChangeStamp_BoardReviews_Insert AFTER INSERT ON BoardReviews BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardReviews_Update
+CREATE TRIGGER BoardChangeStamp_BoardReviews_Update AFTER UPDATE ON BoardReviews BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardSharedOrigins_Delete
+CREATE TRIGGER BoardChangeStamp_BoardSharedOrigins_Delete AFTER DELETE ON BoardSharedOrigins BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardSharedOrigins_Insert
+CREATE TRIGGER BoardChangeStamp_BoardSharedOrigins_Insert AFTER INSERT ON BoardSharedOrigins BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_BoardSharedOrigins_Update
+CREATE TRIGGER BoardChangeStamp_BoardSharedOrigins_Update AFTER UPDATE ON BoardSharedOrigins BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_Boards_Delete
+CREATE TRIGGER BoardChangeStamp_Boards_Delete AFTER DELETE ON Boards BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_Boards_Insert
+CREATE TRIGGER BoardChangeStamp_Boards_Insert AFTER INSERT ON Boards BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
+
+-- trigger BoardChangeStamp_Boards_Update
+CREATE TRIGGER BoardChangeStamp_Boards_Update AFTER UPDATE ON Boards BEGIN UPDATE BoardChangeStamp SET Stamp = random() WHERE Id = 1; END;
 
 -- trigger BoardColumns_EndDesktopActivity
 CREATE TRIGGER BoardColumns_EndDesktopActivity AFTER UPDATE OF Name ON BoardColumns WHEN (instr(lower(NEW.Name), 'ship') > 0 OR instr(lower(NEW.Name), 'done') > 0 OR instr(lower(NEW.Name), 'complete') > 0 OR instr(lower(NEW.Name), 'closed') > 0) BEGIN UPDATE BoardDesktopActivity SET EndedUTC = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE EndedUTC IS NULL AND CardId IN ( SELECT Id FROM BoardCards WHERE ColumnId = NEW.Id); END;

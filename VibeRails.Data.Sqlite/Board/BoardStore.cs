@@ -460,7 +460,8 @@ public sealed partial class BoardStore : IBoardStore
 
     // ------------------------------------------------------------------ cards
 
-    public async Task<IReadOnlyList<BoardCardRecord>> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null)
+    public async Task<IReadOnlyList<BoardCardRecord>> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null,
+        bool descriptions = true)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
@@ -468,7 +469,7 @@ public sealed partial class BoardStore : IBoardStore
         if (board is null)
             return [];
         await using var command = connection.CreateCommand();
-        command.CommandText = CardSelectSql + $"""
+        command.CommandText = (descriptions ? CardSelectSql : CardSelectWithoutDescriptionSql) + $"""
              WHERE c.ProjectPath = $project{ProjectPathCollation}
                AND c.ColumnId IN (SELECT k.Id FROM BoardColumns k WHERE k.BoardId = $board)
                AND c.DeletedUTC IS NULL
@@ -1389,8 +1390,13 @@ public sealed partial class BoardStore : IBoardStore
         "SELECT Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC, DisplayPrefix, SyncEnabled FROM Boards";
 
     // A property because the prefix join interpolates ProjectPathCollation (see CardSequenceReseedSql).
-    private static string CardSelectSql => $"""
-        SELECT c.Id, c.ProjectPath, c.Number, c.ColumnId, c.Position, c.Title, c.Description, c.Assignee, c.Priority,
+    private static string CardSelectSql => CardSelect("c.Description");
+
+    // A title list never reads the descriptions (VIBE-322); '' keeps the column order ReadCard expects.
+    private static string CardSelectWithoutDescriptionSql => CardSelect("''");
+
+    private static string CardSelect(string description) => $"""
+        SELECT c.Id, c.ProjectPath, c.Number, c.ColumnId, c.Position, c.Title, {description}, c.Assignee, c.Priority,
                c.Points, c.Tags, c.Blocked, c.CreatedUTC, c.UpdatedUTC,
                (SELECT COUNT(*) FROM BoardComments m WHERE m.CardId = c.Id AND m.Kind IN ('comment', 'note') AND m.DiscussionHidden = 0 AND NOT EXISTS (SELECT 1 FROM BoardDeletedComments d WHERE d.CommentId = m.Id)) AS CommentCount,
                (SELECT o.OptionsJson FROM BoardCardOptions o WHERE o.CardId = c.Id),
@@ -1780,29 +1786,23 @@ public sealed partial class BoardStore : IBoardStore
     {
         // Attention always wins over activity and explicit drag positions. Preserve the requested
         // order within each group, and keep dense positions consistent with the read projection.
-        var groupedIds = new List<string>(orderedIds.Count);
-        await using (var order = connection.CreateCommand())
-        {
-            order.Transaction = transaction;
-            order.CommandText = """
-                SELECT c.Id FROM json_each($ids) requested
-                JOIN BoardCards c ON c.Id = requested.value
-                ORDER BY c.Flagged DESC, CAST(requested.key AS INTEGER);
-                """;
-            order.Parameters.AddWithValue("$ids", JsonSerializer.Serialize(orderedIds.ToList(), StorageJsonSerializerContext.Default.ListString));
-            await using var reader = await order.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken)) groupedIds.Add(reader.GetString(0));
-        }
-        orderedIds = groupedIds;
-        for (var index = 0; index < orderedIds.Count; index++)
-        {
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = "UPDATE BoardCards SET Position = $position WHERE Id = $id AND Position <> $position;";
-            command.Parameters.AddWithValue("$position", index);
-            command.Parameters.AddWithValue("$id", orderedIds[index]);
-            await command.ExecuteNonQueryAsync(cancellationToken);
-        }
+        // One statement for the whole lane (VIBE-322): a promotion in a long Done lane used to run
+        // one UPDATE per card. Ids that no longer exist take no position, as before; callers pass
+        // each id once. Only rows whose position actually changes are written.
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            WITH ordered AS (
+                SELECT c.Id AS Id,
+                       ROW_NUMBER() OVER (ORDER BY c.Flagged DESC, CAST(requested.key AS INTEGER)) - 1 AS NewPosition
+                FROM json_each($ids) requested
+                JOIN BoardCards c ON c.Id = requested.value)
+            UPDATE BoardCards SET Position = ordered.NewPosition
+            FROM ordered
+            WHERE BoardCards.Id = ordered.Id AND BoardCards.Position <> ordered.NewPosition;
+            """;
+        command.Parameters.AddWithValue("$ids", JsonSerializer.Serialize(orderedIds.ToList(), StorageJsonSerializerContext.Default.ListString));
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task WriteColumnPositionsAsync(SqliteConnection connection, SqliteTransaction transaction, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken)
@@ -2137,6 +2137,8 @@ public sealed partial class BoardStore : IBoardStore
             SqliteSchema.Execute(db, transaction, SyncEntryOrderSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-card-deletion", 3, MigrationKind.Additive, ApplyStoredDeletionKeyMigration);
         SqliteMigrationRunner.Apply(connection, "board-launches", 1, MigrationKind.Additive, ApplyLaunchSchema);
+        // board-change-stamp/1 (VIBE-322): one row the Board poll compares instead of refetching.
+        SqliteMigrationRunner.Apply(connection, "board-change-stamp", 1, MigrationKind.Additive, ApplyChangeStampMigration);
         ReconcileDerivedRows(connection);
     }
 

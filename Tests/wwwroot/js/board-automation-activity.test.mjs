@@ -155,6 +155,8 @@ for (const removing of [false, true]) {
             const offset = requests.length;
             const poll = controller.refreshSessionActivity();
             requests[offset].resolve({ cards: [] });
+            // Only the first poll reads the card beside the activity; later ones read it after (VIBE-322).
+            await new Promise(resolve => setImmediate(resolve));
             requests[offset + 1].resolve(fresh);
             await poll;
         }

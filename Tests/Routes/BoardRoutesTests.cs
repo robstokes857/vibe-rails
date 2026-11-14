@@ -417,8 +417,11 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         Assert.False(activity.GetProperty("hasActiveAutomation").GetBoolean());
         Assert.False(activity.GetProperty("hasWaitingAutomation").GetBoolean());
         Assert.False(activity.GetProperty("hasActiveDesktopAgent").GetBoolean());
-        Assert.Equal(6, activity.EnumerateObject().Count());
-        Assert.True(json.RootElement.GetRawText().Length < 250);
+        // VIBE-322: the card's stamp and the response's change token let the poll skip unchanged reads.
+        Assert.Matches("^[0-9a-f]{16}$", activity.GetProperty("stamp").GetString());
+        Assert.Matches("^[0-9a-f]{16}$", json.RootElement.GetProperty("changeToken").GetString());
+        Assert.Equal(7, activity.EnumerateObject().Count());
+        Assert.True(json.RootElement.GetRawText().Length < 300);
         using var oversized = await PostJsonAsync(path, new { boardId, cardIds = Enumerable.Repeat(card.Id, 101) });
         Assert.Equal(HttpStatusCode.BadRequest, oversized.StatusCode);
         using var invalid = await PostJsonAsync(path, new { boardId, cardIds = new string?[] { null } });

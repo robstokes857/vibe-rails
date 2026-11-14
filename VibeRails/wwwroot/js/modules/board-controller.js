@@ -90,6 +90,9 @@ const BOARD_STORAGE_KEY = BOARD_SELECTION_STORAGE_KEY;
 const emptyFilters = () => ({ q: '', assignee: '', type: '', priority: '', origin: '', ghost: '' });
 // Task-key namespace for the terminal tab that works a card (see wwwroot/AGENTS.md).
 const CARD_TASK_KEY = cardId => `board-card:${cardId}`;
+// The poll skips lanes, card pages and the editor's card while the server's change stamps hold
+// (VIBE-322), but rereads them at least this often in case a change reached neither stamp.
+const BOARD_SNAPSHOT_MAX_AGE_MS = 60000;
 
 function cardType(value) {
     return CARD_TYPES.find(item => item.value === value) || CARD_TYPES[0];
@@ -262,18 +265,22 @@ export class BoardController {
 
     bindSessionActivity() {
         this.disposeSessionActivity();
-        let queued = false, disposed = false;
-        const refresh = () => {
+        let queued = false, disposed = false, forceDetail = false;
+        // A session event rereads the open card even when its stamp has not caught up yet.
+        const refresh = (force = false) => {
+            forceDetail ||= force;
             if (queued || disposed) return;
             queued = true;
             queueMicrotask(() => {
                 queued = false;
-                if (!disposed && !this.app.isUiHidden()) void this.refreshSessionActivity();
+                const force = forceDetail;
+                forceDetail = false;
+                if (!disposed && !this.app.isUiHidden()) void this.refreshSessionActivity({ forceDetail: force });
             });
         };
         this._activityDisposers.push(() => { disposed = true; });
         for (const event of ['automation_terminal_started', 'session_started', 'session_completed']) {
-            const dispose = this.app.appEventClient?.on(event, refresh);
+            const dispose = this.app.appEventClient?.on(event, () => refresh(true));
             if (dispose) this._activityDisposers.push(dispose);
         }
         refresh();
@@ -295,13 +302,23 @@ export class BoardController {
         if (this.app.isUiHidden() || this._boardPollPending) return;
         this._boardPollPending = true;
         try {
-            await this.refreshBoardSnapshot();
-            if (!this.app.isUiHidden()) await this.refreshSessionActivity();
+            // Activity first: it carries the Board change token, read before anything else on the
+            // server (VIBE-322). Lanes and card pages are reread only when that token moved since the
+            // last complete snapshot, and at least once a minute.
+            const changeToken = await this.refreshSessionActivity();
+            if (!this.app.isUiHidden() && this.boardSnapshotStale(changeToken)) await this.refreshBoardSnapshot(changeToken);
         } finally { this._boardPollPending = false; }
     }
 
+    boardSnapshotStale(changeToken) {
+        const seen = this._boardSnapshotSeen;
+        return !changeToken || !seen || seen.token !== changeToken || seen.generation !== this._refreshGeneration
+            || seen.boardId !== this.state.boardId || Date.now() - seen.at >= BOARD_SNAPSHOT_MAX_AGE_MS;
+    }
+
     // Refresh lane membership and summaries without replacing the editor or resetting loaded pages.
-    async refreshBoardSnapshot() {
+    // changeToken is the Board change token read before this snapshot; a complete snapshot records it.
+    async refreshBoardSnapshot(changeToken = null) {
         const root = this.root;
         if (!root?.isConnected || this.app.currentView !== 'board' || !this.state.boardId
             || this._cardPageGeneration !== this._refreshGeneration || this._pageRequests.size || this._boardDragging) return;
@@ -352,13 +369,15 @@ export class BoardController {
             this.state.columns = columns;
             this.state.cards = nextCards;
             this.cardPage = page.lanes ? { ...page, cards: nextCards } : null;
+            this._boardSnapshotSeen = changeToken ? { token: changeToken, generation, boardId, at: Date.now() } : null;
             if (changed) this.renderAll(); // renderLanes preserves horizontal and lane scroll positions.
         } catch (error) {
             if (current()) console.warn('Could not refresh Board cards:', error);
         }
     }
 
-    async refreshSessionActivity() {
+    // Returns the Board change token of this round's first activity read, if it read any (VIBE-322).
+    async refreshSessionActivity({ forceDetail = false } = {}) {
         if (this.app.isUiHidden()) return;
         const root = this.root;
         const editor = document.querySelector('[data-board-card-editor]');
@@ -377,25 +396,39 @@ export class BoardController {
         const abort = this._activityAbort = new AbortController();
         this._activityPending = true;
         const loadedIds = [...new Set(this.state.cards.map(card => card.id))];
+        // The editor's card rides along even when its tile is not loaded, so its stamp is known.
+        const activityIds = onBoard && cardId && !loadedIds.includes(cardId) ? [...loadedIds, cardId] : loadedIds;
         const readActivity = async () => {
-            if (!onBoard) return { cards: [], columnIds: [] };
+            if (!onBoard) return { cards: [], columnIds: [], changeToken: null };
             const cards = [];
-            let columnIds = [];
+            let columnIds = [], changeToken = null;
             // Bound every request and never fetch the unloaded remainder of a completed lane.
-            for (let offset = 0; offset < Math.max(1, loadedIds.length); offset += 100) {
-                if (!current() || abort.signal.aborted) return { cards: [], columnIds: [] };
+            for (let offset = 0; offset < Math.max(1, activityIds.length); offset += 100) {
+                if (!current() || abort.signal.aborted) return { cards: [], columnIds: [], changeToken: null };
                 const activity = await BoardApi.getBoardCardActivityAsync(boardId,
-                    loadedIds.slice(offset, offset + 100), { signal: abort.signal });
+                    activityIds.slice(offset, offset + 100), { signal: abort.signal });
+                // The first read's token is the oldest: everything read after it is at least as new.
+                if (offset === 0) changeToken = activity.changeToken;
                 cards.push(...activity.cards);
                 columnIds = activity.activeAutomationColumnIds;
             }
-            return { cards, columnIds };
+            return { cards, columnIds, changeToken };
         };
+        // With a stamp seen for this editor, read the activity first and fetch the card only when
+        // its stamp moved, or once a minute (VIBE-322). Without one (a new editor, a session event)
+        // the card is read alongside the activity, and the next round records its stamp.
+        const seen = onBoard && cardId && !forceDetail && editor._boardDetailSeen?.cardId === cardId ? editor._boardDetailSeen : null;
+        let detailStamp = null, detailSkipped = false;
+        const activityRead = readActivity();
+        const detailRead = !cardId ? null : !seen ? BoardApi.getBoardCardAsync(cardId, { signal: abort.signal })
+            : activityRead.then(activity => {
+                detailStamp = activity.cards.find(card => card.id === cardId)?.stamp || null;
+                if (!current() || abort.signal.aborted) return null;
+                detailSkipped = Boolean(detailStamp) && detailStamp === seen.stamp && Date.now() - seen.at < BOARD_SNAPSHOT_MAX_AGE_MS;
+                return detailSkipped ? null : BoardApi.getBoardCardAsync(cardId, { signal: abort.signal });
+            });
         try {
-            const [activity, detail] = await Promise.all([
-                readActivity(),
-                cardId ? BoardApi.getBoardCardAsync(cardId, { signal: abort.signal }) : null
-            ]);
+            const [activity, detail] = await Promise.all([activityRead, detailRead]);
             if (!current()) return;
             const { cards, columnIds } = activity;
             if (onBoard) {
@@ -459,9 +492,16 @@ export class BoardController {
                 if (discussionChanged) {
                     this.renderCardDiscussion(editor, card);
                 }
+                editor._boardDetailSeen = { cardId, stamp: detailStamp, at: Date.now() };
+                void this.cardAutomations?.refresh();
+                void this.cardReviews?.refresh();
+            } else if (detailSkipped && editor.isConnected && editor === document.querySelector('[data-board-card-editor]')
+                && editor.dataset.cardId === cardId) {
+                // The card is unchanged; its run and review rails still refresh, as they read other stores.
                 void this.cardAutomations?.refresh();
                 void this.cardReviews?.refresh();
             }
+            return activity.changeToken;
         } catch (error) {
             if (current()) console.warn('Could not refresh Board session activity:', error);
         } finally {
@@ -1192,6 +1232,7 @@ export class BoardController {
             && root === this.root && root?.isConnected && boardId === this.state.boardId;
         const button = this.queryAll('[data-board-action="load-more"]').find(item => item.dataset.columnId === columnId);
         if (button) { button.disabled = true; button.textContent = 'Loading…'; }
+        let page = null;
         try {
             const response = await BoardApi.getBoardCardPageAsync(boardId, this.state.filters, {
                 columnId, offset: lane.nextOffset, continuationToken: lane.continuationToken, signal: request.signal, excerpt: true
@@ -1203,6 +1244,8 @@ export class BoardController {
                 return;
             }
             const cards = new Map(this.state.cards.map(card => [card.id, card]));
+            // Only cards new to this browser can be appended; one already shown elsewhere moved.
+            page = (response.cards || []).every(card => !cards.has(card.id)) ? response.cards || [] : null;
             for (const card of response.cards || []) cards.set(card.id, card);
             this.state.cards = [...cards.values()];
             if (next) Object.assign(lane, next);
@@ -1211,8 +1254,39 @@ export class BoardController {
             if (isCurrent()) this.app.showToast('Board', error?.message || 'Could not load more cards. Try again.', 'error');
         } finally {
             if (this._pageRequests.get(columnId) === request) this._pageRequests.delete(columnId);
-            if (isCurrent()) this.renderLanes();
+            if (isCurrent() && !(page && this.appendLanePage(columnId, page))) this.renderLanes();
         }
+    }
+
+    // A further page of a lane is appended to it instead of repainting every lane (VIBE-322): paging
+    // through a long Done lane repainted the whole board once per page. Anything that does not line
+    // up with what is on screen falls back to renderLanes, which is always correct.
+    appendLanePage(columnId, cards) {
+        if (this._boardDragging || this.collapsedLaneIds.has(columnId)) return false;
+        const lane = this.cardPage?.lanes?.find(item => item.columnId === columnId);
+        const list = this.queryAll('.board-lane-list').find(item => item.dataset.columnId === columnId);
+        if (!lane || !list || list.querySelector('.board-lane-empty')) return false;
+        const order = (a, b) => Number(Boolean(b.flagged)) - Number(Boolean(a.flagged)) || a.position - b.position;
+        const added = [...cards].sort(order);
+        const laneCards = this.filteredCards().filter(card => card.columnId === columnId);
+        const tiles = [...list.querySelectorAll('.board-card[data-card-id]')];
+        const last = laneCards.find(card => card.id === tiles.at(-1)?.dataset.cardId);
+        const more = list.querySelector('[data-board-action="load-more"]');
+        if (added.some(card => card.columnId !== columnId) || tiles.length + added.length !== laneCards.length
+            || (tiles.length && !last) || (last && added.length && order(last, added[0]) > 0) || (lane.hasMore && !more)) return false;
+        const html = added.map(card => this.renderCard(card)).join('');
+        if (more) more.insertAdjacentHTML('beforebegin', html);
+        else list.insertAdjacentHTML('beforeend', html);
+        if (lane.hasMore) {
+            more.disabled = false;
+            more.textContent = `Load more (${laneCards.length} of ${lane.filteredCount})`;
+        } else more?.remove();
+        const total = lane.totalCount ?? this.state.cards.filter(card => card.columnId === columnId).length;
+        for (const count of list.closest('.board-lane')?.querySelectorAll('.board-card-count') || []) count.textContent = String(total);
+        this.cardSelection?.render();
+        const host = this.query('[data-board-lanes]');
+        if (host) this.cardAssign.mount(host, this.state.cards);
+        return true;
     }
 
     captureScroll() {

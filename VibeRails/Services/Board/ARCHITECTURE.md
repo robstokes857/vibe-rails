@@ -81,7 +81,15 @@ attention comments remain visible at the top, followed by chronological discussi
 
 `BoardController.refreshBoardSnapshot` polls the visible board every ten seconds and on return to
 the window. It reloads lane/card summaries and the already loaded depth of completed lanes using
-fresh ordering tokens. A changed ordering token during paging discards the partial snapshot.
+fresh ordering tokens. Since VIBE-322 a round reads card activity first: its `changeToken` is the
+board.db change stamp (`board-change-stamp/1`), read before anything else in that response, and
+the snapshot is skipped while it equals the token recorded with the last complete snapshot of the
+same board and refresh generation, for at most a minute. Each activity entry's `stamp` hashes that
+token with the card's live sessions and tabs and its running, waiting and desktop state; with one
+recorded, the open editor reads the activity first and its card only when the stamp moved, also at
+least once a minute. A new editor and a session event read the card beside the activity, as before.
+A further lane page is appended to its lane (`appendLanePage`) instead of repainting every lane;
+anything that does not line up with the rendered tiles falls back to `renderLanes`. A changed ordering token during paging discards the partial snapshot.
 Navigation, foreground refresh, paging and dragging invalidate or cancel background reads. The
 existing single editor and its drafts stay mounted; activity refresh updates sessions, Comments
 and their attachment/commit metadata together. It rejects a response if local discussion or rail

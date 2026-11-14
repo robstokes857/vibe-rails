@@ -292,11 +292,13 @@ public sealed class ReviewRequestService(
 
     public async Task<ReviewRequestList> ListAsync(string projectPath, CancellationToken ct)
     {
-        var records = await store.ListAsync(NormalizeProject(projectPath), ListLimit, ct);
-        var summaries = new List<ReviewRequestSummary>(records.Count);
-        foreach (var record in records)
-            summaries.Add(Summarize(record, Bundle(record), await store.GetDecisionsAsync(record.Id, ct)));
-        return new ReviewRequestList(summaries);
+        // Every card editor opens this list (VIBE-322). It never loads the bundles, which can hold
+        // megabytes of file content each, and reads every request's decisions in one query.
+        var records = await store.ListSummariesAsync(NormalizeProject(projectPath), ListLimit, ct);
+        var decisions = await store.GetDecisionsAsync(records.Select(item => item.Request.Id).ToList(), ct);
+        return new ReviewRequestList(records.Select(item => Summarize(item.Request,
+            item.Reviewers ?? throw new ReviewRequestException("corrupt", "The stored review bundle could not be read.", 500),
+            item.FileCount, item.SessionCount, decisions.GetValueOrDefault(item.Request.Id) ?? [])).ToList());
     }
 
     public async Task<ReviewRequestDetail> GetAsync(string projectPath, string id, CancellationToken ct)
@@ -568,8 +570,12 @@ public sealed class ReviewRequestService(
         ?? throw new ReviewRequestException("corrupt", "The stored review bundle could not be read.", 500);
 
     private static ReviewRequestSummary Summarize(ReviewRequestRecord record, ReviewBundle bundle, IReadOnlyList<ReviewDecisionRecord> decisions) =>
-        new(record.Id, record.Scope, record.TreeId, record.BaseCommit, record.Status, bundle.Reviewers, record.CardKey,
-            bundle.Files.Count, bundle.Sessions.Count, record.CreatedUTC, record.UpdatedUTC,
+        Summarize(record, bundle.Reviewers, bundle.Files.Count, bundle.Sessions.Count, decisions);
+
+    private static ReviewRequestSummary Summarize(ReviewRequestRecord record, IReadOnlyList<string> reviewers, int fileCount, int sessionCount,
+        IReadOnlyList<ReviewDecisionRecord> decisions) =>
+        new(record.Id, record.Scope, record.TreeId, record.BaseCommit, record.Status, reviewers, record.CardKey,
+            fileCount, sessionCount, record.CreatedUTC, record.UpdatedUTC,
             decisions.Select(ToDto).ToList(),
             record.RemoteId is { } remote
                 ? new ReviewRequestRemote(remote, record.SentUTC ?? record.UpdatedUTC, record.ExpiresUTC, record.RemoteCancelledUTC)

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using VibeRails.DB;
 
@@ -115,6 +116,38 @@ public sealed class ReviewRequestStore : IReviewRequestStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<ReviewRequestListRecord>> ListSummariesAsync(string projectPath, int limit, CancellationToken ct = default)
+    {
+        using var db = SqliteConnectionFactory.Open(_connectionString);
+        using var command = db.CreateCommand();
+        // The bundle's camelCase top-level fields, as ReviewRequestJsonContext writes them in every
+        // schema. Only these three cross into .NET; '' stands in for the bundle text.
+        command.CommandText = RequestColumns.Replace("BundleJson", "''", StringComparison.Ordinal) + """
+            ,
+                   CASE WHEN json_valid(BundleJson) THEN COALESCE(json_extract(BundleJson, '$.reviewers'), '[]') END,
+                   CASE WHEN json_valid(BundleJson) THEN COALESCE(json_array_length(BundleJson, '$.files'), 0) ELSE 0 END,
+                   CASE WHEN json_valid(BundleJson) THEN COALESCE(json_array_length(BundleJson, '$.sessions'), 0) ELSE 0 END
+            FROM ReviewRequests WHERE ProjectPath = $project ORDER BY CreatedUTC DESC, Id LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$project", projectPath);
+        command.Parameters.AddWithValue("$limit", Math.Max(0, limit));
+        using var reader = await command.ExecuteReaderAsync(ct);
+        var result = new List<ReviewRequestListRecord>();
+        while (await reader.ReadAsync(ct))
+        {
+            var reviewers = reader.IsDBNull(17) ? null : ReadReviewers(reader.GetString(17));
+            result.Add(new(ReadRequest(reader), reviewers, reader.GetInt32(18), reader.GetInt32(19)));
+        }
+        return result;
+    }
+
+    private static IReadOnlyList<string>? ReadReviewers(string json)
+    {
+        try { return JsonSerializer.Deserialize(json, VibeRails.DTOs.StorageJsonSerializerContext.Default.ListString); }
+        catch (JsonException) { return null; }
+    }
+
+    /// <inheritdoc />
     public async Task<bool> UpdateStatusAsync(string id, string status, DateTime updatedUtc, CancellationToken ct = default)
     {
         using var db = SqliteConnectionFactory.Open(_connectionString);
@@ -192,6 +225,23 @@ public sealed class ReviewRequestStore : IReviewRequestStore
         command.CommandText = DecisionColumns + " FROM ReviewDecisions d WHERE d.RequestId = $request ORDER BY d.DecidedUTC, d.Id;";
         command.Parameters.AddWithValue("$request", requestId);
         return await ReadDecisionsAsync(command, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, IReadOnlyList<ReviewDecisionRecord>>> GetDecisionsAsync(IReadOnlyList<string> requestIds, CancellationToken ct = default)
+    {
+        var result = new Dictionary<string, IReadOnlyList<ReviewDecisionRecord>>(StringComparer.Ordinal);
+        if (requestIds.Count == 0) return result;
+        using var db = SqliteConnectionFactory.Open(_connectionString);
+        using var command = db.CreateCommand();
+        command.CommandText = DecisionColumns + """
+             FROM ReviewDecisions d WHERE d.RequestId IN (SELECT value FROM json_each($requests))
+            ORDER BY d.RequestId, d.DecidedUTC, d.Id;
+            """;
+        command.Parameters.AddWithValue("$requests", JsonSerializer.Serialize(requestIds.Distinct(StringComparer.Ordinal).ToList(), VibeRails.DTOs.StorageJsonSerializerContext.Default.ListString));
+        foreach (var group in (await ReadDecisionsAsync(command, ct)).GroupBy(decision => decision.RequestId, StringComparer.Ordinal))
+            result[group.Key] = group.ToList();
+        return result;
     }
 
     /// <inheritdoc />

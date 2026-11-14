@@ -1,5 +1,21 @@
 # Board persistence
 
+`board-change-stamp/1` (VIBE-322, additive) adds the one-row `BoardChangeStamp` and AFTER
+INSERT/UPDATE/DELETE triggers on the 24 tables the Board poll and the card editor's refresh read
+(`BoardStore.ChangeStampTables`). Each trigger rewrites the row with `random()`, so every writer
+moves it: other roots, older binaries, tracker and hosted sync. A random value rather than a
+counter, so a restored file never repeats a value for different content. `GetChangeStampAsync`
+returns it as 16 hex digits, or null without the row (the client then rereads everything). Hot or
+unshown tables (desktop leases, dispatch and pending entries, launch events, embeddings, sync
+ledgers, history) are listed in `UnstampedTables`; `BoardChangeStampTests` fails for a table in
+neither list. The trigger list is frozen with the migration: a new table that a tile or the editor
+shows needs its own migration with triggers. Dropping a stamped table drops its triggers too, so a
+test that rebuilds one must also re-run `board-change-stamp`. No row is read or rewritten.
+
+`WriteCardPositionsAsync` (VIBE-322) renumbers a lane in one `UPDATE … FROM` over `json_each`
+instead of one statement per card; the ordering rule and the changed-rows-only write are unchanged.
+`GetCardsAsync(descriptions: false)` reads `''` for every description, for title lists.
+
 VIBE-282: local `DeleteCardAsync` permanently removes one live, project-scoped card through
 `BoardStore.CardDeletion.cs`. Foreign keys cascade its content; explicit transactional cleanup
 removes card-owned workflow reports/steps, dispatch, desktop activity and exemptions. Session

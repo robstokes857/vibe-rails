@@ -201,3 +201,68 @@ test('counts, filter options, and search results include unloaded cards', async 
     requests[0].resolve({ cards: [] });
     await pending;
 });
+
+// VIBE-322: a further page of a long Done lane used to repaint every lane, once per page.
+function appendHarness() {
+    const h = harness();
+    let renders = 0;
+    h.controller.renderLanes = () => { renders++; };
+    const inserted = [];
+    const counts = [{ textContent: '120' }, { textContent: '120' }];
+    const more = { disabled: true, textContent: 'Loading…', removed: false,
+        insertAdjacentHTML(where, html) { inserted.push([where, html]); }, remove() { this.removed = true; } };
+    const tiles = [{ dataset: { cardId: 'a' } }];
+    const list = { dataset: { columnId: 'done' },
+        querySelector: selector => selector === '[data-board-action="load-more"]' ? more : null,
+        querySelectorAll: () => tiles,
+        insertAdjacentHTML: () => assert.fail('the Load more button is the anchor'),
+        closest: () => ({ querySelectorAll: () => counts }) };
+    h.controller.queryAll = selector => selector === '.board-lane-list' ? [list] : [];
+    h.controller.query = () => null;
+    h.controller.renderCard = card => `<${card.id}>`;
+    h.controller.state.cards = [{ id: 'a', columnId: 'done', position: 0 }];
+    return { ...h, inserted, counts, more, tiles, renders: () => renders };
+}
+
+const nextPage = (cards, lane = {}) => ({ cards, lanes: [{ columnId: 'done', totalCount: 121, filteredCount: 121,
+    nextOffset: 33, hasMore: true, continuationToken: 'order-a', ...lane }] });
+
+test('a further lane page is appended to its lane without repainting the board', async () => {
+    const h = appendHarness();
+    const pending = h.controller.loadMoreCards('done');
+    h.requests[0].resolve(nextPage([{ id: 'c', columnId: 'done', position: 2 }, { id: 'b', columnId: 'done', position: 1 }]));
+    await pending;
+    assert.equal(h.renders(), 0);
+    assert.deepEqual(h.inserted, [['beforebegin', '<b><c>']]);
+    assert.equal(h.more.disabled, false);
+    assert.equal(h.more.textContent, 'Load more (3 of 121)');
+    assert.deepEqual(h.counts.map(count => count.textContent), ['121', '121']);
+    assert.deepEqual(h.controller.state.cards.map(card => card.id), ['a', 'c', 'b']);
+});
+
+test('the last lane page removes Load more', async () => {
+    const h = appendHarness();
+    const pending = h.controller.loadMoreCards('done');
+    h.requests[0].resolve(nextPage([{ id: 'b', columnId: 'done', position: 1 }], { hasMore: false }));
+    await pending;
+    assert.equal(h.renders(), 0);
+    assert.equal(h.more.removed, true);
+});
+
+test('a page that does not line up with the rendered lane repaints instead', async () => {
+    const cases = [
+        ['a card already shown moved into the page', h => h.controller.state.cards.push({ id: 'b', columnId: 'open', position: 0 })],
+        ['the rendered tiles are not the loaded cards', h => h.tiles.push({ dataset: { cardId: 'ghost' } })],
+        ['the page sorts before the last tile', h => { h.controller.state.cards[0].position = 9; }],
+        ['the lane is collapsed', h => h.controller.collapsedLaneIds.add('done')]
+    ];
+    for (const [name, prepare] of cases) {
+        const h = appendHarness();
+        prepare(h);
+        const pending = h.controller.loadMoreCards('done');
+        h.requests[0].resolve(nextPage([{ id: 'b', columnId: 'done', position: 1 }]));
+        await pending;
+        assert.deepEqual(h.inserted, [], name);
+        assert.equal(h.renders(), 1, name);
+    }
+});

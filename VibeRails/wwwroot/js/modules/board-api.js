@@ -253,9 +253,13 @@ async function getBoardCardsAsync(boardId = null, extra = {}) {
     return (response?.cards || []).sort((a, b) => a.position - b.position || a.key.localeCompare(b.key));
 }
 
+// changeToken (VIBE-322) is read before the rest of the response; while it is unchanged, the boards,
+// lanes and card pages read after the previous value are current. Each card's `stamp` covers what the
+// card editor's refresh shows. Both are null when the server cannot tell.
 async function getBoardCardActivityAsync(boardId, cardIds, extra = {}) {
     const response = await call('/cards/activity', 'POST', { boardId, cardIds }, extra);
-    return { cards: response?.cards || [], activeAutomationColumnIds: response?.activeAutomationColumnIds || [] };
+    return { cards: response?.cards || [], activeAutomationColumnIds: response?.activeAutomationColumnIds || [],
+        changeToken: response?.changeToken || null };
 }
 
 // pageSize is 30 for what the user pages through. The background poll asks for up to 100 (the

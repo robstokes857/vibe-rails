@@ -35,7 +35,9 @@ public partial interface IBoardService
     Task<DeleteBoardColumnResponse?> DeleteColumnAsync(string projectPath, string columnId, CancellationToken cancellationToken = default);
     Task<BoardColumnListResponse> ReorderColumnsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default, string? boardId = null);
 
-    Task<BoardCardListResponse> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null);
+    /// <param name="descriptions">False returns every card with an empty Description, for title lists (VIBE-322).</param>
+    Task<BoardCardListResponse> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null,
+        bool descriptions = true);
     Task<BoardCardResponse?> GetCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default);
     /// <summary>Updates only the local pin marker, preserving the card's current position.</summary>
     Task<BoardCardResponse?> SetCardPinnedAsync(string projectPath, string idOrKey, bool pinned, CancellationToken cancellationToken = default);
@@ -269,9 +271,10 @@ public sealed partial class BoardService(
 
     // ------------------------------------------------------------------ cards
 
-    public async Task<BoardCardListResponse> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null)
+    public async Task<BoardCardListResponse> GetCardsAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null,
+        bool descriptions = true)
     {
-        var cards = await store.GetCardsAsync(projectPath, cancellationToken, NormalizeBoardId(boardId));
+        var cards = await store.GetCardsAsync(projectPath, cancellationToken, NormalizeBoardId(boardId), descriptions);
         return await GetCardListResponseAsync(projectPath, cards, cancellationToken);
     }
 

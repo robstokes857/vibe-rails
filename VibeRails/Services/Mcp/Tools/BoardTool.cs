@@ -172,7 +172,8 @@ public sealed partial class BoardTool(
             var outsideProject = !SameProject(project, target.Project);
             project = target.Project;
             var columns = (await service.GetColumnsAsync(project, cancellationToken, target.BoardId)).Columns.ToDictionary(c => c.Id, c => c);
-            var cards = (await service.GetCardsAsync(project, cancellationToken, target.BoardId)).Cards.AsEnumerable();
+            // The list prints titles only, so the descriptions stay in the database (VIBE-322).
+            var cards = (await service.GetCardsAsync(project, cancellationToken, target.BoardId, descriptions: false)).Cards.AsEnumerable();
 
             if (!string.IsNullOrWhiteSpace(column))
             {

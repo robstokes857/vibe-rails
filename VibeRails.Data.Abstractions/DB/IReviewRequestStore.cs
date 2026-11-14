@@ -66,6 +66,13 @@ public sealed record ReviewDecisionRecord(
     long? RemoteId = null,
     string? LineCommentsJson = null);
 
+/// <summary>
+/// A request as a list shows it (VIBE-322): every field but the bundle, whose <c>BundleJson</c> is
+/// empty here, plus the three bundle facts a summary needs. <paramref name="Reviewers"/> is null when
+/// the stored bundle is not valid JSON.
+/// </summary>
+public sealed record ReviewRequestListRecord(ReviewRequestRecord Request, IReadOnlyList<string>? Reviewers, int FileCount, int SessionCount);
+
 /// <summary>A stored decision and the request status it produced.</summary>
 public sealed record ReviewDecisionOutcome(ReviewDecisionRecord Decision, string Status);
 
@@ -96,6 +103,12 @@ public interface IReviewRequestStore
     /// <summary>Requests for one project, newest first, at most <paramref name="limit"/>.</summary>
     Task<IReadOnlyList<ReviewRequestRecord>> ListAsync(string projectPath, int limit, CancellationToken ct = default);
 
+    /// <summary>
+    /// <see cref="ListAsync"/> without the bundles, which can hold megabytes of file content each:
+    /// SQLite reads the reviewers and the file and session counts from the stored JSON (VIBE-322).
+    /// </summary>
+    Task<IReadOnlyList<ReviewRequestListRecord>> ListSummariesAsync(string projectPath, int limit, CancellationToken ct = default);
+
     /// <summary>Changes the status and stamps the update time. False when the request does not exist.</summary>
     Task<bool> UpdateStatusAsync(string id, string status, DateTime updatedUtc, CancellationToken ct = default);
 
@@ -112,6 +125,9 @@ public interface IReviewRequestStore
 
     /// <summary>Decisions for one request, oldest first.</summary>
     Task<IReadOnlyList<ReviewDecisionRecord>> GetDecisionsAsync(string requestId, CancellationToken ct = default);
+
+    /// <summary>Decisions for several requests in one read, oldest first per request; a request without any is absent.</summary>
+    Task<IReadOnlyDictionary<string, IReadOnlyList<ReviewDecisionRecord>>> GetDecisionsAsync(IReadOnlyList<string> requestIds, CancellationToken ct = default);
 
     /// <summary>
     /// Verified approvals whose signature covers <paramref name="treeId"/>, newest first, across every

@@ -103,8 +103,9 @@ test('Board timers and lifecycle events pause, resume without overlap, and unsub
     f.app.appEventClient = { on(name, callback) { events.set(name, callback); return () => events.delete(name); } };
     const board = new BoardController(f.app);
     let snapshots = 0, activity = 0, finish;
-    board.refreshBoardSnapshot = async () => { snapshots++; await new Promise(resolve => { finish = resolve; }); };
-    board.refreshSessionActivity = async () => { activity++; };
+    // A round reads activity first: its change token decides whether the snapshot is needed (VIBE-322).
+    board.refreshSessionActivity = async () => { activity++; await new Promise(resolve => { finish = resolve; }); };
+    board.refreshBoardSnapshot = async () => { snapshots++; };
     f.show(false);
     board.bindSessionActivity();
     await settle();
@@ -113,13 +114,13 @@ test('Board timers and lifecycle events pause, resume without overlap, and unsub
     await settle();
     assert.equal(snapshots + activity, 0);
     f.show(true);
-    assert.equal(snapshots, 1);
+    assert.equal(activity, 1);
     f.host.emit('focus');
     clock.tick();
-    assert.equal(snapshots, 1, 'reveal, focus and interval share the pending guard');
+    assert.equal(activity, 1, 'reveal, focus and interval share the pending guard');
     finish();
     await settle();
-    assert.equal(activity, 1);
+    assert.equal(snapshots, 1, 'no change token, so the round reads the snapshot');
     for (const callback of events.values()) callback();
     await settle();
     assert.equal(activity, 2, 'one microtask coalesces simultaneous lifecycle events');
