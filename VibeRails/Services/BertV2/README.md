@@ -11,8 +11,11 @@ inference rounds, subject to the resource-pressure policy below. An idle root ti
 minutes; each corpus's durable completion time suppresses duplicate sweeps across roots for five
 minutes. While a sweep or an inference backlog is unfinished the job follows up after five seconds
 (VB-2GUR8-187: the earlier five-second cadence re-upserted the whole corpus around the clock in
-every root). `SearchIndexMaintenanceJob` repairs derived indexes every fifteen minutes. There is no
-new scheduler, daemon or OS role. Each round gives Board, input and ended-session work a turn.
+every root). `SearchIndexMaintenanceJob` repairs derived indexes every fifteen minutes. Its strict
+FTS integrity check, which re-tokenizes every source under search.db's writer lock, runs only after
+the index changed (FTS5's structure record differs), at most every six hours, and otherwise once a
+day, per process; the vector repair takes the writer lock only when a read probe finds work
+(VIBE-322). There is no new scheduler, daemon or OS role. Each round gives Board, input and ended-session work a turn.
 Ingestion does not require the model; query embedding and background model construction are lazy
 so keyword search survives missing model files or native ONNX dependencies. The singleton owner
 releases the native model after two minutes without inference, including in stdio MCP processes;

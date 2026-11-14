@@ -306,7 +306,10 @@ export class BoardController {
             // server (VIBE-322). Lanes and card pages are reread only when that token moved since the
             // last complete snapshot, and at least once a minute.
             const changeToken = await this.refreshSessionActivity();
-            if (!this.app.isUiHidden() && this.boardSnapshotStale(changeToken)) await this.refreshBoardSnapshot(changeToken);
+            if (this.app.isUiHidden()) return;
+            if (this.boardSnapshotStale(changeToken)) await this.refreshBoardSnapshot(changeToken);
+            // The snapshot polls the manager chip; without one the round still does, as before.
+            else if (this.root?.isConnected && this.app.currentView === 'board' && this.state.boardId) void this.managerChip?.poll();
         } finally { this._boardPollPending = false; }
     }
 
@@ -2381,16 +2384,18 @@ export class BoardController {
     // wall of text cannot bury the rest of the thread.
     applyCommentClamps(host) {
         if (!host.isConnected) return;
-        host.querySelectorAll('[data-board-comment-body]').forEach(body => {
-            const more = body.parentElement.querySelector('[data-board-comment-more]');
-            if (!more || body.classList.contains('is-expanded')) return;
-            // Clamp FIRST, then measure. Measuring an unclamped body always reports
-            // scrollHeight === clientHeight, so the old order could never detect
-            // overflow and nothing was ever clamped.
-            body.classList.add('is-clamped');
-            const overflowing = body.scrollHeight > body.clientHeight + 4;
-            more.hidden = !overflowing;
-            if (!overflowing) {
+        const entries = [...host.querySelectorAll('[data-board-comment-body]')]
+            .map(body => ({ body, more: body.parentElement.querySelector('[data-board-comment-more]') }))
+            .filter(({ body, more }) => more && !body.classList.contains('is-expanded'));
+        // Clamp FIRST, then measure. Measuring an unclamped body always reports
+        // scrollHeight === clientHeight, so the old order could never detect
+        // overflow and nothing was ever clamped. All clamps, then all reads, then
+        // all writes: one layout for the thread instead of one per comment (VIBE-322).
+        for (const { body } of entries) body.classList.add('is-clamped');
+        const overflowing = entries.map(({ body }) => body.scrollHeight > body.clientHeight + 4);
+        entries.forEach(({ body, more }, index) => {
+            more.hidden = !overflowing[index];
+            if (!overflowing[index]) {
                 body.classList.remove('is-clamped');
                 return;
             }

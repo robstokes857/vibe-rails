@@ -14,8 +14,11 @@ public sealed partial class LaunchStore : ILaunchStore
 
     public LaunchStore(string connectionString)
     {
-        // One short-lived connection per operation; do not retain file handles after component teardown.
-        this.connectionString = new SqliteConnectionStringBuilder(connectionString) { Pooling = false }.ToString();
+        // One connection per operation, from the pool like state.db and board.db (VIBE-322): the
+        // scheduler's idle tick opened the file two or three times, about 3 ms each. Nothing relies on
+        // the close-time checkpoint: complete backups capture launches.db through the SQLite backup API
+        // (BackupFiles.CaptureAsync). Tests pass Pooling=False so their temporary files can be deleted.
+        this.connectionString = connectionString;
         using var db = Open();
         SqliteMigrationRunner.RequireGenerationAtMost(db, Generation, "launches");
         SqliteMigrationRunner.Apply(db, "launches", 1, MigrationKind.Additive, (migration, tx) =>

@@ -219,19 +219,53 @@ public sealed partial class SqliteSearchIndexStore(string databasePath, string s
         return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
-    public bool Repair()
+    /// <summary>
+    /// The strict FTS check re-tokenizes every source while it holds search.db's writer lock, and the
+    /// trigger-maintained index drifts only through damage. So it runs after the index has changed, at
+    /// most every <see cref="FtsCheckMinimumInterval"/>, and otherwise every <see cref="FtsCheckMaximumInterval"/>
+    /// (VIBE-322); it ran every 15 minutes in every root. The schedule is per process.
+    /// </summary>
+    internal static readonly TimeSpan FtsCheckMinimumInterval = TimeSpan.FromHours(6);
+    internal static readonly TimeSpan FtsCheckMaximumInterval = TimeSpan.FromHours(24);
+    private long? _ftsCheckedAt;
+    private byte[]? _ftsCheckedStructure;
+
+    /// <summary>Strict FTS checks this instance has run; for tests of the schedule.</summary>
+    internal int FtsChecks { get; private set; }
+
+    public bool Repair() => Repair(Now);
+
+    internal bool Repair(long now)
     {
         Initialize();
         using var db = Open();
         var repaired = false;
-        try { Execute(db, "INSERT INTO SearchSources_fts(SearchSources_fts,rank) VALUES('integrity-check',1)"); }
-        catch (SqliteException ex) when (ex.SqliteErrorCode == 11)
+        // FTS5 rewrites its structure record (rowid 10) whenever a write reaches the index.
+        var structure = ReadFtsStructure(db);
+        var since = now - _ftsCheckedAt;
+        if (since is null || (since >= (long)FtsCheckMinimumInterval.TotalMilliseconds
+            && (since >= (long)FtsCheckMaximumInterval.TotalMilliseconds || !structure.AsSpan().SequenceEqual(_ftsCheckedStructure))))
         {
-            Execute(db, "INSERT INTO SearchSources_fts(SearchSources_fts) VALUES('rebuild')");
-            repaired = true;
+            FtsChecks++;
+            try { Execute(db, "INSERT INTO SearchSources_fts(SearchSources_fts,rank) VALUES('integrity-check',1)"); }
+            catch (SqliteException ex) when (ex.SqliteErrorCode == 11)
+            {
+                Execute(db, "INSERT INTO SearchSources_fts(SearchSources_fts) VALUES('rebuild')");
+                repaired = true;
+                structure = ReadFtsStructure(db);
+            }
+            _ftsCheckedAt = now;
+            _ftsCheckedStructure = structure;
         }
         SearchDatabaseSchema.EnsureVectors(databasePath);
         using var vectors = BertVectorDatabase.Open(databasePath);
+        // A plain read finds nothing to fix on an ordinary pass, without the writer lock the
+        // transaction below would take and hold for both scans (VIBE-322).
+        using (var probe = Command(vectors, """
+            SELECT EXISTS (SELECT 1 FROM SearchChunks WHERE ModelVersion IS NOT NULL AND Id NOT IN (SELECT Id FROM vec_search_chunks))
+                OR EXISTS (SELECT 1 FROM vec_search_chunks WHERE Id NOT IN (SELECT Id FROM SearchChunks))
+            """))
+            if (Convert.ToInt64(probe.ExecuteScalar(), CultureInfo.InvariantCulture) == 0) return repaired;
         using var tx = vectors.BeginTransaction();
         repaired |= Execute(vectors, """
             UPDATE SearchChunks SET ModelVersion=NULL WHERE Id IN (
@@ -245,5 +279,11 @@ public sealed partial class SqliteSearchIndexStore(string databasePath, string s
             """);
         tx.Commit();
         return repaired;
+    }
+
+    private static byte[] ReadFtsStructure(SqliteConnection db)
+    {
+        using var cmd = Command(db, "SELECT block FROM SearchSources_fts_data WHERE id=10");
+        return cmd.ExecuteScalar() as byte[] ?? [];
     }
 }

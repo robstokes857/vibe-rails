@@ -5,6 +5,9 @@ Git events and schedules. `ILaunchStore` owns the global catalog in
 `~/.vibe_rails/launches.db` in every build configuration. Startup creates the
 component automatically, with WAL, the shared SQLite busy timeout and additive,
 versioned schema setup. It starts empty; no environment or Job is imported.
+Connections come from the pool like state.db and board.db (VIBE-322); nothing relies
+on a close-time checkpoint, because backups take an online snapshot (below). Tests
+pass `Pooling=False` so their temporary files can be deleted.
 
 A preset owns an ID, revision, name, description, provider, typed options,
 additional argv, optional prompt, enabled state, purpose, timeout and timestamps.

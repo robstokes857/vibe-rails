@@ -58,6 +58,16 @@ test('an unchanged change token skips the lane and card snapshot', async t => {
     assert.equal(await round(h, 't2'), false);
 });
 
+test('the manager chip is polled every round, with or without a snapshot', async t => {
+    const h = harness(t);
+    let polls = 0;
+    h.controller.managerChip = { poll: async () => { polls++; } };
+    await round(h, 't1');
+    await round(h, 't1');
+    await round(h, 't2');
+    assert.equal(polls, 3);
+});
+
 test('the snapshot is still reread once a minute, without a token, and after a refresh or board switch', async t => {
     const h = harness(t);
     await round(h, 't1');
