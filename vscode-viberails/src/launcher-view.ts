@@ -211,6 +211,7 @@ export class LauncherTreeDataProvider implements vscode.TreeDataProvider<Launche
 }
 
 export interface RunLauncherDependencies {
+    promptUserMessage(label: string): PromiseLike<string | undefined>;
     request(method: BackendMethod, path: string, body?: unknown): Promise<unknown>;
     openDashboard(): Promise<void>;
     reveal(): void;
@@ -235,11 +236,13 @@ export async function runLauncherItem(item: LauncherItem | undefined, dependenci
             return;
         }
         if (item.definitionType === 'preset') {
+            const userMessage = await dependencies.promptUserMessage(item.label);
+            if (userMessage === undefined) return;
             // Use the same template-value prompt, revision check and terminal
             // adoption as the browser picker before posting the typed run.
             await dependencies.openDashboard();
             dependencies.reveal();
-            if (!await dependencies.post({ command: 'launchDefinition', definitionId: item.id, definitionType: 'preset' }))
+            if (!await dependencies.post({ command: 'launchDefinition', definitionId: item.id, definitionType: 'preset', userMessage }))
                 throw new Error('The dashboard could not receive this launch. Try again.');
             return;
         }

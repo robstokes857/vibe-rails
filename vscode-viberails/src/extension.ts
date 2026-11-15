@@ -366,6 +366,12 @@ function registerLauncherView(context: vscode.ExtensionContext, registeredComman
         ...bindSidebarTreeView<LauncherNode>(LAUNCHER_VIEW_ID, provider, registeredCommands),
         vscode.commands.registerCommand(COMMAND_LAUNCHER_REFRESH, () => provider.refresh()),
         vscode.commands.registerCommand(COMMAND_LAUNCHER_RUN, (item?: LauncherItem) => runLauncherItem(item, {
+            promptUserMessage: (label) => vscode.window.showInputBox({
+                title: `Run ${label}`,
+                prompt: 'User message (optional). Leave empty to launch, or press Escape to cancel.',
+                ignoreFocusOut: true,
+                validateInput: value => value.length > 8000 ? 'Use 8,000 characters or fewer.' : null
+            }),
             request: (method, route, body) => requestJson(getBackendConnection(), method, route, body),
             openDashboard: () => openDashboard(context),
             reveal: () => webviewManager?.reveal(),

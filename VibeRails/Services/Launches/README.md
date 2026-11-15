@@ -77,6 +77,18 @@ No schema generation bump, backfill, data conversion or manual migration is requ
 
 ## Frontend contract (VIBE-292 / VB-4OG9T-366)
 
+Manual preset runs accept an optional `userMessage` (up to 8,000 characters).
+Quick actions provides an inline field and the VS Code Launch view asks before
+opening the dashboard (blank continues; Escape cancels). The immutable run context
+keeps the message separately from the template, including on retry; it never edits
+the preset. `PromptPlaceholderService` substitutes `{{user_message}}` once, or
+appends the message when no such token exists. Message text is never interpreted
+as placeholder syntax. Missing/blank messages resolve to empty text, including on
+scheduled and Board launches. Custom `{{name}}` variables retain their existing
+required-value dialog. The final prompt still has the 30,000-character limit.
+This is an additive JSON field in existing run snapshots, with no schema change;
+older executables do not resolve this new placeholder or use the message field.
+
 Code quality Actions are offered in every UI catalog, Quick actions, Board add/run choices
 and the definition editor. VIBE-309 briefly hid them with a presentation filter; VIBE-311
 removed it. No stored data was changed by either.

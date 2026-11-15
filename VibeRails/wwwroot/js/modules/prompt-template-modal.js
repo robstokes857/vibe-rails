@@ -11,7 +11,8 @@ const DEFAULT_PATTERN = /\bdefault\s*=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])
 // literal for it.
 // "step" is on this list because {{step:<id>}} parses under TOKEN_PATTERN as name "step" with
 // ":<id>" falling into the argument capture.
-const BUILTIN_TOKEN_NAMES = Object.freeze(['datetime', 'date', 'time', 'git_branch', 'env_name', 'board_card', 'worktree']);
+// user_message stays literal here: the server inserts the separate per-run value without rescanning it.
+const BUILTIN_TOKEN_NAMES = Object.freeze(['datetime', 'date', 'time', 'git_branch', 'env_name', 'board_card', 'worktree', 'user_message']);
 const STEP_ID_PATTERN = /step\s*:\s*([0-9a-fA-F-]+)/i;
 
 function lower(value) {
@@ -159,6 +160,7 @@ export async function resolvePromptTemplateForLaunch(app, options = {}) {
         environmentName: options.environmentName || environment?.name || '',
         // For the preview's {{step:<id>}} chips — EnvironmentResponse already carries steps.
         steps: environment?.steps || [],
+        userMessage: options.userMessage,
         title: options.title || environment?.name || ''
     });
 
@@ -196,6 +198,9 @@ function buildValues(variables, container) {
 /** Preview text for a reserved token: the resolved value, or a described stand-in for the
  *  server-resolved ones. */
 function reservedTokenPreview(token, context = {}) {
+    if (lower(token.name) === 'user_message') {
+        return context.userMessage?.trim() ? context.userMessage : '(no user message)';
+    }
     if (lower(token.name) === 'step') {
         const stepId = STEP_ID_PATTERN.exec(token.token)?.[1]?.toLowerCase() ?? '';
         const steps = Array.isArray(context.steps) ? context.steps : [];
@@ -215,9 +220,11 @@ function buildPreviewHtml(template, values = {}, context = {}) {
     const text = String(template ?? '');
     let html = '';
     let lastIndex = 0;
+    let hasUserMessage = false;
 
     for (const match of text.matchAll(TOKEN_PATTERN)) {
         const token = parseToken(match);
+        if (lower(token.name) === 'user_message') hasUserMessage = true;
         html += escapeHtml(text.slice(lastIndex, match.index));
 
         if (isReservedToken(token.name)) {
@@ -234,6 +241,9 @@ function buildPreviewHtml(template, values = {}, context = {}) {
     }
 
     html += escapeHtml(text.slice(lastIndex));
+    if (!hasUserMessage && context.userMessage?.trim()) {
+        html += `\n\n<span class="vb-prompt-template-token vb-prompt-template-token-builtin">${escapeHtml(context.userMessage)}</span>`;
+    }
     return html;
 }
 
@@ -292,7 +302,7 @@ function showPromptTemplateModal(app, options) {
             : 'Fill Prompt Values';
         // Context for auto-filled tokens: env_name resolves client-side; steps give the
         // {{step:<id>}} preview chips their names.
-        const context = { environmentName: options.environmentName, steps: options.steps };
+        const context = { environmentName: options.environmentName, steps: options.steps, userMessage: options.userMessage };
         if (app.showModal(title, renderModalHtml({ ...options, context })) === false) {
             resolve(null);
             return;
@@ -364,7 +374,7 @@ function showPromptTemplateModal(app, options) {
             }
 
             const resolved = renderPromptTemplate(options.template, buildValues(variables, form), context);
-            if (!resolved.trim()) {
+            if (!resolved.trim() && !options.userMessage?.trim()) {
                 app.showError?.('Resolved initial message is empty.');
                 return;
             }

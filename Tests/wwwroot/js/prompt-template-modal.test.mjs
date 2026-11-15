@@ -12,6 +12,14 @@ const {
     findEnvironmentForPrompt
 } = await import(pathToFileURL(sourceModule).href);
 
+test('optional user message never opens a required field and stays literal until the server pass', () => {
+    const template = '{{user_message}} {{ USER_MESSAGE }} {{ticket}}';
+    assert.deepEqual(extractPromptTemplateVariables(template).map(v => v.name), ['ticket']);
+    assert.equal(hasPromptTemplateVariables('{{user_message}}'), false);
+    assert.equal(renderPromptTemplate(template, { ticket: '123', user_message: 'must not substitute' }),
+        '{{user_message}} {{ USER_MESSAGE }} 123');
+});
+
 test('worktree options stay server-owned and never become fill-in fields', () => {
     for (const token of ['{{worktree}}', '{{worktree delete_after_days=7}}', '{{WORKTREE path="../task one" delete_after_days=never}}']) {
         assert.deepEqual(extractPromptTemplateVariables(token), []);

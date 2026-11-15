@@ -168,6 +168,16 @@ public class LaunchRoutesTests
             var run = (await runResponse.Content.ReadFromJsonAsync<LaunchRun>(ct))!;
             Assert.Null(run.ClaimToken);
             Assert.True(run.Snapshot.Context.NativeTerminal);
+            Assert.Null(run.Snapshot.Context.UserMessage);
+            using var messageResponse = await SendAsync(HttpMethod.Post, url + "/api/v1/runs",
+                new LaunchRequest(saved.Preset.Id, UserMessage: "Focus on {{worktree}} literally"), ct);
+            Assert.Equal(HttpStatusCode.OK, messageResponse.StatusCode);
+            var messageRun = (await messageResponse.Content.ReadFromJsonAsync<LaunchRun>(ct))!;
+            Assert.Equal("Focus on {{worktree}} literally", messageRun.Snapshot.Context.UserMessage);
+            Assert.Equal("Work", messageRun.Snapshot.Preset!.InitialPrompt);
+            using var oversizedMessage = await SendAsync(HttpMethod.Post, url + "/api/v1/runs",
+                new LaunchRequest(saved.Preset.Id, UserMessage: new string('x', 8_001)), ct);
+            Assert.Equal(HttpStatusCode.BadRequest, oversizedMessage.StatusCode);
             using var nativeResponse = await SendAsync(HttpMethod.Post, url + "/api/v1/runs",
                 new LaunchRequest(saved.Preset.Id, NativeTerminal: true), ct);
             Assert.Equal(HttpStatusCode.OK, nativeResponse.StatusCode);

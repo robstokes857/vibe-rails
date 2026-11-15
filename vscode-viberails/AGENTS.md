@@ -56,6 +56,13 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 
 ## Architecture
 
+Before launching a preset, the Launch view asks for **User message (optional)**
+with a native input box. Enter with no text launches normally; Escape cancels
+before opening the dashboard. `launchDefinition` carries the bounded `userMessage`
+string into the shared browser flow and immutable run snapshot. Custom template
+variables still use the dashboard dialog; the message is never a preset edit.
+Actions and signed library scripts do not ask for a message.
+
 The Launch view reads the launch catalog, script library and shared Quick actions preferences.
 `GET /api/v1/quick-actions/preferences` hides matching stable keys (`preset:<id>`,
 `action:<id>`, `script:<registration-id>`) without disabling definitions. The title action

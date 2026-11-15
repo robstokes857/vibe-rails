@@ -19881,6 +19881,7 @@ body.performance-mode .brand-text-sm {
 .launch-menu-details { display: grid; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
 .launch-menu-name { font: 600 14px/1.5 var(--font-sans); }
 .launch-menu-subtitle { font: 400 12px/1.5 var(--font-sans); color: var(--color-text-muted); }
+.launch-menu-details .form-control { min-width: 0; }
 .launch-menu .launch-menu-run {
     display: inline-flex;
     align-items: center;

@@ -66,7 +66,7 @@ export function bindBoardReferences(input, { app, host, card = {}, onLink = asyn
         const kind = referenceSearchKind(token);
         const query = token.query.toLowerCase();
         if (kind === 'variable') {
-            const names = [...new Set(['datetime', 'date', 'time', 'git_branch', 'env_name', 'board_card', 'worktree',
+            const names = [...new Set(['datetime', 'date', 'time', 'git_branch', 'env_name', 'board_card', 'worktree', 'user_message',
                 ...extractPromptTemplateVariables(input.value).map(variable => variable.name)])];
             return { files: names.filter(name => name.startsWith(query)).map(name => ({ kind: 'variable', label: `{{${name}}}`, name })) };
         }

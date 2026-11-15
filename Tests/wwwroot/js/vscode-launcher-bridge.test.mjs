@@ -40,7 +40,19 @@ test('typed preset launches resolve templates in the shared browser flow and Act
     f.send({ command: 'launchDefinition', definitionType: 'action', definitionId: 'action_1' });
     f.send({ command: 'launchQueued', definitionType: 'action', definitionId: 'action_1' });
     await settled();
-    assert.deepEqual(f.calls, [['launch', 'preset_1', 'preset'], ['editor', 'action', 'action_1']]);
+    assert.deepEqual(f.calls, [['launch', 'preset_1', 'preset', { userMessage: null }], ['editor', 'action', 'action_1']]);
+});
+
+test('optional messages cross the bridge verbatim; malformed and oversized values cannot launch', async () => {
+    const f = fixture();
+    const message = 'Focus on <input> and {{worktree}}\nnext line';
+    for (const userMessage of [message, '', 42, {}, 'x'.repeat(8001)])
+        f.send({ command: 'launchDefinition', definitionType: 'preset', definitionId: 'preset_1', userMessage });
+    await settled();
+    assert.deepEqual(f.calls, [
+        ['launch', 'preset_1', 'preset', { userMessage: message }],
+        ['launch', 'preset_1', 'preset', { userMessage: '' }]
+    ]);
 });
 
 test('each host command reaches the same code path the nav flyout uses', async () => {

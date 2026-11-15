@@ -15,6 +15,46 @@ public class PromptPlaceholderServiceTests
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Theory]
+    [InlineData("Review {{user_message}}.", null, "Review .")]
+    [InlineData("{{user_message}}", "", "")]
+    [InlineData("{{user_message}}", "  \r\n", "")]
+    [InlineData("{{ USER_MESSAGE }} / {{user_message}}", "focus here", "focus here / focus here")]
+    [InlineData("Review", "focus here", "Review\n\nfocus here")]
+    [InlineData(null, "focus here", "focus here")]
+    [InlineData("", "focus here", "focus here")]
+    public async Task UserMessageIsOptionalAndAppendsOnlyWithoutPlaceholder(string? template, string? message, string expected)
+    {
+        Assert.Equal(expected, await new PromptPlaceholderService().ResolveAsync(template, Context with { UserMessage = message }, Ct));
+    }
+
+    [Theory]
+    [InlineData("Review {{user_message}}")]
+    [InlineData("Review")]
+    public async Task UserMessageIsLiteralAndCannotCreateWorktrees(string template)
+    {
+        const string message = "literal {{worktree}} {{date}} {{user_message}} $& <tag>\nsecond line";
+        var worktrees = new Mock<IManagedWorktreeService>(MockBehavior.Strict);
+        var result = await new PromptPlaceholderService(worktrees: worktrees.Object)
+            .ResolveAsync(template, Context with { UserMessage = message }, Ct);
+        Assert.EndsWith(message, result);
+        worktrees.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UserMessageLimitsApplyBeforeSideEffectsAndAfterExpansion()
+    {
+        var worktrees = new Mock<IManagedWorktreeService>(MockBehavior.Strict);
+        var service = new PromptPlaceholderService(worktrees: worktrees.Object);
+        await Assert.ThrowsAsync<ArgumentException>(() => service.ResolveAsync("{{worktree}}",
+            Context with { UserMessage = new string('x', 8_001) }, Ct));
+        worktrees.VerifyNoOtherCalls();
+        await Assert.ThrowsAsync<PromptTooLongException>(() => service.ResolveAsync(
+            string.Concat(Enumerable.Repeat("{{user_message}}", 4)), Context with { UserMessage = new string('x', 8_000) }, Ct));
+        await Assert.ThrowsAsync<PromptTooLongException>(() => service.ResolveAsync(
+            new string('x', 29_999), Context with { UserMessage = "more" }, Ct));
+    }
+
+    [Theory]
     [InlineData(null, null)]
     [InlineData("", "")]
     [InlineData("plain @file !command #card", "plain @file !command #card")]

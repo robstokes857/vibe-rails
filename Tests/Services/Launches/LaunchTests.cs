@@ -35,6 +35,25 @@ public sealed class LaunchTests : IDisposable
         service.EnqueueAsync("preset", id, new(root, root, trigger, occurrence), Ct);
 
     [Fact]
+    public async Task OptionalMessageIsFrozenInRunAndRetryWithoutChangingPreset()
+    {
+        var preset = (await Preset("Review {{user_message}}")).Preset;
+        const string message = "Focus on {{worktree}} as literal text";
+        var run = await service.EnqueueAsync("preset", preset.Id,
+            new(root, root, "manual", "message", UserMessage: message), Ct);
+        var restored = (await store.GetRunAsync(run.Id, Ct))!;
+        Assert.Equal(message, restored.Snapshot.Context.UserMessage);
+        Assert.Equal("Review {{user_message}}", restored.Snapshot.Context.ComposedPrompt);
+        Assert.Equal(preset.InitialPrompt, (await store.GetPresetAsync(preset.Id, Ct))!.InitialPrompt);
+        await store.CancelAsync(run.Id, Project, Ct);
+        Assert.Equal(message, (await service.RetryAsync(root, run.Id, Ct)).Snapshot.Context.UserMessage);
+        var scheduled = await Enqueue(preset.Id, "schedule", "schedule");
+        Assert.Null(scheduled.Snapshot.Context.UserMessage);
+        await Assert.ThrowsAsync<LaunchValidationException>(() => service.EnqueueAsync("preset", preset.Id,
+            new(root, root, "manual", "oversized", UserMessage: new string('x', 8_001)), Ct));
+    }
+
+    [Fact]
     public async Task BlankPromptClassifiesAndRejectsAutomaticAdmission()
     {
         var p = (await Preset("  ")).Preset;
@@ -44,6 +63,22 @@ public sealed class LaunchTests : IDisposable
         Assert.False(catalog.CanRunAutomatically);
         await Assert.ThrowsAsync<LaunchValidationException>(() => Enqueue(p.Id, trigger: "schedule"));
         Assert.Equal("queued", (await Enqueue(p.Id)).Status);
+    }
+
+    [Fact]
+    public async Task LiteralUserMessageSurvivesResolutionAndSpawnValidation()
+    {
+        var preset = (await Preset("Review {{user_message}}")).Preset;
+        const string message = "Explain {{step:old}} and {{worktree}} literally";
+        var run = await service.EnqueueAsync("preset", preset.Id, new(root, root, "manual", "literal", UserMessage: message), Ct);
+        var claim = (await store.TryClaimAsync(run.Id, 3, Environment.ProcessId, DateTime.UtcNow, Ct))!;
+        run = (await store.GetRunAsync(run.Id, Ct))!;
+        var resolved = await new VibeRails.Services.Environments.PromptPlaceholderService().ResolveLaunchAsync(
+            run.Snapshot.Context.ComposedPrompt, new(root, UserMessage: run.Snapshot.Context.UserMessage), Ct);
+        var execution = new LaunchExecution(store, service, run);
+        await execution.BeforeSpawnAsync("literal-session", resolved.Prompt, resolved.WorkingDirectory, Ct);
+        Assert.Equal("Review " + message, (await store.GetRunAsync(run.Id, Ct))!.ResolvedPrompt);
+        await LaunchExecution.CompleteSessionAsync("literal-session", 0);
     }
 
     [Fact]

@@ -16,7 +16,9 @@ export function setupVSCodeLauncherBridge(app, host = window) {
         switch (data.command) {
             case 'launchDefinition':
                 if (typeof data.definitionId !== 'string' || !data.definitionId || data.definitionType !== 'preset') return;
-                void settle(app, () => app.aiAgentsController?.launch(data.definitionId, 'preset'), 'Could not launch this definition.');
+                if (data.userMessage != null && (typeof data.userMessage !== 'string' || data.userMessage.length > 8000)) return;
+                void settle(app, () => app.aiAgentsController?.launch(data.definitionId, 'preset',
+                    { userMessage: data.userMessage ?? null }), 'Could not launch this definition.');
                 return;
             case 'launchQueued':
                 app.showToast?.('AI Agents', 'Run queued.', 'success');

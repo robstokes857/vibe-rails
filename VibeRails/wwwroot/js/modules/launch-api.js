@@ -60,6 +60,7 @@ export class LaunchApi {
             occurrenceId = crypto.randomUUID(),
             promptPrefix = null,
             initialPrompt = null,
+            userMessage = null,
             expectedRevision = null,
             nativeTerminal = type === 'preset'
         } = {}
@@ -70,6 +71,7 @@ export class LaunchApi {
             occurrenceId,
             promptPrefix,
             initialPrompt,
+            userMessage,
             expectedRevision,
             nativeTerminal
         });

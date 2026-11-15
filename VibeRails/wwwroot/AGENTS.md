@@ -1461,6 +1461,14 @@ and CSV quote wrappers are rejected. Backend write validation remains authoritat
 
 ## Quick actions visibility
 
+Agent and Quick Launch rows also offer **User message (optional)**, empty on each
+opening. `launch-menu.js` passes it through `ai-agents-controller.js` and
+`launch-api.js` as `userMessage`, separately from `initialPrompt`. The VS Code
+bridge accepts the same bounded string. `{{user_message}}` is a reserved built-in
+in template preview, shared help and caret suggestions; only the backend inserts
+it (empty when omitted), or appends it if there is no placeholder. Never substitute
+it in the browser and then send its contents through the backend template pass.
+
 The top-bar Play menu (`launch-menu.js`) and VS Code Launch view use
 `GET /api/v1/quick-actions/preferences`. **Manage quick actions…** opens the same
 native dialog from either surface (`quick-action-preferences.js`); show/hide switches

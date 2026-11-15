@@ -1,6 +1,7 @@
 import { escapeHtml } from './utils.js';
 
 const variables = [
+    ['{{user_message}}', 'Optional message supplied at launch; empty when omitted'],
     ['{{name}}', 'Ask for a value at launch'],
     ['{{name default="…"}}', 'Ask for a value with a prefilled answer'],
     ['{{datetime}}', 'Current date and time'],
@@ -20,6 +21,7 @@ export function promptVariableHelp({ id = 'launch-prompt-variable-help' } = {}) 
             ${variables.map(([token, hint]) => `<button type="button" class="btn btn-sm btn-secondary" data-prompt-variable="${escapeHtml(token)}" title="${escapeHtml(hint)}" aria-label="Insert ${escapeHtml(token)}: ${escapeHtml(hint)}"><code>${escapeHtml(token)}</code></button>`).join('')}
         </div>
         <details class="form-text"><summary>Variable help and worktree options</summary>
+            <p><code>{{user_message}}</code> inserts the optional message from Quick actions or the VS Code Launch view. It is empty when omitted, including automatic runs. Without this variable, a supplied message is appended to the prompt.</p>
             <p>Replace <code>name</code> with your own variable name to ask for a value at launch; a default prefills the answer. Other values fill in automatically. <code>{{board_card}}</code> is empty without a triggering Board card.</p>
             <p><code>{{worktree}}</code> creates a checkout from HEAD in your home folder and starts the agent there. Optional: <code>{{worktree path="../my-task" delete_after_days=14}}</code>. Use a new directory outside the source checkout. Retention defaults to 7 days; use 7 or more, or <code>never</code>. Expired worktrees, including uncommitted files, are removed while Vibe Rails is open; active sessions postpone removal. Git branches are kept.</p>
         </details>

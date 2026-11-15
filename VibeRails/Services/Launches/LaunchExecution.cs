@@ -17,7 +17,8 @@ public sealed class LaunchExecution(ILaunchStore store, LaunchService service, L
     public async Task BeforeSpawnAsync(string sessionId, string? prompt, string directory, CancellationToken ct)
     {
         await service.ValidateSnapshotAsync(Run.Snapshot, ct);
-        LaunchValidation.RejectRetiredPrompt(prompt);
+        // Validate the source templates above, not the resolved text: a literal user
+        // message may describe retired syntax without asking us to execute it.
         if (board is not null) await LaunchBoardValidation.ValidateAsync(board, Run, ct);
         using var process = Process.GetCurrentProcess();
         var deadline = Run.Snapshot.Preset?.TimeoutMinutes is { } minutes ? DateTime.UtcNow.AddMinutes(minutes) : (DateTime?)null;

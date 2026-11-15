@@ -225,7 +225,7 @@ export class AiAgentsController {
     async launch(
         id,
         type = 'preset',
-        { focusTerminal = false, promptPrefix = null, nativeTerminal = !focusTerminal } = {}
+        { focusTerminal = false, promptPrefix = null, userMessage = null, nativeTerminal = !focusTerminal } = {}
     ) {
         if (type === 'preset') nativeTerminal = true;
         if (this.launching.has(id)) return;
@@ -239,7 +239,8 @@ export class AiAgentsController {
                     this.app,
                     {
                         initialPrompt: preset.initialPrompt,
-                        environmentName: preset.name
+                        environmentName: preset.name,
+                        userMessage
                     }
                 );
                 if (!resolved || resolved.canceled) return;
@@ -249,6 +250,7 @@ export class AiAgentsController {
             const run = await this.api.run(id, type, {
                 promptPrefix,
                 initialPrompt,
+                userMessage,
                 expectedRevision,
                 nativeTerminal
             });

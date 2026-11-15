@@ -78,6 +78,78 @@ async function setup(page) {
     return state;
 }
 
+for (const width of [320, 375, 768, 1024]) test(`optional launch message reaches the immutable run at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 850 });
+    const state = await setup(page);
+    state.runUpdate = { status: 'running' };
+    state.presets.push({ id:'review', name:'Review changes', cli:'codex', initialPrompt:'Review {{user_message}}', enabled:true, revision:1 });
+    state.presets.push({ id:'quick', name:'Quick terminal', cli:'codex', initialPrompt:'', enabled:true, revision:1 });
+    const trigger = page.locator('[data-action="automation-launcher"]');
+    const menu = page.getByRole('dialog', { name:'Quick actions', exact:true });
+    await trigger.click();
+    const input = menu.getByRole('textbox', { name:'User message for Review changes (optional)', exact:true });
+    await expect(input).toBeFocused();
+    await expect(input).not.toHaveAttribute('required');
+    const message = 'Focus on <input> and {{worktree}} literally';
+    await input.fill(message);
+    await expect(menu.getByRole('textbox', { name:'User message for Quick terminal (optional)', exact:true })).toHaveValue('');
+    expect(await menu.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`user-message-${width}.png`) });
+    await input.press('Enter');
+    await expect.poll(() => state.requests.filter(r => r.path === '/api/v1/runs' && r.method === 'POST').length).toBe(1);
+    const first = state.requests.find(r => r.path === '/api/v1/runs' && r.method === 'POST').body;
+    expect(first.userMessage).toBe(message);
+    expect(first.initialPrompt).toBe('Review {{user_message}}');
+    expect(first.expectedRevision).toBe(1);
+    await expect(page.locator('[data-prompt-template-modal]')).toHaveCount(0);
+    await trigger.click();
+    await expect(input).toHaveValue('');
+    await menu.getByRole('button', { name:'Run Quick terminal', exact:true }).click();
+    await expect.poll(() => state.requests.filter(r => r.path === '/api/v1/runs' && r.method === 'POST').length).toBe(2);
+    expect(state.requests.filter(r => r.path === '/api/v1/runs' && r.method === 'POST')[1].body.userMessage).toBe('');
+    expect(state.presets[0].initialPrompt).toBe('Review {{user_message}}');
+});
+
+for (const suffix of ['', ' {{user_message}}']) test(`optional message survives the required variable dialog (${suffix || 'appended'}) and cancellation queues nothing`, async ({ page }) => {
+    const state = await setup(page);
+    state.runUpdate = { status: 'running' };
+    state.presets.push({ id:'review', name:'Review', cli:'codex', initialPrompt:'Review {{ticket}}' + suffix, enabled:true, revision:3 });
+    const trigger = page.locator('[data-action="automation-launcher"]');
+    await trigger.click();
+    await page.locator('[data-launch-message]').fill('Focus on <safety>');
+    await page.getByRole('button', { name:'Run Review', exact:true }).click();
+    const form = page.locator('[data-prompt-template-modal]');
+    await expect(form.locator('textarea')).toHaveCount(1);
+    await expect(form.locator('[data-prompt-template-preview]')).toContainText('Focus on <safety>');
+    await form.getByRole('button', { name:'Cancel', exact:true }).click();
+    expect(state.runs).toHaveLength(0);
+    await trigger.click();
+    await page.locator('[data-launch-message]').fill('Focus on {{worktree}}');
+    await page.getByRole('button', { name:'Run Review', exact:true }).click();
+    await form.getByLabel('Ticket', { exact:true }).fill('VB-123');
+    await form.getByRole('button', { name:'Start Terminal', exact:true }).click();
+    await expect.poll(() => state.runs.length).toBe(1);
+    const body = state.requests.find(r => r.path === '/api/v1/runs' && r.method === 'POST').body;
+    expect(body.initialPrompt).toBe('Review VB-123' + suffix);
+    expect(body.userMessage).toBe('Focus on {{worktree}}');
+});
+
+test('a user message can supply the entire prompt when optional template values are blank', async ({ page }) => {
+    const state = await setup(page);
+    state.runUpdate = { status: 'running' };
+    state.presets.push({ id:'optional', name:'Optional values', cli:'codex', initialPrompt:'{{context default=""}}', enabled:true, revision:1 });
+    await page.locator('[data-action="automation-launcher"]').click();
+    await page.locator('[data-launch-message]').fill('Review this change');
+    await page.getByRole('button', { name:'Run Optional values', exact:true }).click();
+    const form = page.locator('[data-prompt-template-modal]');
+    await expect(form.locator('[data-prompt-template-preview]')).toContainText('Review this change');
+    await form.getByRole('button', { name:'Start Terminal', exact:true }).click();
+    await expect.poll(() => state.runs.length).toBe(1);
+    const body = state.requests.find(r => r.path === '/api/v1/runs' && r.method === 'POST').body;
+    expect(body.initialPrompt).toBe('');
+    expect(body.userMessage).toBe('Review this change');
+});
+
 for (const width of [375, 1280]) test(`Manage quick actions persists shared visibility at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 850 });
     const state = await setup(page);
@@ -334,20 +406,22 @@ test('quick actions use explicit Run buttons and preserve launch and keyboard be
     await expect(panel.getByText('Build <client> & test', { exact: true })).toBeVisible();
     await expect(panel.locator('client')).toHaveCount(0);
     const runAgent = panel.getByRole('button', { name: 'Run Release Vibe Rails Client App', exact: true });
-    await expect(runAgent).toBeFocused();
+    await expect(panel.locator('[data-launch-message]')).toBeFocused();
     await page.screenshot({ path: testInfo.outputPath('quick-actions-desktop.png') });
     await panel.getByText('Release Vibe Rails Client App', { exact: true }).click();
     expect(await page.evaluate(() => window.quickActionLaunches)).toEqual([]);
     await runAgent.click();
     await expect(panel).toHaveCount(0);
     await expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(await page.evaluate(() => window.quickActionLaunches)).toEqual([['release', 'preset']]);
+    expect(await page.evaluate(() => window.quickActionLaunches)).toEqual([['release', 'preset', { userMessage: '' }]]);
     await trigger.click();
+    await expect(panel.locator('[data-launch-message]')).toBeFocused();
+    await page.keyboard.press('Tab');
     await expect(panel.getByRole('button', { name: 'Run Release Vibe Rails Client App' })).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(panel.getByRole('button', { name: 'Run Build <client> & test', exact: true })).toBeFocused();
     await page.keyboard.press('Enter');
-    expect(await page.evaluate(() => window.quickActionLaunches)).toEqual([['release', 'preset'], ['script', 'action']]);
+    expect(await page.evaluate(() => window.quickActionLaunches)).toEqual([['release', 'preset', { userMessage: '' }], ['script', 'action', { userMessage: null }]]);
     await trigger.click();
     await expect(panel).toBeVisible();
     await page.keyboard.press('Escape');
@@ -439,7 +513,7 @@ test('prompt help inserts every supported variable and saves literal placeholder
     const editor = page.locator('[data-launch-editor]');
     const prompt = editor.getByLabel('Initial prompt (optional)', { exact: true });
     const variables = editor.getByRole('group', { name: 'Insert a prompt variable' });
-    const tokens = ['{{name}}', '{{name default="…"}}', '{{datetime}}', '{{date}}', '{{time}}',
+    const tokens = ['{{user_message}}', '{{name}}', '{{name default="…"}}', '{{datetime}}', '{{date}}', '{{time}}',
         '{{git_branch}}', '{{env_name}}', '{{worktree}}', '{{board_card}}'];
     await expect(variables.getByRole('button')).toHaveText(tokens);
     await expect(prompt).toHaveAttribute('aria-describedby', 'launch-prompt-variable-help');

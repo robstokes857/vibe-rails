@@ -14,7 +14,8 @@ public sealed record PromptPlaceholderContext(
     string WorkingDirectory,
     int? EnvironmentId = null,
     string? EnvironmentName = null,
-    string? BoardCardKey = null);
+    string? BoardCardKey = null,
+    string? UserMessage = null);
 
 /// <summary>The once-resolved message and the directory the CLI must use.</summary>
 public sealed record ResolvedPrompt(string? Prompt, string WorkingDirectory);
@@ -96,16 +97,23 @@ public sealed partial class PromptPlaceholderService : IPromptPlaceholderService
         CancellationToken cancellationToken = default)
     {
         VibeRails.Launches.LaunchValidation.RejectRetiredPrompt(prompt);
-        if (string.IsNullOrEmpty(prompt))
-            return new ResolvedPrompt(prompt, context.WorkingDirectory);
+        if (context.UserMessage?.Length > VibeRails.Launches.LaunchValidation.MaxUserMessageChars)
+            throw new ArgumentException("User message must be 8,000 characters or fewer.");
+        var message = string.IsNullOrWhiteSpace(context.UserMessage) ? "" : context.UserMessage;
+        context = context with { UserMessage = message };
+        var hasUserMessage = prompt is not null && TokenRegex().Matches(prompt).Cast<Match>()
+            .Any(match => match.Groups[1].Value.Equals("user_message", StringComparison.OrdinalIgnoreCase));
 
-        var resolved = prompt.Contains("{{", StringComparison.Ordinal)
+        var resolved = prompt?.Contains("{{", StringComparison.Ordinal) == true
             ? await ResolveTokensAsync(prompt, context, cancellationToken)
             : new ResolvedPrompt(prompt, context.WorkingDirectory);
+        // Append only after the template pass: message text must never be interpreted as tokens.
+        if (!hasUserMessage && message.Length > 0)
+            resolved = resolved with { Prompt = string.IsNullOrEmpty(resolved.Prompt) ? message : resolved.Prompt + "\n\n" + message };
 
         // Checked even when nothing was substituted: this is the one chokepoint every launched
         // prompt passes through, so it is the only place a length guarantee can be made.
-        if (resolved.Prompt!.Length > MaxResolvedPromptChars)
+        if (resolved.Prompt?.Length > MaxResolvedPromptChars)
             throw PromptTooLongException.ForResolvedPrompt(resolved.Prompt.Length, MaxResolvedPromptChars);
 
         return resolved;
@@ -149,6 +157,7 @@ public sealed partial class PromptPlaceholderService : IPromptPlaceholderService
                 "env_name" => context.EnvironmentName ?? "",
                 "git_branch" => gitBranch ?? "(no git branch)",
                 "board_card" => context.BoardCardKey ?? "",
+                "user_message" => context.UserMessage ?? "",
                 "worktree" => worktreePath!,
                 // User-prompted variables retain their existing caller-owned handling.
                 _ => match.Value

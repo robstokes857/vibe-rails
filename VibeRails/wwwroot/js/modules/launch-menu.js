@@ -6,12 +6,14 @@ import { hiddenQuickActions, quickActionKey, openQuickActionPreferences } from '
 const footer = '<div class="launch-menu-footer"><button type="button" class="btn btn-link launch-menu-manage" data-launch-customize>Manage quick actions…</button><button type="button" class="btn btn-link launch-menu-manage" data-launch-manage>Manage AI Agents<i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></div>';
 
 /** One row for a saved launch (`data-launch-id`) or a signed library script (`data-script-id`). */
-function menuRow(name, presentation, target) {
+function menuRow(name, presentation, target, messageId = null) {
     return `<li class="launch-menu-row">
         <span class="launch-menu-icon">${presentation.logoHtml}</span>
         <div class="launch-menu-details">
             <span class="launch-menu-name">${escapeHtml(name)}</span>
             <span class="launch-menu-subtitle">${escapeHtml(presentation.subtitle)}</span>
+            ${messageId ? `<label class="form-label mb-0" for="${messageId}">User message <span class="text-muted">(optional)</span></label>
+            <input class="form-control" id="${messageId}" data-launch-message maxlength="8000" type="text" autocomplete="off" aria-label="User message for ${escapeHtml(name)} (optional)">` : ''}
         </div>
         <button type="button" class="btn btn-secondary launch-menu-run" ${target} aria-label="Run ${escapeHtml(name)}"><i class="fa-solid fa-play" aria-hidden="true"></i><span>Run</span></button>
     </li>`;
@@ -78,7 +80,7 @@ export class LaunchMenu {
             const available = items.filter((item) => item.canLaunch && !hidden.has(quickActionKey(item)));
             const scripts = libraryScripts(library?.state).filter((script) => script.canRun && !hidden.has(`script:${script.id}`));
             const rows = [
-                ...available.map((item) => menuRow(item.name, launchPresentation(item), `data-launch-id="${escapeHtml(item.id)}"`)),
+                ...available.map((item, index) => menuRow(item.name, launchPresentation(item), `data-launch-id="${escapeHtml(item.id)}"`, item.definitionType === 'preset' ? `launch-message-${index}` : null)),
                 ...scripts.map((script) => menuRow(script.name, script, `data-script-id="${escapeHtml(script.id)}"`))
             ];
             panel.innerHTML = '<h2 class="launch-menu-heading">Quick actions</h2>' +
@@ -86,6 +88,12 @@ export class LaunchMenu {
                     ? `<ul class="launch-menu-list">${rows.join('')}</ul>`
                     : '<p class="launch-menu-empty" role="status">No quick actions shown. Manage quick actions to show hidden items, or add one in AI Agents.</p>') +
                 footer;
+            panel.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' && !event.isComposing && event.target.matches('[data-launch-message]')) {
+                    event.preventDefault();
+                    event.target.closest('.launch-menu-row').querySelector('[data-launch-id]').click();
+                }
+            }, { signal: abort.signal });
             panel.addEventListener(
                 'click',
                 (event) => {
@@ -97,11 +105,13 @@ export class LaunchMenu {
                     const script = scripts.find(
                         (script) => script.id === button.dataset.scriptId
                     );
+                    const userMessage = button.closest('.launch-menu-row')?.querySelector('[data-launch-message]')?.value ?? null;
                     this.closeFlyout();
                     if (item)
                         void this.app.aiAgentsController.launch(
                             item.id,
-                            item.definitionType
+                            item.definitionType,
+                            { userMessage }
                         );
                     // The private script terminal, exactly as Run on the script's own page.
                     else if (script)
@@ -112,7 +122,7 @@ export class LaunchMenu {
                 },
                 { signal: abort.signal }
             );
-            panel.querySelector('button')?.focus();
+            panel.querySelector('input, button')?.focus();
         } catch (error) {
             if (!abort.signal.aborted) panel.textContent = error.message;
         }

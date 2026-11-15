@@ -40,7 +40,8 @@ public static class NativeLaunchRunner
             var card = context.CardId is null ? null : await board.FindCardAsync(context.ProjectPath, context.CardId, ct);
             var prompt = await scoped.GetRequiredService<IPromptPlaceholderService>().ResolveLaunchAsync(
                 ComposePrompt(run.Snapshot),
-                new(context.WorkingDirectory, EnvironmentName: preset.Name, BoardCardKey: card?.Key), ct);
+                new(context.WorkingDirectory, EnvironmentName: preset.Name, BoardCardKey: card?.Key,
+                    UserMessage: context.UserMessage), ct);
             var execution = new LaunchExecution(store, service, run, board);
             return await scoped.GetRequiredService<TerminalRunner>().RunCliWithWebAsync(
                 preset.Cli, prompt.WorkingDirectory, null, LaunchOptionBuilder.Build(preset),

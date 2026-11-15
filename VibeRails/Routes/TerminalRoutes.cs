@@ -40,7 +40,7 @@ public static class TerminalRoutes
                 .FindCardAsync(snapshot.Context.ProjectPath, snapshot.Context.CardId, ct);
             var success = await terminal.StartLaunchSessionAsync(execution, () => prompts.ResolveLaunchAsync(template,
                 new PromptPlaceholderContext(snapshot.Context.WorkingDirectory, EnvironmentName: snapshot.Preset.Name,
-                    BoardCardKey: boardCard?.Key), ct));
+                    BoardCardKey: boardCard?.Key, UserMessage: snapshot.Context.UserMessage), ct));
             return success ? Results.Ok(new TerminalStatusResponse(true, terminal.ActiveSessionId, terminal.ActiveCli, terminal.ActiveWorkingDirectory))
                 : Results.Conflict(new ErrorResponse("The terminal already has a session."));
         }

@@ -60,7 +60,7 @@ public sealed record LaunchExecutionContext(string ProjectPath, string WorkingDi
     bool AuthorizeBoardTools = false, bool ContextIncluded = false, string? ComposedPrompt = null,
     string? SessionOrigin = null, string? Selection = null, string? PromptOverride = null,
     string? ProjectRoot = null, string? SessionTitle = null, bool NativeTerminal = false,
-    RuleLaunchContext? RuleViolation = null)
+    RuleLaunchContext? RuleViolation = null, string? UserMessage = null)
 {
     /// <summary>
     /// The project as the queuing root spelled it. <see cref="ProjectPath"/> is the comparison key

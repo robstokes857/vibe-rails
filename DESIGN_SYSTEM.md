@@ -805,6 +805,13 @@ Keep a separate secondary **Run** button matching the catalog's dark fill, borde
 text color and play icon. Icons are
 decorative; shared presentation logic keeps the catalog and dropdown aligned.
 
+Agent and Quick Launch rows also include a labelled **User message (optional)**
+field beneath the name/subtitle, before Run. It starts empty for each opening;
+blank input launches normally. The VS Code Launch view asks for the same optional
+message before launching: Enter accepts a blank value, Escape cancels. Messages
+fill `{{user_message}}` in the saved prompt, or append when it has no such token.
+Actions and library scripts keep their existing launch controls.
+
 Signed scripts from the script library follow the saved launches in the same list, with
 the same row: the `code` icon, the script's display name and a muted "{runtime} script"
 subtitle (adding the file name when the display name differs). Scripts that are unsigned

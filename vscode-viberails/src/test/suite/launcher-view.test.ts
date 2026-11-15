@@ -13,6 +13,7 @@ function dependencies(overrides: Partial<RunLauncherDependencies> = {}) {
     const calls: unknown[][] = [], errors: string[] = [], messages: object[] = [];
     let refreshes = 0;
     const deps: RunLauncherDependencies = {
+        promptUserMessage: async () => '',
         request: async (...args) => { calls.push(args); return { id: 'run_1' }; },
         openDashboard: async () => {}, reveal: () => {}, post: async message => { messages.push(message); return true; },
         notifyQueued: () => {}, notifyError: message => errors.push(message), refresh: () => { refreshes++; },
@@ -189,11 +190,25 @@ suite('Signed library scripts', () => {
     });
 });
 suite('Typed launch dispatch', () => {
+    test('optional message is sent verbatim and Escape cancels before opening the dashboard', async () => {
+        let opened = 0;
+        const message = 'Focus on {{worktree}} and <tags>';
+        const state = dependencies({ promptUserMessage: async () => message, openDashboard: async () => { opened++; } });
+        await runLauncherItem(item(), state.deps);
+        assert.equal(opened, 1);
+        assert.equal((state.messages[0] as { userMessage: string }).userMessage, message);
+        const cancelled = dependencies({ promptUserMessage: async () => undefined, openDashboard: async () => { opened++; } });
+        await runLauncherItem(item(), cancelled.deps);
+        assert.equal(opened, 1);
+        assert.deepEqual(cancelled.messages, []);
+        assert.deepEqual(cancelled.calls, []);
+        await tick();
+    });
     test('presets use the shared template and terminal launch flow in the dashboard', async () => {
         const state = dependencies();
         await runLauncherItem(item(), state.deps);
         assert.equal(state.calls.length, 0);
-        assert.deepEqual(state.messages, [{ command: 'launchDefinition', definitionId: 'preset_1', definitionType: 'preset' }]);
+        assert.deepEqual(state.messages, [{ command: 'launchDefinition', definitionId: 'preset_1', definitionType: 'preset', userMessage: '' }]);
         const failed = dependencies({ post: async () => false });
         await runLauncherItem(item(), failed.deps);
         assert.match(failed.errors[0], /dashboard could not receive/);

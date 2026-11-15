@@ -1504,7 +1504,8 @@ for (const width of [320, 375, 768, 1024, 1280]) test(`Board descriptions share 
     await expect(composer.locator('[data-board-composer-live]')).toHaveCount(0);
     await expect(composer.locator('.prompt-reference-overlay')).toHaveAttribute('aria-hidden', 'true');
     await expect(input).toHaveAttribute('aria-describedby', 'board-description-variable-help');
-    await expect(variables.getByRole('button')).toHaveCount(9);
+    await expect(variables.getByRole('button')).toHaveCount(10);
+    await expect(variables.locator('[data-prompt-variable="{{user_message}}"]')).toBeVisible();
     await expect(help.locator('details')).not.toHaveAttribute('open', '');
     const date = variables.locator('[data-prompt-variable="{{date}}"]');
     expect((await date.boundingBox()).height).toBe(width <= 768 ? 44 : 32);
