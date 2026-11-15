@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <!-- Tests launch this DLL through dotnet. On Unix an apphost named GitProcessFixture
+         collides with the test output directory that contains the fixture's files. -->
+    <UseAppHost>false</UseAppHost>
     <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
