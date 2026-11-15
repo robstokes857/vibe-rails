@@ -171,6 +171,29 @@ public sealed class SigningKeyServiceTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => _service.SignCommitTreeAsync(created.Key.Id, Password, new string('B', 40), Ct));
     }
 
+    [Fact]
+    public async Task StopBypassSignsTheReasonAndRulesAndCannotUseTheGenericSigningRoute()
+    {
+        _apiKey = "bypass-signing-api-key";
+        var cloudId = Guid.NewGuid();
+        _handler.Respond = captured => RegistrationReply(captured, cloudId);
+        var created = await _service.CreateAsync(new("Exception key", Password), Ct);
+        var scope = new StopBypassScope(new string('a', 64), null, new string('b', 40), new string('c', 40),
+            "Emergency repair", [new("vc.rules.md", "File Lock('protected.txt')")]);
+        var signature = await _service.SignStopBypassAsync(created.Key.Id, Password, scope, Ct);
+        using var verifier = RSA.Create();
+        verifier.ImportFromPem(created.Key.PublicKeyPem);
+        Assert.True(verifier.VerifyData(StopBypassFormat.BuildPayload(scope), Convert.FromBase64String(signature.SignatureBase64),
+            HashAlgorithmName.SHA256, RSASignaturePadding.Pss));
+        Assert.False(verifier.VerifyData(StopBypassFormat.BuildPayload(scope with { Reason = "Other reason" }),
+            Convert.FromBase64String(signature.SignatureBase64), HashAlgorithmName.SHA256, RSASignaturePadding.Pss));
+        Assert.False(verifier.VerifyData(CommitSignatureFormat.BuildPayload(scope.StagedTree),
+            Convert.FromBase64String(signature.SignatureBase64), HashAlgorithmName.SHA256, RSASignaturePadding.Pss));
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.SignAsync(created.Key.Id,
+            new(Password, Convert.ToBase64String(StopBypassFormat.BuildPayload(scope))), Ct));
+        Assert.DoesNotContain(scope.Reason, Encoding.UTF8.GetString(StopBypassFormat.BuildPayload(scope)));
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("%%%")]

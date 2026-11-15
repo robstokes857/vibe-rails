@@ -39,6 +39,8 @@ public class McpServerHttpTests : IAsyncLifetime
     private static readonly string[] ExpectedTools =
     {
         "validate_vca",
+        "request_stop_bypass",
+        "get_stop_bypass_status",
         "search_history",
         "pause_token_saver",
         "resume_token_saver",

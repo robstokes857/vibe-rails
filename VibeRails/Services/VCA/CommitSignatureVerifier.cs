@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Security.Cryptography;
 using VibeRails.DTOs;
 
 namespace VibeRails.Services.VCA;
@@ -74,14 +75,18 @@ public sealed class ViberailsCommitSignatureVerifier : ICommitSignatureVerifier,
     }
 
     public async Task<CommitSignatureVerification> VerifyAsync(CommitSignature signature, CancellationToken cancellationToken)
+        => await VerifyPayloadAsync(signature, CommitSignatureFormat.BuildPayload(signature.TreeId), cancellationToken);
+
+    /// <summary>Verifies a domain-separated approval statement using the same registered-key authority.</summary>
+    internal async Task<CommitSignatureVerification> VerifyPayloadAsync(CommitSignature signature, byte[] payload, CancellationToken cancellationToken)
     {
-        var cacheKey = $"{signature.KeyId:N}|{signature.Fingerprint}|{signature.TreeId}|{signature.SignatureBase64}";
+        var cacheKey = $"{signature.KeyId:N}|{signature.Fingerprint}|{Convert.ToHexStringLower(SHA256.HashData(payload))}|{signature.SignatureBase64}";
         if (_definitive.TryGetValue(cacheKey, out var cached)) return cached;
 
         CommitSignatureVerification result;
         try
         {
-            result = await SendAsync(signature, cancellationToken);
+            result = await SendAsync(signature, payload, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -98,7 +103,7 @@ public sealed class ViberailsCommitSignatureVerifier : ICommitSignatureVerifier,
         return result;
     }
 
-    private async Task<CommitSignatureVerification> SendAsync(CommitSignature signature, CancellationToken cancellationToken)
+    private async Task<CommitSignatureVerification> SendAsync(CommitSignature signature, byte[] payload, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(RequestTimeout);
@@ -106,7 +111,7 @@ public sealed class ViberailsCommitSignatureVerifier : ICommitSignatureVerifier,
         request.Content = JsonContent.Create(
             new VerifySignatureRequest(
                 signature.KeyId,
-                Convert.ToBase64String(CommitSignatureFormat.BuildPayload(signature.TreeId)),
+                Convert.ToBase64String(payload),
                 signature.SignatureBase64,
                 CommitSignatureFormat.Algorithm,
                 signature.Fingerprint),

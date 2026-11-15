@@ -168,7 +168,9 @@ evaluates deferred message rules. The non-blocking automated-workflows step cons
 unrecognized, SKIP and DISABLED rules never produce those records. Recognized but unevaluable
 rules retain their normal violation policy. Ordinary validation, check Actions and previews
 have no admission side effects. WARN/COMMIT/STOP behavior is unchanged: STOP still blocks,
-COMMIT still needs its message acknowledgment, and either can queue a response. Queue/storage
+COMMIT still needs its message acknowledgment, and either can queue a response. An explicit
+[signed STOP exception](../VCA/STOP_BYPASS.md) can allow its covered violations while preserving
+rule-response admission. Queue/storage
 or eligibility failures appear in the hook transcript without changing enforcement.
 
 `LaunchEventService` snapshots `RuleLaunchContext` in the normal immutable run. It contains

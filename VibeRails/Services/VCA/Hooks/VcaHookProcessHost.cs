@@ -134,6 +134,14 @@ public static class VcaHookProcessHost
             return reviewExitCode;
         }
 
+        if (invocation.Kind == VcaHookKind.SignStopBypass)
+        {
+            var result = await StopBypassPopup.RunInConsoleAsync(invocation, output, cancellationToken);
+            if (invocation.ConsoleWindowAttached)
+                await PauseForEnterAsync(output, input, result, ConsolePauseTimeout, cancellationToken, style);
+            return result;
+        }
+
         var services = new ServiceCollection();
         ConfigureServices(
             services,
@@ -367,6 +375,7 @@ public static class VcaHookProcessHost
         VcaHookKind.AcknowledgeCommitMessage => "Commit Acknowledgment",
         VcaHookKind.SignCommitMessage => "Human Verification",
         VcaHookKind.SignReview => "Review Approval",
+        VcaHookKind.SignStopBypass => "STOP Bypass Approval",
         VcaHookKind.Preview => "Preview",
         _ => "Pre-Commit"
     };

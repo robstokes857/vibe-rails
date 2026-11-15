@@ -296,7 +296,7 @@ test('VCA STOP findings explain why the commit is blocked and how to fix it', ()
 
     assert.equal(model.tone, 'danger');
     assert.match(model.title, /commit blocked/i);
-    assert.match(model.message, /cannot be bypassed/i);
+    assert.match(model.message, /signed exception with a reason/i);
     assert.equal(model.findings[0].label, 'STOP');
     assert.match(model.findings[0].reason, /without a matching test/i);
     assert.match(model.fixBrief, /what to do next: add or update/i);

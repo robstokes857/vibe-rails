@@ -42,6 +42,23 @@ public sealed class CommitSignatureVerifierTests
             Encoding.UTF8.GetString(Convert.FromBase64String(body.RootElement.GetProperty("payloadBase64").GetString()!)));
     }
 
+    [Fact]
+    public async Task BypassVerificationSendsOnlyItsDigestAndCannotReuseATreeVerificationCacheEntry()
+    {
+        var handler = new FakeHandler(_ => Reply(Valid("owner@example.com")));
+        using var verifier = new ViberailsCommitSignatureVerifier(new HttpClient(handler), ownsClient: true);
+        var scope = new StopBypassScope(new string('a', 64), null, new string('b', 40), Signature.TreeId,
+            "Private incident reason", [new("vc.rules.md", "File Lock('private-path')")]);
+        await verifier.VerifyAsync(Signature, Ct);
+        await verifier.VerifyPayloadAsync(Signature, StopBypassFormat.BuildPayload(scope), Ct);
+        Assert.Equal(2, handler.Requests.Count);
+        using var body = JsonDocument.Parse(handler.Requests[1].Body);
+        var payload = Encoding.UTF8.GetString(Convert.FromBase64String(body.RootElement.GetProperty("payloadBase64").GetString()!));
+        Assert.StartsWith(StopBypassFormat.PayloadPrefix, payload);
+        Assert.DoesNotContain(scope.Reason, payload);
+        Assert.DoesNotContain("private-path", payload);
+    }
+
     [Theory]
     [InlineData("key_not_found", CommitSignatureStatus.Rejected, "not registered")]
     [InlineData("key_revoked", CommitSignatureStatus.Rejected, "revoked")]

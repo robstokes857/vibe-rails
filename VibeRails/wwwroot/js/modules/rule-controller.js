@@ -303,8 +303,8 @@ export function buildVcaExplanationViewModel(response = {}) {
     if (outcome === 'blocked') {
         tone = 'danger';
         icon = 'fa-circle-xmark';
-        title = `Commit blocked — ${stopCount || findings.length} issue${(stopCount || findings.length) === 1 ? '' : 's'} must be fixed`;
-        message = 'STOP rules cannot be bypassed. Fix the items below, then run validation again.';
+        title = `Commit blocked — ${stopCount || findings.length} issue${(stopCount || findings.length) === 1 ? ' needs' : 's need'} attention`;
+        message = 'Fix the items below, or ask your agent to request a signed exception with a reason. Approval applies only to the staged changes.';
     } else if (outcome === 'attention') {
         tone = 'warning';
         icon = 'fa-triangle-exclamation';

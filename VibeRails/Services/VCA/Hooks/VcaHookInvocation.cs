@@ -20,7 +20,9 @@ public enum VcaHookKind
     // to them on viberails.ai by signing its tree, after this machine has rebuilt that tree from
     // the bundle. Same window family and the same rules as SignCommitMessage; the decision is
     // posted to viberails.ai instead of a commit message.
-    SignReview
+    SignReview,
+    // Human approval of a captured STOP exception; no password is accepted in argv or MCP.
+    SignStopBypass
 }
 
 public sealed record VcaHookInvocation(
@@ -47,7 +49,8 @@ public sealed record VcaHookInvocation(
     HumanSignaturePopupArguments? Signing = null,
     // SignReview only: the viberails.ai reference (rvw_…) of the request to approve. The popup
     // fetches the bundle itself; nothing about its content travels in argv.
-    string? ReviewReference = null);
+    string? ReviewReference = null,
+    string? BypassRequest = null);
 
 /// <summary>
 /// Arguments of the signing popup. The tree is computed by the commit-msg hook that opens the popup;

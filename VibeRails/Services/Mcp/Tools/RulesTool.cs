@@ -16,7 +16,8 @@ namespace VibeRails.Services.Mcp.Tools;
 /// MCP normalizes the method name to snake_case (<c>validate_vca</c>).
 /// </summary>
 [McpServerToolType]
-public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityExemptionService? exemptions = null)
+public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityExemptionService? exemptions = null,
+    StopBypassService? stopBypasses = null)
 {
     private static readonly IFileClassifier FileClassifier = new FileClassifier();
     private static readonly StringComparer GitPathComparer = OperatingSystem.IsWindows()
@@ -99,6 +100,25 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
         return report.Output;
     }
 
+    [McpServerTool]
+    [Description("Requests human approval to bypass the current staged snapshot's STOP violations. Supply WHY and the intended commit message to include message rules. Opens a separate signing popup; never ask for a private key or password through MCP. Returns pending, not approved. Poll get_stop_bypass_status; after approval retry the commit without restaging. The hook records the signed reason in the commit.")]
+    public async Task<string> RequestStopBypass(string reason, string? commitMessage = null, CancellationToken cancellationToken = default)
+    {
+        try { return await (stopBypasses ?? new StopBypassService(snapshotProvider)).RequestAsync(
+            Directory.GetCurrentDirectory(), reason, commitMessage, cancellationToken); }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+        { return "STOP bypass not requested: " + ex.Message; }
+    }
+
+    [McpServerTool]
+    [Description("Checks the current worktree's signed STOP-bypass request. Pending never means approved. No keys or passwords are returned; changed staged content requires a new request.")]
+    public async Task<string> GetStopBypassStatus(CancellationToken cancellationToken = default)
+    {
+        try { return await (stopBypasses ?? new StopBypassService(snapshotProvider)).StatusAsync(Directory.GetCurrentDirectory(), cancellationToken); }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        { return "STOP bypass status unavailable: " + ex.Message; }
+    }
+
     internal static async Task<VcaToolValidationReport> ValidateVcaReportAsync(
         IGitStagedSnapshotProvider snapshotProvider,
         string? workingDirectory = null,
@@ -107,7 +127,8 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
         CancellationToken cancellationToken = default,
         GitStagedSnapshot? stagedSnapshot = null,
         bool workingTreeScope = false,
-        ICommitSignatureVerifier? signatureVerifier = null, CodeQualityExemptionService? exemptions = null)
+        ICommitSignatureVerifier? signatureVerifier = null, CodeQualityExemptionService? exemptions = null,
+        VerifiedStopBypass? stopBypass = null)
     {
         // "changed" when validating a working-tree snapshot, "staged" when validating the
         // index — the transcript must name what was actually looked at.
@@ -303,6 +324,15 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
                             ? new[] { file.RelativePath, previous } : new[] { file.RelativePath })
                             .Distinct(StringComparer.Ordinal).ToArray()));
 
+                    if (enforcement == "STOP" && stopBypass?.Covers(sourcePath, ruleText, validation.SignatureRequest?.Approvers) == true)
+                    {
+                        var explanation = $"Signed STOP bypass by {stopBypass.SignerEmail}. Reason: {stopBypass.Scope.Reason}";
+                        warnings.Add($"[STOP BYPASSED] {ruleText}: {explanation}");
+                        findings.Add(new(VcaRuleFindingKind.Warning, enforcement, ruleText, explanation, sourcePath,
+                            "The signed exception and reason must remain in the commit message."));
+                        continue;
+                    }
+
                     if (enforcement == "WARN")
                     {
                         warnings.Add($"[WARN] {ruleText}: {message}");
@@ -340,7 +370,7 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
                     else if (enforcement == "STOP")
                     {
                         hasStopViolation = true;
-                        violations.Add($"[STOP] {ruleText}: {message}\n  This violation CANNOT be overridden. Fix it before committing.");
+                        violations.Add($"[STOP] {ruleText}: {message}\n  Fix it, or request a signed STOP bypass with a reason using request_stop_bypass. A plain acknowledgment cannot bypass STOP.");
                         findings.Add(new VcaRuleFinding(
                             VcaRuleFindingKind.Blocked,
                             enforcement,
@@ -1290,7 +1320,7 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
             VcaRuleFindingKind.AcknowledgmentRequired =>
                 "Fix the issue, or include the shown acknowledgment token and a meaningful reason in the final commit message.",
             VcaRuleFindingKind.Blocked =>
-                "Fix the issue, stage the correction, and run validation again. STOP rules cannot be acknowledged or bypassed.",
+                "Fix the issue, or use request_stop_bypass to ask a person for a signed exception with a reason. A plain acknowledgment cannot bypass STOP.",
             _ => "Review this finding before committing."
         };
     }

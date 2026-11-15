@@ -77,7 +77,8 @@ public sealed class SigningKeyService(HttpClient cloudClient, SigningKeyStore st
         // A commit approval is a claim that a person reviewed a commit. Only the Git Guard signing
         // popup may make one (SignCommitTreeAsync), so this general route cannot be used to mint a
         // human-verified signature for a tree an agent picked.
-        if (payload.AsSpan().StartsWith(Encoding.UTF8.GetBytes(CommitSignatureFormat.PayloadPrefix)))
+        if (payload.AsSpan().StartsWith(Encoding.UTF8.GetBytes(CommitSignatureFormat.PayloadPrefix))
+            || payload.AsSpan().StartsWith(Encoding.UTF8.GetBytes(StopBypassFormat.PayloadPrefix)))
             throw new ArgumentException("This content is reserved for commit approval. Sign commits in the Git Guard popup instead.");
         using var lease = await store.LockAsync(ct);
         var key = store.Read(id);
@@ -97,12 +98,21 @@ public sealed class SigningKeyService(HttpClient cloudClient, SigningKeyStore st
     {
         if (!CommitSignatureFormat.IsObjectId(treeId))
             throw new ArgumentException("The commit tree id is not a full lowercase git object id.");
+        return await SignApprovalAsync(id, password, treeId, CommitSignatureFormat.BuildPayload(treeId), ct);
+    }
+
+    /// <summary>Called only by the separate human prompt after displaying the exact exception and reason.</summary>
+    internal Task<CommitSignature> SignStopBypassAsync(Guid id, string? password, StopBypassScope scope, CancellationToken ct) =>
+        SignApprovalAsync(id, password, scope.StagedTree, StopBypassFormat.BuildPayload(scope), ct);
+
+    private async Task<CommitSignature> SignApprovalAsync(Guid id, string? password, string treeId, byte[] payload, CancellationToken ct)
+    {
         using var lease = await store.LockAsync(ct);
         var key = store.Read(id);
         var cloudKeyId = PublicInfo(key, apiKey()).CloudKeyId
             ?? throw new ArgumentException("Sync this key to viberails.ai in Settings > KEYS before signing commits with it.");
         using var rsa = Unlock(key, password);
-        var signature = rsa.SignData(CommitSignatureFormat.BuildPayload(treeId), HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
+        var signature = rsa.SignData(payload, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
         return new CommitSignature(cloudKeyId, key.Fingerprint, treeId, Convert.ToBase64String(signature));
     }
 

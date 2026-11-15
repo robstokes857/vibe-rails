@@ -202,11 +202,21 @@ Rules-page validation reports the same configuration error or a clear deferred r
 | --- | --- | --- | --- |
 | `WARN` | reported, allows commit | — | Visible, never blocking. |
 | `COMMIT` | reported, allows commit | **blocks** until acknowledged | Needs `[VCA:<source>:<slug>] Reason: …` in the commit message. |
-| `STOP` | **blocks** | blocks | Cannot be acknowledged or bypassed. |
+| `STOP` | **blocks** | blocks | A plain acknowledgment is insufficient. A signed exception must cover the exact staged snapshot, rule and recorded reason. |
 | `SKIP` / `DISABLED` | not evaluated | not evaluated | An explicit opt-out. |
 
 `COMMIT` is deliberately non-blocking at pre-commit: the acknowledgment lives in a commit message
 that does not exist yet. The commit-msg hook is where it is enforced.
+
+### Signed STOP exceptions
+
+MCP `request_stop_bypass(reason, commitMessage)` captures the current STOP violations and opens
+the separate human signing popup. `get_stop_bypass_status` reports pending/approved/stale/failure.
+The agent never receives the key or password. A person approves the displayed snapshot, exact
+rules and reason with a synced Settings > KEYS key; explicitly named approvers still apply.
+Installed hooks verify the exception and record readable `VCA-STOP-Reason` / `VCA-STOP-Rule`
+trailers plus signed `VCA-STOP-Bypass` evidence. Ordinary tree signatures do not bypass STOP.
+Full format, lifetime and security contract: [STOP_BYPASS.md](STOP_BYPASS.md).
 
 ## Signed commits: `Human verified` and `Signed Approval` (2026-10-20)
 

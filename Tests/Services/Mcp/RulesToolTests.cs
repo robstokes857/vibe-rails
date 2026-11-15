@@ -175,7 +175,8 @@ public class RulesToolTests
         Assert.Equal("Log all file changes", finding.Rule);
         Assert.Equal("vc.rules.md", finding.SourcePath);
         Assert.Contains("src/app.cs", finding.Reason);
-        Assert.Contains("cannot be acknowledged", finding.Guidance, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("plain acknowledgment cannot bypass STOP", finding.Guidance, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("request_stop_bypass", finding.Guidance, StringComparison.Ordinal);
         Assert.Null(finding.Acknowledgment);
     }
 

@@ -46,6 +46,7 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
         var approvers = new List<string>();
         var requirements = new List<string>();
         string? reviewReference = null;
+        string? bypassRequest = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -167,6 +168,12 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
                 continue;
             }
 
+            if (arg.Equals("--bypass-request", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                bypassRequest = args[++i];
+                continue;
+            }
+
             if (arg.Equals("--review", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
             {
                 reviewReference = args[++i];
@@ -202,7 +209,8 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
             Signing: kind == VcaHookKind.SignCommitMessage
                 ? new HumanSignaturePopupArguments(treeId, baseTree, approvers, requirements)
                 : null,
-            ReviewReference: kind == VcaHookKind.SignReview ? reviewReference : null);
+            ReviewReference: kind == VcaHookKind.SignReview ? reviewReference : null,
+            BypassRequest: kind == VcaHookKind.SignStopBypass ? bypassRequest : null);
     }
 
     private static VcaHookKind ParseKind(string value)
@@ -210,6 +218,7 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
         return value.ToLowerInvariant() switch
         {
             "pre-commit" => VcaHookKind.PreCommit,
+            "sign-stop-bypass" => VcaHookKind.SignStopBypass,
             "precommit" => VcaHookKind.PreCommit,
             "commit-msg" => VcaHookKind.CommitMessage,
             "commit-message" => VcaHookKind.CommitMessage,
