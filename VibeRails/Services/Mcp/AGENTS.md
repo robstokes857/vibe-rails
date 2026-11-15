@@ -46,8 +46,9 @@ Agent status names each session's manager/worker role. Discovery/start require i
 `VIBERAILS_TOOL_*` scoped per-launch credentials and an open root; standalone MCP clients and the root's
 MCP Explorer without that inherited context get an actionable failure. They use the existing
 loopback-only client pattern, both credentials, bounded responses and no redirects/proxies/cookies.
-Start is limited to the root's project. Poll `get_board_agent_status` using the returned session
-ID and then the whole card when waiting for workflows. Launch success is not completion;
+Start is limited to the root's project. Poll `get_board_agent_status` about once a minute using
+the returned session ID and then the whole card when waiting for workflows. `get_board_reviews`
+uses the same cadence while waiting for a report. Launch success is not completion;
 check status before retrying an uncertain launch. Never change a live TUI's settings by typing.
 Keep both tools in the exact Board grant list and both transports' shared registration.
 
@@ -214,7 +215,7 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 
 | Wire name (snake_case) | Method | Description |
 |------------------------|--------|-------------|
-| `validate_vca` | `RulesTool.ValidateVca` | Validates the staged Git index snapshot against `- [ENFORCEMENT] …` rules from the indexed vc.rules.md files. |
+| `validate_vca` | `RulesTool.ValidateVca` | Call before committing to validate the staged Git index against rules from indexed vc.rules.md files. For intentional STOP exceptions, request human approval with `request_stop_bypass(reason, commitMessage)`, check `get_stop_bypass_status`, and retry only after approval without changing the staged snapshot. Never substitute `--no-verify`; report missing tools as a runtime/version mismatch. |
 | `create_session_share_link` | `SessionSharingTool.CreateSessionShareLink` | Creates a public replay link for the calling terminal's inherited session, with a required `displayName` (1–160 characters). Returns upload status, expiry and a ready-to-copy `vibe-share:<url>` commit line. Anyone with the link can view terminal output, prompts and saved code changes. |
 | `request_review` | `ReviewRequestTool.RequestReview` | Creates a review request for the calling terminal's project from the staged index (VB-50 slice E) through the root's `/api/v1/review-requests` with the inherited root credentials, attaching only the calling session: `reviewers` (1–10 emails), optional `note` and `cardKey`. Returns the request id, tree, files, sessions and exactly what a send would transfer. Never sends, decides or signs: a person sends from the card after reading the disclosure. Not a Board auto-grant. |
 | `add_jira_comment` | `BoardTool.AddJiraComment` | Explicitly posts text and optional public `sessionLinks` to the card's connected Jira issue, then saves a Board receipt. Uses saved credentials; no Board auto-grant or automatic retry. See [Jira comments](../Jira/Comments.md). |
@@ -239,11 +240,6 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `attach_board_session` | `BoardTool.AttachBoardSession` | Explicitly attach the current VibeRails session to another card in the same project. Idempotent; preserves the original default. Future commit-link calls share with all attachments. No session-id argument or card move. |
 | `complete_board_agent` | `BoardTool.CompleteBoardAgent` | Current linked agent's first final report: required summary (≤ 4,000 characters), outcome `succeeded` / `failed` / `cancelled`, optional card. Does not stop its process or complete remaining workflow actions. |
 | `end_agent_session` | `AgentSessionTool.EndAgentSession` | Available to every managed terminal when that session should end; ordinary task/report completion does not require it. When used, it is the last call after required work/reports/handoff/moves and `complete_board_agent`: closes the calling PTY after 30 seconds. No target parameter; exact current session is rechecked at execution. Repeat calls keep the first deadline, recordings remain, and normal workflow continuation does not imply review approval. |
-| `get_pr_review_queue` | `PrReviewTool.GetPrReviewQueue` | Which open GitHub PR in this project's repository to review next and why (JSON: `next`, ranked `queue`, `skipped`, `counts`). Runs the user's `gh` read-only. See [PR Reviews](../PrReviews/AGENTS.md). |
-| `get_pr_review` | `PrReviewTool.GetPrReview` | One tracked PR with its derived status, GitHub lifecycle and review history (JSON). |
-| `start_pr_review` | `PrReviewTool.StartPrReview` | Starts or resumes the PR's single pending review pass; an untracked PR needs title, author and `openedAt`. Idempotent. |
-| `save_pr_review_draft` | `PrReviewTool.SavePrReviewDraft` | Checkpoints supplied findings onto the pending pass without completing it. |
-| `complete_pr_review` | `PrReviewTool.CompletePrReview` | Completes the pending pass with feedback and verdict; `blocking` defaults to `verdict == request_changes`. Local record only; posts nothing to GitHub. |
 | `get_board_agent_status` | `BoardTool.GetBoardAgentStatus` | Poll a card's ten newest agents or a specific linked session, completion reports, latest updates, recorded exits, pending lane entries and twenty recent card-triggered runs. Unknown liveness is explicit. |
 | `await_board_events` | `BoardTool.AwaitBoardEvents` | The AI board manager's wait (VIBE-204): `FAIL` while the switch is off. Blocks server-side up to `timeoutSeconds` (default 25, max 45) until a Card Log, discussion or completion-report entry lands after `since`, or the Agent-card snapshot changes (a worker exiting), then returns the entries oldest first (card, current lane, kind, attention, author, bounded body), the snapshot (lane, flag, worker, open worker sessions, owner) and `nextSince` (`<time>~<digest>`). `scope=managed` (default) covers board-managed cards plus workflow/manager changes, `scope=all` every card; the caller's own writes never wake it. Without `since` it returns the snapshot and a fresh cursor; a quiet wait keeps its cursor and says the snapshot is unchanged instead of repeating it. A cursor without its `~digest` tag has nothing to compare, so it waits for entries or the timeout (never returning at once as "changed") and then returns the snapshot with a tagged cursor (VIBE-284). Read-only. |
 > The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
@@ -591,6 +587,7 @@ uploads and Board-viewer access retain the unlimited-byte policy. Markdown/TXT r
 text format; tool failures set `IsError`.
 Only current attachments on the resolved card/project are readable. SVG, PDFs and arbitrary binary
 files are not returned as images; the Board viewer remains their existing access path. This adds no
-new tool name, grant, database path, SQL operation or filesystem export. The launch prompt and card
-attachment guidance explicitly require Board tools instead of direct database access. This is a
-supported workflow, not OS isolation: a local CLI with filesystem permission could still bypass it.
+new tool name, grant, database path, SQL operation or filesystem export. The launch prompt directs
+agents to `read_board_attachment`, and card attachment guidance requires Board tools instead of
+direct database access. This is a supported workflow, not OS isolation: a local CLI with filesystem
+permission could still bypass it.

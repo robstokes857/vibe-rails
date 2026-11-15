@@ -119,6 +119,7 @@ public sealed class BoardSharingTests : IDisposable
             () => store.CreateCardAsync(root, new("col_shared", "Forbidden", "", null, "medium", null, [], false), Ct),
             () => store.CreateColumnAsync(root, "Forbidden", "", Ct, shared.Id),
             () => store.UpdateColumnAsync(root, "col_shared", "Forbidden", null, Ct),
+            () => store.UpdateColumnAsync(root, "col_shared", null, null, Ct, isDefaultForNewCards: true),
             () => store.DeleteColumnAsync(root, "col_shared", Ct),
             () => store.ReorderColumnsAsync(root, ["col_shared"], Ct, shared.Id),
             () => store.RenameBoardAsync(root, shared.Id, "Forbidden", null, Ct),

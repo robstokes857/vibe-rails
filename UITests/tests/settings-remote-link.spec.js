@@ -78,6 +78,15 @@ async function openSettings(page, { bridge = false, signedIn = false, email = 'r
     };
 }
 
+test('account menu keeps pre-commit review requests accessible', async ({ page }) => {
+    await openSettings(page, { signedIn: true });
+    await page.locator('[data-action="account-menu"]').click();
+    await page.getByRole('button', { name: 'Review requests', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Reviews requested of you' })).toBeVisible();
+    await expect(page.locator('[data-account-menu]')).toBeHidden();
+    await expect(page.getByRole('button', { name: 'PR Reviews', exact: true })).toHaveCount(0);
+});
+
 test('browser sign-in opens from an explicit click and saves only the linked key alongside a settings draft', async ({ page, context }, testInfo) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await context.route(LINK_URL, route => route.fulfill({ contentType: 'text/html', body: '<h1>Enter your VibeRails code</h1>' }));

@@ -60,8 +60,7 @@ through viberails.ai before committing. Reviewers can inspect the work, comment,
 or reject. Signed approvals cover the exact staged tree and can satisfy configured repository
 approval rules. The **Reviews requested of you** sidebar brings incoming requests into VS Code.
 
-The dashboard's **Reviews** page also tracks GitHub pull request reviews across configured
-repositories. **Send to…** summarizes a recorded session and starts another supported CLI or
+**Send to…** summarizes a recorded session and starts another supported CLI or
 saved setup with that context.
 
 ![The session history menu handing recorded work to another CLI or saved setup](https://raw.githubusercontent.com/robstokes857/vibe-rails/main/docs/images/session-handoff.png)
@@ -104,7 +103,7 @@ controls. See the [gateway configuration guide](https://github.com/robstokes857/
 user prompts and model replies. Savings depend on the workload; the terminal's **tokens saved**
 meter shows the running total.
 
-The built-in **MCP server** gives supported agents tools for Board work, handoffs, review tracking,
+The built-in **MCP server** gives supported agents tools for Board work, handoffs, pre-commit review requests,
 history search, rule validation, and TokenSaver control. **MCP Explorer** lets you inspect and
 call those tools from the dashboard.
 

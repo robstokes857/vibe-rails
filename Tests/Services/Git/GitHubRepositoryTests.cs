@@ -1,12 +1,12 @@
-using VibeRails.Services.PrReviews;
+using VibeRails.Services.Git;
 using Xunit;
 
-namespace Tests.Services.PrReviews;
+namespace Tests.Services.Git;
 
 public sealed class GitHubRepositoryTests
 {
     [Theory]
-    [InlineData("https://github.com/PeakActivity/NEE-Treasury-C3.git", "PeakActivity", "NEE-Treasury-C3")]
+    [InlineData("https://github.com/ExampleOrg/Example-Project.git", "ExampleOrg", "Example-Project")]
     [InlineData("https://github.com/octo/widgets", "octo", "widgets")]
     [InlineData("https://github.com/octo/widgets/", "octo", "widgets")]
     [InlineData("https://user:ghp_secret@github.com/octo/widgets.git", "octo", "widgets")]
@@ -44,12 +44,10 @@ public sealed class GitHubRepositoryTests
     }
 
     [Fact]
-    public void Builds_links_without_the_remote_credentials()
+    public void Keeps_repository_identity_without_the_remote_credentials()
     {
         GitHubRepository.TryParseRemote("https://user:ghp_secret@github.com/octo/widgets.git", out var repository);
 
         Assert.Equal("octo/widgets", repository.FullName);
-        Assert.Equal("https://github.com/octo/widgets", repository.Url);
-        Assert.Equal("https://github.com/octo/widgets/pull/7", repository.PullRequestUrl(7));
     }
 }

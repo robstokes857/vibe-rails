@@ -75,8 +75,6 @@ public static class RouteExtensions
         if (isActiveRootBackend)
             BoardRoutes.Map(app);
         if (isActiveRootBackend) PinRoutes.Map(app);
-        // PR review tracker: configured watches or project-origin fallback, with `gh`; root dashboard only.
-        if (isActiveRootBackend) PrReviewRoutes.Map(app);
         if (isActiveRootBackend) { LaunchRoutes.Map(app); BoardLaunchRoutes.Map(app); }
         PushRoutes.Map(app);
         LifecycleRoutes.Map(app);

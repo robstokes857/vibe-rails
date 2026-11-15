@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 
 async function setup(page) {
-    const state={presets:[],actions:[],bindings:[],runs:[],files:[],requests:[],conflict:false, projects:[
+    const state={presets:[],actions:[],bindings:[],runs:[],files:[],requests:[],hiddenKeys:[],conflict:false, projects:[
         {id:'C:\\FIXTURES\\PROJECT',name:'Same name',path:'C:\\fixtures\\project',isCurrent:true},
         {id:'C:\\FIXTURES\\OTHER',name:'Same name',path:'C:\\fixtures\\other',isCurrent:false}
     ]};
@@ -16,6 +16,15 @@ async function setup(page) {
         const ok=json=>route.fulfill({json});
         if(path==='/api/v1/context')return ok({isInGit:true,rootPath:'C:\\fixtures\\project',launchDirectory:'C:\\fixtures\\project',isActiveRootBackend:true});
         if(path==='/api/v1/launch-projects')return ok(state.projects);
+        if(path==='/api/v1/quick-actions/preferences') {
+            if(state.failQuickActions)return route.fulfill({status:503,json:{error:'Could not save quick actions. Try again.'}});
+            if(method==='PUT') {
+                state.hiddenKeys=state.hiddenKeys.filter(key=>key!==body.key);
+                if(body.hidden)state.hiddenKeys.push(body.key);
+                return route.fulfill({status:204});
+            }
+            return ok({hiddenKeys:state.hiddenKeys});
+        }
         if(path==='/api/v1/launch-catalog')return ok({items:items().filter(p=>new URL(req.url()).searchParams.get('includeAll')==='true'||p.inProject)});
         if(path==='/api/v1/llm-picker/preferences')return ok({items:[...base.map(([cli,label],order)=>({key:`base:${cli}`,kind:'base',group:'Base CLIs',label,cli,enabled:true,order})),...items().filter(p=>p.definitionType==='preset').map((p,order)=>({key:`preset:${p.id}:${p.cli}`,kind:p.kind,group:'AI Agents',label:p.name,cli:p.cli,enabled:p.enabled,inProject:p.inProject,order}))]});
         if(path.includes('/launch-defaults'))return ok({model:'',effort:'',speed:'',mode:'',yolo:false});
@@ -68,6 +77,82 @@ async function setup(page) {
     await expect(page.getByRole('heading',{name:'AI Agents',exact:true})).toBeVisible();
     return state;
 }
+
+for (const width of [375, 1280]) test(`Manage quick actions persists shared visibility at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 850 });
+    const state = await setup(page);
+    state.presets.push({ id:'reviewer', name:'Review <changes>', cli:'codex', initialPrompt:'Review', enabled:true, revision:1 });
+    state.presets.push({ id:'quick', name:'Fast terminal', cli:'claude', enabled:true, revision:1 });
+    state.actions.push({ id:'check', name:'Check', kind:'vca', enabled:true, revision:1 });
+    state.scripts = [{ id:'reg_run', name:'run.ps1', displayName:'Start app', status:'approved' }];
+    await page.evaluate(() => { window.quickActionRefreshes = 0; window.__viberails_launcherChanged__ = () => window.quickActionRefreshes++; });
+    const trigger = page.locator('[data-action="automation-launcher"]');
+    await trigger.click();
+    const menu = page.getByRole('dialog', { name:'Quick actions', exact:true });
+    await menu.getByRole('button', { name:'Manage quick actions…', exact:true }).click();
+    const dialog = page.getByRole('dialog', { name:'Manage quick actions', exact:true });
+    await expect(dialog.getByRole('switch')).toHaveCount(4);
+    await dialog.getByRole('switch', { name:'Show Review <changes>', exact:true }).uncheck();
+    await expect(dialog.getByRole('status')).toContainText('Saved.');
+    expect(state.hiddenKeys).toEqual(['preset:reviewer']);
+    await page.screenshot({ path:testInfo.outputPath(`quick-actions-${width}.png`) });
+    expect(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await dialog.getByRole('button', { name:'Done', exact:true }).click();
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await expect(menu.locator('.launch-menu-name')).toHaveText(['Fast terminal', 'Check', 'Start app']);
+    // The same definition still exists and remains enabled; its changed label keeps its preference.
+    expect(state.presets[0].enabled).toBe(true);
+    state.presets[0].name = 'Renamed reviewer';
+    await page.reload();
+    await trigger.click();
+    await expect(menu.locator('.launch-menu-name')).toHaveText(['Fast terminal', 'Check', 'Start app']);
+    await menu.getByRole('button', { name:'Manage quick actions…' }).click();
+    await expect(dialog.getByRole('switch', { name:'Show Renamed reviewer' })).not.toBeChecked();
+    for (const toggle of await dialog.getByRole('switch').all()) {
+        if (await toggle.isChecked()) { await toggle.uncheck(); await expect(toggle).toBeEnabled(); }
+    }
+    await dialog.press('Escape');
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await expect(menu).toContainText('No quick actions shown.');
+    await menu.getByRole('button', { name:'Manage quick actions…' }).click();
+    await dialog.getByRole('switch', { name:'Show Renamed reviewer' }).check();
+    await expect(dialog.getByRole('status')).toContainText('Saved.');
+    await dialog.getByRole('button', { name:'Done' }).click();
+    await trigger.click();
+    await expect(menu.locator('.launch-menu-name')).toHaveText(['Renamed reviewer']);
+});
+
+test('quick action settings restore failed saves and open from the VS Code command', async ({ page }) => {
+    const state = await setup(page);
+    state.presets.push({ id:'reviewer', name:'Reviewer', cli:'codex', initialPrompt:'Review', enabled:true, revision:1 });
+    await page.evaluate(async () => {
+        window.__viberails_VSCODE__ = true;
+        window.quickActionRefreshes = 0;
+        window.__viberails_launcherChanged__ = () => window.quickActionRefreshes++;
+        const { setupVSCodeLauncherBridge } = await import('/js/modules/vscode-launcher-bridge.js');
+        let receive;
+        const host = { __viberails_VSCODE__:true, parent:{}, addEventListener: (type, handler) => { receive = handler; } };
+        setupVSCodeLauncherBridge(window.app, host);
+        receive({ source:host.parent, data:{ command:'openLauncherCustomize' } });
+    });
+    const dialog = page.getByRole('dialog', { name:'Manage quick actions', exact:true });
+    const toggle = dialog.getByRole('switch', { name:'Show Reviewer' });
+    await expect(toggle).toBeChecked();
+    state.failQuickActions = true;
+    await toggle.uncheck();
+    await expect(dialog.getByRole('alert')).toContainText('Try again');
+    await expect(toggle).toBeChecked();
+    expect(state.hiddenKeys).toEqual([]);
+    state.failQuickActions = false;
+    await toggle.uncheck();
+    await expect(dialog.getByRole('status')).toContainText('Saved.');
+    await expect.poll(() => page.evaluate(() => window.quickActionRefreshes)).toBe(1);
+    expect(state.requests.filter(r => r.method === 'PUT').map(r => r.path)).toEqual([
+        '/api/v1/quick-actions/preferences', '/api/v1/quick-actions/preferences'
+    ]);
+});
 
 for (const width of [375, 1024]) test(`project scope is searchable, retained and manageable at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
@@ -271,8 +356,8 @@ test('quick actions use explicit Run buttons and preserve launch and keyboard be
     state.presets = [];
     state.actions = [];
     await trigger.click();
-    await expect(panel.getByRole('status')).toContainText('No quick actions available');
-    await expect(panel.getByRole('button', { name: 'Manage AI Agents', exact: true })).toBeFocused();
+    await expect(panel.getByRole('status')).toContainText('No quick actions shown');
+    await expect(panel.getByRole('button', { name: 'Manage quick actions…', exact: true })).toBeFocused();
     await panel.getByRole('button', { name: 'Manage AI Agents', exact: true }).click();
     await expect(panel).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'AI Agents', exact: true })).toBeVisible();

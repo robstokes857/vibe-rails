@@ -38,7 +38,7 @@ public static class BoardPromptComposer
         + "When work remains and no existing worker or relevant lane Automation is running or pending, you must launch a worker before execution begins. Launch delegated implementation, testing or other workers with start_board_agent using intent=worker and task for a bounded assignment and expected output. "
         + "The saved Assignee is the default worker; omit selection to use it. Use list_board_agent_options when no default worker is configured or another worker is needed, then pass its enabled picker key as selection. Your Manager selection stays separate; do not overwrite either saved assignment to delegate. Run one worker at a time in this shared checkout. "
         + "If a worker launch fails or is uncertain, check status before retrying and resolve the launch issue; do not fall back to doing the worker's task yourself. "
-        + "Poll get_board_agent_status every 10 seconds and inspect the matching session's completion report, process outcome and card comments. A successful process exit without the required handoff or review report is not approval. "
+        + "Poll get_board_agent_status about once a minute and inspect the matching session's completion report, process outcome and card comments. A successful process exit without the required handoff or review report is not approval. "
         + "Read get_board_reviews for review scope and blockers; assign fixes, rerun the required review, and check the fresh evidence. "
         + "You decide lane movement using the user's workflow, lane context and evidence. Save a handoff before each move; check destination Automations and let their ordered steps finish before leaving their lane. Avoid duplicating a lane Automation with a direct worker. "
         + "A finished implementation worker is one pipeline step, not the end of your manager session. Stay active and continue polling while workers, queued Automations or required reviews remain. "
@@ -83,18 +83,8 @@ public static class BoardPromptComposer
         + "The original coding agent waits for required workflow steps before its final card move, because leaving the lane cancels pending steps. ";
     internal const string ManagedWorkflowGuidance = WorkflowStepGuidance
         + "The manager waits for required workflow steps and decides the card's next move, because leaving the lane cancels pending steps. This Automation worker reports its own step and exits without waiting for later steps or moving the card. ";
-    internal const string ReviewFindingGuidance =
-        "Critical, high and medium-high findings block completion; fix them. "
-        + "Medium-low and low findings are non-blocking notes: the worker may fix now or defer to a backlog card. Reference the original card/finding there; link the backlog key in the original card's comment and handoff. These notes alone need no re-review. ";
-    internal const string AgentCompletionGuidance =
-        "When your assigned work is finished, call complete_board_agent with your outcome and summary after the handoff and card moves. "
-        + "To wait for a triggered agent, poll get_board_agent_status every 10 seconds for pending entries, run outcomes and completion reports. "
-        + "Poll get_board_reviews every 10 seconds; read the report with reviewId and check scope. Fix agreed blockers; document disagreements with evidence. "
-        + ReviewFindingGuidance
-        + "Success without a report means report missing, never approved. "
-        + "If work is waiting on the user's answer or approval, keep the session open and wait for that response; a pending question is not task completion. ";
     internal const string AutomationCompletionGuidance =
-        "When completely finished (including any review you are waiting for), call end_agent_session LAST, then send your final response. It closes only your own PTY and child processes after 30 seconds, retaining recordings. Do not start more work after calling it. ";
+        "When this Automation's assigned work, required reviews and approvals are finished, save its handoff and call complete_board_agent, then end_agent_session LAST. Send your final response; the PTY closes after 30 seconds. ";
 
     internal static string ComposeStandaloneAutomationPrompt(string? workerPrompt) =>
         "This is an Automation Worker session. " + StandaloneCompletionGuidance + "\n\n" + workerPrompt;
@@ -125,7 +115,7 @@ public static class BoardPromptComposer
         + "This is an Automation-launched agent. Keep your progress logs, decisions, validation results and final handoff in Comments using add_board_comment on every card this Automation is working against. Attach any additional cards with attach_board_session and name each target explicitly when commenting. Do not leave the only copy in terminal output: the Automation terminal closes after completion; its recording remains available. "
         + (managedWorkflow ? "Read the user's context from get_board_card. The manager owns lane movement and closure. "
             : "Before moving, save your handoff, check destination Automations with list_board_columns, then report the move. Read the user's context from get_board_card. ")
-        + JiraGuidance + AdoGuidance + (managedWorkflow ? ManagedWorkflowGuidance : WorkflowGuidance) + AttentionGuidance + (managedWorkflow ? "" : AgentCompletionGuidance + AutomationCompletionGuidance)
+        + JiraGuidance + AdoGuidance + (managedWorkflow ? ManagedWorkflowGuidance : WorkflowGuidance) + AttentionGuidance + (managedWorkflow ? "" : AutomationCompletionGuidance)
         + (userContext.Length == 0 ? "" : "\n\n" + userContext)
         + "\n\n" + (workerPrompt ?? "")
         + (managedWorkflow ? "\n\nAgent workflow Automation role: complete only your assigned step. Save required review evidence, report_automation_step with passed or failed and its summary, then save your handoff, complete_board_agent and end_agent_session LAST. Leave movement and closure to the manager; do not wait for later lane steps." : "");
@@ -331,9 +321,7 @@ public static class BoardPromptComposer
                 .Append("Link commits and post your handoff summary before moving, then move once and read move_board_card's report. ");
         builder.Append("Use link_board_commit once per commit; it links every card attached to this session. ")
             .Append("If you also work on another card, use attach_board_session with its key; the original card stays the default. ")
-            .Append(AttentionGuidance)
-            .Append(isManager || isManagedWorker ? "" : AgentCompletionGuidance)
-            .Append("Use the Board tools as the only access path for card data and attachments.");
+            .Append(AttentionGuidance);
 
         if (!string.IsNullOrWhiteSpace(environmentPrompt))
             builder.Append("\n\n").Append(environmentPrompt.Trim());

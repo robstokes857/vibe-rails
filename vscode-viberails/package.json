@@ -80,7 +80,7 @@
       },
       {
         "command": "viberails.launcher.customize",
-        "title": "Customize Launcher List…",
+        "title": "Manage Quick Actions…",
         "category": "VibeRails",
         "icon": "$(settings-gear)"
       },

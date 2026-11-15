@@ -31,6 +31,13 @@ public static class LaunchRoutes
         });
         api.MapGet("/launch-catalog", async (bool? includeAll, LaunchService service, IBoardProjectResolver projects, CancellationToken ct) =>
             Results.Ok(await service.CatalogAsync(await projects.ResolveAsync(ct), ct, includeAll == true)));
+        api.MapGet("/quick-actions/preferences", async (VibeRails.DB.IRepository repository, CancellationToken ct) =>
+            Results.Ok(await new QuickActionPreferences(repository).GetAsync(ct)));
+        api.MapPut("/quick-actions/preferences", async (QuickActionPreferenceRequest request, VibeRails.DB.IRepository repository, CancellationToken ct) =>
+        {
+            await new QuickActionPreferences(repository).SaveAsync(request, ct);
+            return Results.NoContent();
+        });
         api.MapGet("/launch-projects", async (VibeRails.DB.IRepository repository, IBoardProjectResolver projects, CancellationToken ct) =>
             Results.Ok(await LaunchProjects.ListAsync(repository, await projects.ResolveAsync(ct), ct)));
         api.MapGet("/presets", async (ILaunchStore store, CancellationToken ct) => Results.Ok(await store.ListPresetsAsync(ct)));

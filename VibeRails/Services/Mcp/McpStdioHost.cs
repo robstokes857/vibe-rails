@@ -157,11 +157,6 @@ public static class McpStdioHost
         VibeRails.Services.Launches.LaunchServiceRegistration.AddLaunchDefinitions(services, ResolveStatePath);
         services.AddScoped<RulesTool>();
         services.AddScoped<BoardTool>();
-        // PR review tools. The store owns its dedicated schema and read-only legacy adoption, so this child needs only
-        // that store, not the dashboard's Repository. `gh` output is captured, never written here.
-        services.AddSqlitePrReviewStorage(_ => ResolveStatePath());
-        VibeRails.Services.PrReviews.PrReviewServiceCollectionExtensions.AddPrReviews(services);
-        services.AddScoped<PrReviewTool>();
         // HostShellTools (run_shell_command) and WebResearchTools (web_search/web_fetch) are
         // intentionally not exposed for now (security review 2026-07-02); mirrors MapRegisterServices.
         // Classes kept in-tree for re-add.

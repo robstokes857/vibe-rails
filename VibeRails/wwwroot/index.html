@@ -98,11 +98,6 @@
                 <i class="fa-solid fa-plug me-1"></i>
                 <span>MCP</span>
             </button>
-            <button class="app-subnav-link" data-action="navigate" data-view="pr-reviews" hidden
-                title="PR Reviews — review log and next-up queue for this project's GitHub pull requests">
-                <i class="fa-solid fa-code-pull-request me-1"></i>
-                <span>Reviews</span>
-            </button>
             <button type="button" class="app-subnav-link automation-launch-btn" data-action="automation-launcher"
                 title="Launch an agent or automation" aria-haspopup="dialog" aria-controls="launch-menu" aria-expanded="false"
                 aria-label="Launch an agent or automation">
@@ -163,6 +158,10 @@
                         <button type="button" class="app-account-menu-item" data-account-menu-action="settings">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
                             <span>Account settings</span>
+                        </button>
+                        <button type="button" class="app-account-menu-item" data-account-menu-action="review-inbox" data-account-signed-in>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="m9 12 2 2 4-4"/></svg>
+                            <span>Review requests</span>
                         </button>
                         <a class="app-account-menu-item" data-account-menu-action="site" data-account-signed-in
                             href="https://viberails.ai/Account" target="_blank" rel="noopener noreferrer">
@@ -1116,8 +1115,6 @@
                             aria-controls="settings-panel-keys" aria-selected="false" tabindex="-1" data-settings-tab="keys">KEYS</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-setup"
                             aria-controls="settings-panel-setup" aria-selected="false" tabindex="-1" data-settings-tab="setup">Setup</button>
-                        <button type="button" class="settings-tab" role="tab" id="settings-tab-pr-reviewer"
-                            aria-controls="settings-panel-pr-reviewer" aria-selected="false" tabindex="-1" data-settings-tab="pr-reviewer">PR Reviewer</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-ai-board-manager"
                             aria-controls="settings-panel-ai-board-manager" aria-selected="false" tabindex="-1" data-settings-tab="ai-board-manager">AI board manager</button>
                     </div>
@@ -1130,29 +1127,6 @@
                         <p>Instructions you add to LLM launches, from the broadest level to the most specific: App, Board, Card, then Card type.
                             App context is set here. Each board's settings, under Context, show all four levels for that board.</p>
                         <div data-settings-context-editor></div>
-                    </section>
-                </div></div>
-            </div>
-            <div class="settings-panel" id="settings-panel-pr-reviewer" role="tabpanel" aria-labelledby="settings-tab-pr-reviewer" tabindex="0" hidden>
-                <div class="row justify-content-center"><div class="col-md-8 col-lg-6">
-                    <section class="sandbox-item-card text-start" data-settings-pr-reviewer>
-                        <h2 class="sandbox-item-name">PR Reviewer</h2>
-                        <div class="form-check form-switch my-3">
-                            <input type="checkbox" role="switch" class="form-check-input" id="setting-pr-reviewer-enabled" data-pr-reviewer-enabled disabled>
-                            <label class="form-check-label" for="setting-pr-reviewer-enabled">Enable PR Reviewer and GitHub publishing</label>
-                        </div>
-                        <p>Review PRs and publish results through your GitHub CLI account while VibeRails is open. Blockers request changes on GitHub.</p>
-                        <p class="form-text">Off by default. Saves immediately for all projects on this machine. Turning off preserves history; work already in progress may finish.</p>
-                        <label class="form-label" for="setting-pr-reviewer-repository">GitHub repository to watch</label>
-                        <form class="d-flex gap-2 mb-2" data-pr-reviewer-repository-form>
-                            <input type="text" id="setting-pr-reviewer-repository" class="form-control" data-pr-reviewer-repository
-                                aria-describedby="pr-reviewer-repositories-help" placeholder="owner/repository" autocomplete="off" spellcheck="false" autocapitalize="none" disabled>
-                            <button type="submit" class="btn btn-primary flex-shrink-0" data-pr-reviewer-add-repository disabled>Add</button>
-                        </form>
-                        <p id="pr-reviewer-repositories-help" class="form-text">Up to 50. Empty uses each project's GitHub origin. Changes save immediately.</p>
-                        <ul class="list-unstyled mb-3" aria-label="Watched repositories" data-pr-reviewer-repositories hidden></ul>
-                        <p role="status" data-pr-reviewer-status>Open this page to load the saved setting.</p>
-                        <button type="button" class="btn btn-outline-secondary" data-pr-reviewer-reload>Reload saved setting</button>
                     </section>
                 </div></div>
             </div>
@@ -3073,148 +3047,6 @@
                     <iframe class="mcp-remote-frame" data-mcp-remote-frame title="Isolated remote MCP inspector"
                         sandbox="allow-scripts" referrerpolicy="no-referrer" src="mcp-remote.html"></iframe>
                 </section>
-            </div>
-        </div>
-    </template>
-
-    <!-- PR Reviews (view 'pr-reviews'): lead-review log for the project's GitHub pull requests.
-         The list and one PR's detail are two pages of this one view; pr-reviews-controller.js. -->
-    <template id="pr-reviews-template">
-        <div class="view pr-reviews-view" data-view="pr-reviews">
-            <style>
-                .pr-reviews-view { color: var(--color-text, #e6e6e6); display: grid; gap: 1.5rem; min-width: 0; }
-                .pr-reviews-view [hidden] { display: none !important; }
-                .pr-reviews-view .pr-subtitle { color: var(--color-text-muted, #9aa0a6); margin: 0.25rem 0 0; }
-                .pr-reviews-view .pr-subtitle a,
-                .pr-reviews-view a.pr-row-title { color: var(--color-accent, #06b6d4); }
-                .pr-reviews-view .pr-section { display: grid; gap: 0.75rem; min-width: 0; }
-                .pr-reviews-view .pr-section > * { min-width: 0; }
-                .pr-reviews-view .pr-section-heading { display: flex; flex-direction: column; gap: 0.1rem; }
-                .pr-reviews-view .pr-section-bar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 0.75rem; }
-                .pr-reviews-view .pr-section-title { font-size: 1.15rem; font-weight: 600; margin: 0; }
-                .pr-reviews-view .pr-count { color: var(--color-text-muted, #9aa0a6); font-weight: 400; margin-left: 0.25rem; }
-                .pr-reviews-view .pr-eyebrow { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted, #9aa0a6); }
-                .pr-reviews-view .pr-eyebrow[data-tone="warning"] { color: var(--color-warning, #f59e0b); }
-                .pr-reviews-view .pr-eyebrow[data-tone="danger"] { color: var(--color-danger, #ef4444); }
-                .pr-reviews-view .pr-muted { color: var(--color-text-muted, #9aa0a6); font-size: 0.85rem; }
-                .pr-reviews-view .pr-list { display: grid; border: 1px solid var(--color-border, #2d2f36); border-radius: 8px; overflow: hidden; }
-                .pr-reviews-view .pr-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.75rem;
-                    padding: 0.65rem 0.9rem; background: var(--color-bg-surface, #1b1d22); color: inherit; text-align: left; width: 100%;
-                    border: 0; border-bottom: 1px solid var(--color-border, #2d2f36); border-left: 3px solid transparent; }
-                .pr-reviews-view .pr-list > .pr-row:last-child { border-bottom: 0; }
-                .pr-reviews-view button.pr-row:hover, .pr-reviews-view button.pr-row:focus-visible { background: var(--color-bg-surface-hover, #23262d); }
-                .pr-reviews-view .pr-row[data-tone="warning"] { border-left-color: var(--color-warning, #f59e0b); }
-                .pr-reviews-view .pr-row[data-tone="danger"] { border-left-color: var(--color-danger, #ef4444); }
-                .pr-reviews-view .pr-open-row { grid-template-columns: auto minmax(0, 1fr) auto auto; }
-                .pr-reviews-view .pr-number { font-family: var(--font-mono, ui-monospace, monospace); color: var(--color-primary, #8b5cf6); }
-                .pr-reviews-view .pr-row-main { display: grid; min-width: 0; }
-                .pr-reviews-view .pr-row-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-                .pr-reviews-view .pr-row-meta { color: var(--color-text-muted, #9aa0a6); font-size: 0.8rem; }
-                .pr-reviews-view .pr-row-badges { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
-                .pr-reviews-view .pr-badge { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.1rem 0.5rem; border-radius: 999px;
-                    font-size: 0.75rem; white-space: nowrap; border: 1px solid var(--color-border, #2d2f36); color: var(--color-text-muted, #9aa0a6); }
-                .pr-reviews-view .pr-badge[data-tone="success"] { color: var(--color-success, #22c55e); border-color: color-mix(in srgb, var(--color-success, #22c55e) 45%, transparent); }
-                .pr-reviews-view .pr-badge[data-tone="warning"] { color: var(--color-warning, #f59e0b); border-color: color-mix(in srgb, var(--color-warning, #f59e0b) 45%, transparent); }
-                .pr-reviews-view .pr-badge[data-tone="danger"] { color: var(--color-danger, #ef4444); border-color: color-mix(in srgb, var(--color-danger, #ef4444) 45%, transparent); }
-                .pr-reviews-view .pr-badge[data-tone="info"],
-                .pr-reviews-view .pr-badge[data-tone="accent"] { color: var(--color-accent, #06b6d4); border-color: color-mix(in srgb, var(--color-accent, #06b6d4) 45%, transparent); }
-                .pr-reviews-view .pr-empty { padding: 1rem; border: 1px dashed var(--color-border, #2d2f36); border-radius: 8px;
-                    background: var(--color-bg-base, #121212); color: var(--color-text-muted, #9aa0a6); }
-                .pr-reviews-view .pr-alert { margin: 0; padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid var(--color-border, #2d2f36); }
-                .pr-reviews-view .pr-alert[data-tone="danger"] { border-color: var(--color-danger, #ef4444); background: color-mix(in srgb, var(--color-danger, #ef4444) 10%, transparent); }
-                .pr-reviews-view .pr-alert[data-tone="info"] { border-color: var(--color-accent, #06b6d4); background: color-mix(in srgb, var(--color-accent, #06b6d4) 8%, transparent); }
-                .pr-reviews-view .pr-next { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem;
-                    padding: 0.85rem 1rem; border: 1px solid var(--color-border, #2d2f36); border-left: 3px solid var(--color-accent, #06b6d4);
-                    border-radius: 8px; background: var(--color-bg-surface, #1b1d22); margin-bottom: 0.75rem; }
-                .pr-reviews-view .pr-next[data-tone="warning"] { border-left-color: var(--color-warning, #f59e0b); }
-                .pr-reviews-view .pr-next[data-tone="muted"] { border-left-color: var(--color-border, #2d2f36); }
-                .pr-reviews-view .pr-next-main { display: grid; gap: 0.2rem; min-width: 0; }
-                .pr-reviews-view .pr-next-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-                .pr-reviews-view .pr-filters { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
-                .pr-reviews-view .pr-filters .form-control { flex: 1 1 240px; min-width: 0; }
-                .pr-reviews-view .pr-filters .btn-group { flex-wrap: wrap; max-width: 100%; }
-                .pr-reviews-view .pr-filters .btn { white-space: nowrap; }
-                .pr-reviews-view .pr-filters .btn[aria-pressed="true"] { background: var(--color-bg-elevated, #2a2d35); color: var(--color-text, #e6e6e6); }
-                .pr-reviews-view .pr-card { display: grid; gap: 0.5rem; padding: 1rem 1.1rem; border: 1px solid var(--color-border, #2d2f36);
-                    border-radius: 8px; background: var(--color-bg-surface, #1b1d22); }
-                .pr-reviews-view .pr-card[data-tone="danger"] { border-color: color-mix(in srgb, var(--color-danger, #ef4444) 60%, transparent); }
-                .pr-reviews-view .pr-pending { border-color: color-mix(in srgb, var(--color-warning, #f59e0b) 55%, transparent); }
-                .pr-reviews-view .pr-card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 0.75rem; }
-                .pr-reviews-view .pr-card-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-                .pr-reviews-view .pr-start-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
-                .pr-reviews-view .pr-detail-head { grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; }
-                .pr-reviews-view .pr-detail-title { font-size: 1.35rem; margin: 0.15rem 0 0.4rem; overflow-wrap: anywhere; }
-                .pr-reviews-view .pr-detail-summary { color: var(--color-text-muted, #9aa0a6); margin: 0 0 0.5rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-                .pr-reviews-view .pr-detail-side { display: grid; gap: 0.4rem; align-content: start; justify-items: stretch; min-width: 170px; }
-                .pr-reviews-view .pr-form-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
-                .pr-reviews-view .pr-verdict { width: auto; min-width: 200px; }
-                .pr-reviews-view .pr-form-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
-                .pr-reviews-view .pr-form-actions .pr-muted { margin-right: auto; }
-                .pr-reviews-view .pr-feedback-input { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.85rem; }
-                .pr-reviews-view .pr-feedback { margin: 0.5rem 0 0; padding: 0.85rem; border: 1px solid var(--color-border, #2d2f36); border-radius: 6px;
-                    background: var(--color-bg-base, #121212); color: inherit; font-family: inherit; font-size: 0.875rem;
-                    white-space: pre-wrap; overflow-wrap: anywhere; }
-                .pr-reviews-view .pr-feedback.is-collapsed { max-height: 280px; overflow: hidden; }
-                .pr-reviews-view .pr-review + .pr-review { margin-top: 0.75rem; }
-                @media (max-width: 768px) {
-                    .pr-reviews-view .pr-row, .pr-reviews-view .pr-open-row { grid-template-columns: auto minmax(0, 1fr); }
-                    .pr-reviews-view .pr-row-badges, .pr-reviews-view .pr-row-action { grid-column: 2; }
-                    .pr-reviews-view .pr-detail-head { grid-template-columns: minmax(0, 1fr); }
-                }
-            </style>
-
-            <header class="vb-page-header">
-                <div class="vb-page-heading">
-                    <h1 class="vb-page-title">PR Reviews</h1>
-                    <p class="pr-subtitle" data-pr-repository>Lead-review log for this project's GitHub pull requests</p>
-                </div>
-                <div class="vb-page-actions">
-                    <!-- Review requests before a commit (VB-50 slice D) live on their own page. -->
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-pr-open-inbox
-                        title="Changes other people asked you to review before they commit">
-                        <i class="fa-solid fa-inbox me-1" aria-hidden="true"></i>Requested of you
-                    </button>
-                </div>
-            </header>
-
-            <div class="pr-section" data-pr-list-page>
-                <div data-pr-problem hidden></div>
-                <section data-pr-legacy-conflicts data-pr-needs-repo hidden></section>
-                <section class="pr-section" data-pr-pending-section data-pr-needs-repo hidden></section>
-                <section class="pr-section" data-pr-blocked-section data-pr-needs-repo hidden></section>
-                <section class="pr-section" data-pr-needs-repo hidden>
-                    <div class="pr-section-bar">
-                        <div class="pr-section-heading">
-                            <span class="pr-eyebrow">Live from the GitHub CLI</span>
-                            <h2 class="pr-section-title">Open on GitHub <span class="pr-count" data-pr-open-count>0</span></h2>
-                        </div>
-                        <div class="pr-card-actions align-items-center">
-                            <span class="pr-muted" data-pr-updated role="status" aria-live="polite"></span>
-                            <button type="button" class="btn btn-sm btn-secondary" data-pr-refresh>
-                                <i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh</button>
-                        </div>
-                    </div>
-                    <div data-pr-open-body></div>
-                </section>
-                <section class="pr-section" data-pr-needs-repo hidden>
-                    <div class="pr-section-heading">
-                        <span class="pr-eyebrow">Local review history, newest write first</span>
-                        <h2 class="pr-section-title">All pull requests <span class="pr-count" data-pr-all-count>0</span></h2>
-                    </div>
-                    <div class="pr-filters">
-                        <input type="search" class="form-control form-control-sm" data-pr-query maxlength="200"
-                            placeholder="Filter by number, title, author or overview" aria-label="Filter pull requests">
-                        <div class="btn-group" role="group" aria-label="GitHub state" data-pr-lifecycle-filters></div>
-                        <div class="btn-group" role="group" aria-label="Review state" data-pr-status-filters></div>
-                    </div>
-                    <div data-pr-all-body></div>
-                </section>
-            </div>
-
-            <div class="pr-section" data-pr-detail-page hidden>
-                <div><button type="button" class="btn btn-sm btn-outline-secondary" data-pr-back>
-                    <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> All PRs</button></div>
-                <div class="pr-section" data-pr-detail-body aria-busy="false"></div>
             </div>
         </div>
     </template>
@@ -6039,11 +5871,6 @@
                     <p class="vb-page-description">Changes other people asked you to look at before they commit. Read each one on viberails.ai,
                         with the sessions that produced it. Approve here: a signing window rebuilds the change from your own copy of the
                         repository, shows it, and signs it with your key.</p>
-                </div>
-                <div class="vb-page-actions">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-ri-action="back">
-                        <i class="fa-solid fa-code-pull-request me-1" aria-hidden="true"></i>PR Reviews
-                    </button>
                 </div>
             </header>
             <div class="ri-status" data-ri-status></div>

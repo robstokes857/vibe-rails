@@ -317,7 +317,7 @@ public sealed partial class BoardStore : IBoardStore
         return await ReadColumnAsync(connection, null, project, columnId, cancellationToken);
     }
 
-    public async Task<BoardColumnRecord> CreateColumnAsync(string projectPath, string name, string color, CancellationToken cancellationToken = default, string? boardId = null, bool first = false)
+    public async Task<BoardColumnRecord> CreateColumnAsync(string projectPath, string name, string color, CancellationToken cancellationToken = default, string? boardId = null, bool first = false, bool isDefaultForNewCards = false)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
@@ -332,14 +332,16 @@ public sealed partial class BoardStore : IBoardStore
         var id = NewId("col");
         var now = DateTime.UtcNow;
         await InsertColumnAsync(connection, transaction, id, project, board, name, position, color, now, cancellationToken);
+        if (isDefaultForNewCards)
+            await SetDefaultColumnAsync(connection, transaction, board, id, true, cancellationToken);
         if (first)
             await WriteColumnPositionsAsync(connection, transaction,
                 [id, .. others.Select(column => column.Id)], cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return new BoardColumnRecord(id, project, name, position, color, now, now, board);
+        return new BoardColumnRecord(id, project, name, position, color, now, now, board, isDefaultForNewCards);
     }
 
-    public async Task<BoardColumnRecord?> UpdateColumnAsync(string projectPath, string columnId, string? name, string? color, CancellationToken cancellationToken = default)
+    public async Task<BoardColumnRecord?> UpdateColumnAsync(string projectPath, string columnId, string? name, string? color, CancellationToken cancellationToken = default, bool? isDefaultForNewCards = null)
     {
         var project = NormalizeProjectPath(projectPath);
         await using var connection = await OpenAsync(cancellationToken);
@@ -349,10 +351,14 @@ public sealed partial class BoardStore : IBoardStore
             return null;
         await RequireWritableBoardAsync(connection, transaction, existing.BoardId, cancellationToken);
 
+        if (isDefaultForNewCards is { } selected)
+            await SetDefaultColumnAsync(connection, transaction, existing.BoardId, existing.Id, selected, cancellationToken);
+
         var updated = existing with
         {
             Name = name ?? existing.Name,
             Color = color ?? existing.Color,
+            IsDefaultForNewCards = isDefaultForNewCards ?? existing.IsDefaultForNewCards,
             UpdatedUtc = DateTime.UtcNow
         };
 
@@ -575,7 +581,7 @@ public sealed partial class BoardStore : IBoardStore
             var columns = board is null ? [] : await ReadColumnsAsync(connection, transaction, project, board, cancellationToken);
             if (columns.Count == 0)
                 throw new BoardValidationException("No lane available. Create a lane first.");
-            column = columns.OrderBy(c => c.Position).First();
+            column = columns.FirstOrDefault(c => c.IsDefaultForNewCards) ?? columns[0];
         }
         else
         {
@@ -1383,8 +1389,11 @@ public sealed partial class BoardStore : IBoardStore
 
     // ------------------------------------------------------------------ readers
 
-    private const string ColumnSelectSql =
-        "SELECT c.Id, c.ProjectPath, c.Name, c.Position, c.Color, c.CreatedUTC, c.UpdatedUTC, c.BoardId FROM BoardColumns c";
+    private const string ColumnSelectSql = """
+        SELECT c.Id, c.ProjectPath, c.Name, c.Position, c.Color, c.CreatedUTC, c.UpdatedUTC, c.BoardId,
+               EXISTS(SELECT 1 FROM Boards b WHERE b.Id = c.BoardId AND b.DefaultColumnId = c.Id)
+        FROM BoardColumns c
+        """;
 
     private const string BoardSelectSql =
         "SELECT Id, ProjectPath, Name, Position, CreatedUTC, UpdatedUTC, DisplayPrefix, SyncEnabled FROM Boards";
@@ -1449,7 +1458,8 @@ public sealed partial class BoardStore : IBoardStore
         reader.GetString(4),
         ParseDb(reader.GetString(5)),
         ParseDb(reader.GetString(6)),
-        reader.IsDBNull(7) ? string.Empty : reader.GetString(7));
+        reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
+        reader.GetInt32(8) != 0);
 
     private static async Task<IReadOnlyList<BoardRecord>> ReadBoardsAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, CancellationToken cancellationToken)
     {
@@ -2139,6 +2149,12 @@ public sealed partial class BoardStore : IBoardStore
         SqliteMigrationRunner.Apply(connection, "board-launches", 1, MigrationKind.Additive, ApplyLaunchSchema);
         // board-change-stamp/1 (VIBE-322): one row the Board poll compares instead of refetching.
         SqliteMigrationRunner.Apply(connection, "board-change-stamp", 1, MigrationKind.Additive, ApplyChangeStampMigration);
+        SqliteMigrationRunner.Apply(connection, "board-default-column", 1, MigrationKind.Additive, (db, transaction) =>
+        {
+            if (!SqliteSchema.HasColumn(db, transaction, "Boards", "DefaultColumnId"))
+                SqliteSchema.Execute(db, transaction,
+                    "ALTER TABLE Boards ADD COLUMN DefaultColumnId TEXT NULL REFERENCES BoardColumns(Id) ON DELETE SET NULL;");
+        });
         ReconcileDerivedRows(connection);
     }
 

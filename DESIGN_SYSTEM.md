@@ -779,6 +779,13 @@ the previous process to finish, then continues regardless of its result. Show
 numbered rows with Up, Down and Remove controls; do not offer a continuation-result
 selector. Keep process outcomes and review results visible in run activity.
 
+In **Card runs**, keep the run name, process/result status and actions visible.
+Put the report body in a native **Report** disclosure, collapsed by default;
+omit the disclosure when there is no report. Use a 14px semibold run name,
+13px regular muted status and disclosure label, and 14px regular muted report
+text with 1.6 line height. Separate runs with quiet rules. Preserve expanded
+reports and disclosure focus during activity refreshes; long text wraps in the panel.
+
 The lane settings **Add to this lane** picker shows a decorative icon beside each
 agent, script or check, including the selected value. Reuse the provider artwork
 and filters for agents, the existing code icon for scripts, and the VibeRails
@@ -811,6 +818,13 @@ definition editor's footer alike (never "Retire").
 Use the Menu panel surface, 16px padding and 8px gaps. Rows use the base surface,
 a quiet border and 12px padding. Keep Run visible beside long names, including on
 narrow screens. Place **Manage AI Agents** in a quieter footer after a separator.
+Add **Manage quick actions…** in that footer and in the VS Code Launch view. Both
+open the same dialog: native show/hide switches for this project's saved Agents,
+Quick Launches, Actions and signed library scripts. Changes save immediately and
+apply to both Play menus on this computer. Keep hidden items in the dialog so they
+can be restored; hiding a shortcut never disables its definition or changes Board
+pickers. Explain saving and failures inline, keep the switch's previous value after
+a failed save, and return focus to the opener when the dialog closes.
 The trigger references the popover with `aria-controls` and `aria-haspopup="dialog"`;
 ordinary buttons support Tab, and Escape closes it and returns focus to the trigger.
 Saved Agents and Quick Launches open a native OS terminal for every non-Board launch,

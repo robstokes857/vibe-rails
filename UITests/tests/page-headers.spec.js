@@ -5,7 +5,6 @@ const VIEWS = [
     ['agents', 'Rules'],
     ['code-quality', 'Code quality'],
     ['mcp', 'MCP Explorer'],
-    ['pr-reviews', 'PR Reviews'],
     ['settings', 'Application Settings']
 ];
 
@@ -25,14 +24,7 @@ test.beforeEach(async ({ page }) => {
             '/api/v1/llm-picker/preferences': { items: [] },
             '/api/v1/hooks/status': { inGitRepo: true, isInstalled: true },
             '/api/v1/mcp/tools': [],
-            '/api/v1/settings/pin/status': { isSet: false },
-            '/api/v1/pr-reviews': {
-                repository: 'octo/widgets', repositoryUrl: 'https://github.com/octo/widgets', problem: null, pullRequests: []
-            },
-            '/api/v1/pr-reviews/queue': {
-                repository: 'octo/widgets', next: null, queue: [], skipped: [],
-                counts: { open: 0, eligible: 0, drafts: 0, upToDate: 0 }
-            }
+            '/api/v1/settings/pin/status': { isSet: false }
         };
         return route.fulfill({ json: payloads[path] || {} });
     });
@@ -105,4 +97,16 @@ test('shared headers follow the host theme colors', async ({ page }) => {
         await expect(page.locator('#app-content .vb-page-header'))
             .toHaveCSS('border-bottom-color', 'rgb(100, 110, 120)');
     }
+});
+
+test('Settings no longer exposes or requests PR Reviewer', async ({ page }) => {
+    const requests = [];
+    page.on('request', request => requests.push(new URL(request.url()).pathname));
+    await page.goto('/?view=settings', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'Application Settings' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'PR Reviewer', exact: true })).toHaveCount(0);
+    await expect(page.locator('[data-view="pr-reviews"]')).toHaveCount(0);
+    await page.getByRole('tab', { name: 'AI board manager', exact: true }).click();
+    await expect(page.locator('#settings-panel-ai-board-manager')).toBeVisible();
+    expect(requests.filter(path => path.startsWith('/api/v1/pr-reviews'))).toEqual([]);
 });

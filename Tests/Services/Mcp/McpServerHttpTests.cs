@@ -49,12 +49,6 @@ public class McpServerHttpTests : IAsyncLifetime
         "request_review",
         "add_jira_comment",
         "add_ado_comment",
-        "get_pr_review_queue",
-        "get_pr_review",
-        "start_pr_review",
-        "save_pr_review_draft",
-        "complete_pr_review",
-        "retry_pr_review_publish",
         "list_launch_catalog", "list_launch_projects", "get_launch_definition", "save_launch_preset", "save_launch_action",
         "retire_launch_definition", "list_launch_bindings", "save_launch_binding", "run_launch",
         "get_launch_run", "list_launch_runs", "cancel_launch_run", "retry_launch_run", "resolve_uncertain_launch_run",
@@ -92,11 +86,6 @@ public class McpServerHttpTests : IAsyncLifetime
         builder.Services.AddScoped<BoardWorkflowService>();
         VibeRails.Services.GitPreflight.GitPreflightServiceCollectionExtensions.AddGitSnapshots(builder.Services);
         builder.Services.AddScoped<RulesTool>();
-        builder.Services.AddSingleton(Mock.Of<VibeRails.DB.IPrReviewStore>());
-        builder.Services.AddSingleton(Mock.Of<VibeRails.Services.PrReviews.IGitHubPullRequestClient>());
-        builder.Services.AddSingleton(Mock.Of<VibeRails.Services.PrReviews.IPrReviewRepositoryResolver>());
-        builder.Services.AddScoped<VibeRails.Services.PrReviews.PrReviewService>();
-        builder.Services.AddScoped<PrReviewTool>();
 
         builder.Services
             .AddMcpServer(options =>
@@ -252,6 +241,18 @@ public class McpServerHttpTests : IAsyncLifetime
             Assert.Contains(expected, names);
         }
         Assert.Equal(ExpectedTools.Length + BoardMcpAuthorization.ToolNames.Count, names.Count);
+        var validation = Assert.Single(tools, tool => tool.Name == "validate_vca").Description;
+        Assert.Contains("request_stop_bypass with a reason and intended commit message", validation);
+        Assert.Contains("get_stop_bypass_status", validation);
+        Assert.Contains("only after approval, without changing the staged snapshot", validation);
+        Assert.Contains("Never substitute --no-verify", validation);
+        Assert.Contains("runtime/version mismatch", validation);
+        foreach (var name in new[] { "get_board_agent_status", "get_board_reviews" })
+        {
+            var description = Assert.Single(tools, tool => tool.Name == name).Description;
+            Assert.Contains("about once a minute", description);
+            Assert.DoesNotContain("10 seconds", description);
+        }
     }
 
     [Fact]

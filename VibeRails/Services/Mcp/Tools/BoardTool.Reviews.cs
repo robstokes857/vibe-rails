@@ -44,7 +44,7 @@ public sealed partial class BoardTool
         catch (Exception ex) when (ex is not OperationCanceledException) { return Fail("save review", ex); }
     }
 
-    [McpServerTool, Description("Poll code review status, including queued/failed runs without a session and saved reports. Process success without a report means Report missing, never approved. Poll every 10 seconds while waiting, then read a report with reviewId, evaluate its scope and fix findings you agree with. verify=true compares inputs in this caller's checkout; otherwise freshness is unknown. offset pages history (50 rows) or report text (40000 characters).")]
+    [McpServerTool, Description("Poll code review status, including queued/failed runs without a session and saved reports. Process success without a report means Report missing, never approved. Poll about once a minute while waiting, then read a report with reviewId, evaluate its scope and fix findings you agree with. verify=true compares inputs in this caller's checkout; otherwise freshness is unknown. offset pages history (50 rows) or report text (40000 characters).")]
     public async Task<string> GetBoardReviews(string? card = null, string? reviewId = null, bool verify = false,
         int offset = 0, CancellationToken cancellationToken = default)
     {
@@ -64,7 +64,7 @@ public sealed partial class BoardTool
                     + (r.Error is null ? "" : $" · {r.Error}")))
                     + (read.Latest is {} latest ? $"\nLatest saved report: {latest.Id} · {latest.Result}. Read with reviewId={latest.Id}." : "")
                     + (read.HasMore ? $"\nOlder reports: offset={offset + 50}." : "")
-                    + "\nRead saved reports with reviewId. Poll again in 10 seconds while waiting; evaluate scope and fix findings you agree with.";
+                    + "\nRead saved reports with reviewId. Poll about once a minute while waiting; evaluate scope and fix findings you agree with.";
             }
             var report = await ReviewService.ReportAsync(target.Project, target.CardId!, reviewId, verify,
                 projects.GitWorkingDirectory, cancellationToken);

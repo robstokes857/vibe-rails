@@ -67,9 +67,13 @@ public partial class CommandServiceTests
 
         var prompt = Assert.Single(prepared.Argv!, arg => arg.Contains("Creating a story is optional and at your discretion."));
         Assert.Contains("create_board_card", prompt);
-        Assert.Contains("Reuse a story already tracking this work", prompt);
         Assert.Contains("add_board_comment", prompt);
         Assert.Contains("attach_board_session", prompt);
+        Assert.Contains("Before committing, call validate_vca", prompt);
+        Assert.Contains("request_stop_bypass with a reason and intended commit message", prompt);
+        Assert.Contains("Check get_stop_bypass_status; retry only after approval, without changing the staged snapshot", prompt);
+        Assert.Contains("Never substitute --no-verify", prompt);
+        Assert.Contains("If these tools are missing, report the runtime/version mismatch", prompt);
         Assert.Contains("This message is not a task.", prompt);
         Assert.Contains("tell the user you're ready to help", prompt);
         Assert.Contains("write a request on their behalf", prompt);

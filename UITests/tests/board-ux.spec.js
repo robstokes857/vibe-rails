@@ -2156,6 +2156,88 @@ for (const width of [1440, 390]) {
         await expect(page.locator('.board-card')).toHaveCount(3);
     });
 
+    test(`new cards use the saved default lane even when collapsed at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        const columns = [
+            { id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' },
+            { id: 'col_refine', name: 'Needs refinement', position: 1, color: '#64748b', boardId: 'brd_main' }
+        ];
+        const requests = await openBoard(page, { columns });
+        await page.route('**/api/v1/launch-catalog*', route => route.fulfill({ json: { items: [] } }));
+        await page.route('**/api/v1/board/columns/*/launches', route => route.fulfill({ json: { selections: [], revision: 0 } }));
+        let rejectSave = true;
+        await page.route('**/api/v1/board/columns/*', route => {
+            const id = new URL(route.request().url()).pathname.split('/').pop();
+            const lane = columns.find(column => column.id === id);
+            if (!lane || route.request().method() !== 'PUT') return route.fallback();
+            if (rejectSave) return route.fulfill({ status: 400, json: { error: 'Try saving the lane again.' } });
+            const body = route.request().postDataJSON();
+            if (body.isDefaultForNewCards) columns.forEach(column => { column.isDefaultForNewCards = false; });
+            Object.assign(lane, body);
+            return route.fulfill({ json: lane });
+        });
+        await page.getByRole('button', { name: 'Settings for Needs refinement', exact: true }).click();
+        const editor = page.locator('[data-board-lane-editor]');
+        const checkbox = editor.getByRole('checkbox', { name: 'Newly created cards land here' });
+        await expect(checkbox).not.toBeChecked();
+        await checkbox.focus();
+        await page.keyboard.press('Space');
+        await expect(checkbox).toBeChecked();
+        await page.screenshot({ path: testInfo.outputPath(`default-lane-${width}.png`) });
+        expect(await editor.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        const label = await checkbox.locator('..').boundingBox();
+        expect(label.height).toBeGreaterThanOrEqual(44);
+        await editor.getByRole('button', { name: 'Save lane', exact: true }).click();
+        await expect(page.getByText('Try saving the lane again.', { exact: true })).toBeVisible();
+        await expect(checkbox).toBeChecked();
+        rejectSave = false;
+        await Promise.all([
+            page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/board/columns'),
+            editor.getByRole('button', { name: 'Save lane', exact: true }).click()
+        ]);
+        await expect(editor).toHaveCount(0);
+        await page.goto('/?view=board', { waitUntil: 'domcontentloaded' });
+        await page.getByRole('button', { name: 'Settings for Needs refinement', exact: true }).click();
+        await expect(checkbox).toBeChecked();
+        await page.keyboard.press('Escape');
+        await expect(editor).toHaveCount(0);
+
+        // Existing cards keep their own lane; the default only seeds new drafts.
+        await page.locator('.board-card').click();
+        await expect(page.locator('#board-card-lane')).toHaveValue('col_ready');
+        await page.keyboard.press('Escape');
+        await page.getByRole('button', { name: 'Hide Needs refinement lane', exact: true }).click();
+        await page.locator('[data-board-action="new-card"]').click();
+        await expect(page.locator('#board-card-lane')).toHaveValue('col_refine');
+        await page.locator('#board-card-title').fill('Arrives in the collapsed lane');
+        await page.locator('[data-board-save-card]').click();
+        await expect.poll(() => requests.filter(request => request.path === '/api/v1/board/cards' && request.method === 'POST').length).toBe(1);
+        expect(requests.find(request => request.path === '/api/v1/board/cards' && request.method === 'POST').body.columnId).toBe('col_refine');
+        await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
+        await page.getByRole('button', { name: 'Show Needs refinement lane', exact: true }).click();
+        await expect(page.locator('.board-lane[data-column-id="col_refine"] .board-card')).toContainText('Arrives in the collapsed lane');
+
+        // A second selection replaces the first. Clearing it restores the first-lane fallback.
+        await page.getByRole('button', { name: 'Settings for Ready', exact: true }).click();
+        await checkbox.check();
+        await Promise.all([
+            page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/board/columns'),
+            editor.getByRole('button', { name: 'Save lane', exact: true }).click()
+        ]);
+        await page.getByRole('button', { name: 'Settings for Needs refinement', exact: true }).click();
+        await expect(checkbox).not.toBeChecked();
+        await page.keyboard.press('Escape');
+        await page.getByRole('button', { name: 'Settings for Ready', exact: true }).click();
+        await expect(checkbox).toBeChecked();
+        await checkbox.uncheck();
+        await Promise.all([
+            page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/board/columns'),
+            editor.getByRole('button', { name: 'Save lane', exact: true }).click()
+        ]);
+        await page.locator('[data-board-action="new-card"]').click();
+        await expect(page.locator('#board-card-lane')).toHaveValue('col_ready');
+    });
+
     test(`lane colours save custom selections and stay in sync with presets at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
         const columns = [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }];
@@ -2190,15 +2272,17 @@ for (const width of [1440, 390]) {
         await expect(selectedPresets).toHaveCount(1);
         await picker.fill('#cf6c48');
         await editor.getByLabel('Name', { exact: true }).fill('Custom lane');
+        await editor.getByRole('checkbox', { name: 'Newly created cards land here' }).check();
         await page.screenshot({ path: testInfo.outputPath(`lane-colour-${width}.png`) });
         expect(await editor.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         await editor.getByRole('button', { name: 'Create lane', exact: true }).click();
         await expect(editor).toHaveCount(0);
-        expect(writes[0]).toEqual({ name: 'Custom lane', color: '#cf6c48', boardId: 'brd_main' });
+        expect(writes[0]).toEqual({ name: 'Custom lane', color: '#cf6c48', boardId: 'brd_main', isDefaultForNewCards: true });
 
         const lane = page.locator('.board-lane[data-column-id="col_custom"]');
         await expect(lane).toHaveCSS('--lane-color', '#cf6c48');
         await page.getByRole('button', { name: 'Settings for Custom lane', exact: true }).click();
+        await expect(editor.getByRole('checkbox', { name: 'Newly created cards land here' })).toBeChecked();
         await expect(picker).toHaveValue('#cf6c48');
         await expect(selectedPresets).toHaveCount(0);
         await picker.fill('#000000');
@@ -4538,6 +4622,68 @@ test('unified lane progress distinguishes process and review, retries and skips 
     await panel.getByRole('button',{name:'Retry',exact:true}).click();await expect.poll(()=>state.retries).toBe(1);
     await expect(panel).toContainText('Process: queued');await panel.getByRole('button',{name:'Stop and skip',exact:true}).click();
     await expect.poll(()=>state.skips).toBe(1);await expect(panel.getByRole('button',{name:'Stop and skip'})).toHaveCount(0);
+});
+
+for (const width of [320, 375, 768, 1024]) test(`lane reports collapse independently and survive activity refresh at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.clock.install();
+    await openBoard(page);
+    const state = await installLaunchFixture(page);
+    const report = 'Review completed. Please rerun against the latest changes.\n' +
+        'A long reference: ' + 'abcdef0123456789'.repeat(12) + '\n<img src=x onerror="window.__reportInjected=true">';
+    state.activity = [
+        { cardLabel: 'VIBE-1', definitionName: 'Code review', entry: { id: 'entry_1', cardId: 'card_test', processStatus: 'succeeded', verdict: 'failed', summary: report }, run: { id: 'run_1', status: 'succeeded', sessionId: 'session_1' } },
+        { cardLabel: 'VIBE-2', definitionName: 'Code review', entry: { id: 'entry_2', processStatus: 'succeeded', verdict: 'passed', summary: 'No findings in the reviewed changes.' }, run: { id: 'run_2', status: 'succeeded' } },
+        { cardLabel: 'VIBE-3', definitionName: 'Build', entry: { id: 'entry_3', processStatus: 'failed', skipRequested: true }, run: { id: 'run_3', status: 'failed', error: 'The build could not start.' } },
+        { cardLabel: 'VIBE-4', definitionName: 'Check', entry: { id: 'entry_4', processStatus: 'running' }, run: { id: 'run_4', status: 'running' } }
+    ];
+    const trigger = page.getByRole('button', { name: 'Agents and Actions on entry to Ready', exact: true });
+    await trigger.click();
+    const panel = page.locator('.board-lane-agents-panel');
+    const rows = panel.locator('.board-lane-run');
+    const firstReport = rows.nth(0).locator('details');
+    const firstToggle = firstReport.locator('summary');
+    await expect(rows).toHaveCount(4);
+    await expect(panel.locator('[data-lane-report]')).toHaveCount(3);
+    await expect(panel.locator('[data-lane-report][open]')).toHaveCount(0);
+    await expect(firstReport.locator('p')).toBeHidden();
+    await expect(rows.nth(0).locator('.board-lane-run-status')).toBeVisible();
+    for (const name of ['Open session', 'Stop and skip', 'Retry'])
+        await expect(rows.nth(0).getByRole('button', { name, exact: true })).toBeVisible();
+    await expect(rows.nth(0).locator('.board-lane-run-title')).toHaveCSS('font-weight', '600');
+    await expect(rows.nth(0).locator('.board-lane-run-status')).toHaveCSS('font-weight', '400');
+    await panel.locator('[data-lane-running]').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath('lane-reports-collapsed.png') });
+    await firstToggle.focus();
+    await firstToggle.press('Enter');
+    await expect(firstReport.locator('p')).toBeVisible();
+    await expect(firstReport.locator('p')).toHaveText(report);
+    await expect(firstReport.locator('p')).toHaveCSS('font-weight', '400');
+    await expect(firstReport.locator('p')).toHaveCSS('font-size', '14px');
+    await expect(firstReport.locator('img')).toHaveCount(0);
+    await expect(rows.nth(1).locator('details')).not.toHaveAttribute('open');
+    expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await firstReport.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath('lane-reports-expanded.png') });
+
+    state.activity[0].entry.summary = report + '\nAdditional review context.';
+    state.activity[3].run.status = 'succeeded';
+    await page.clock.fastForward(10000);
+    await expect(firstReport.locator('p')).toContainText('Additional review context.');
+    await expect(firstReport).toHaveAttribute('open');
+    await expect(firstToggle).toBeFocused();
+    await expect(rows.nth(1).locator('details')).not.toHaveAttribute('open');
+    await firstToggle.press('Space');
+    await expect(firstReport.locator('p')).toBeHidden();
+    await rows.nth(2).locator('summary').click();
+    await expect(rows.nth(2).locator('details p')).toHaveText('The build could not start.');
+    await expect(rows.nth(2).locator('details p')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await expect(panel.locator('[data-lane-report]')).toHaveCount(3);
+    await expect(panel.locator('[data-lane-report][open]')).toHaveCount(0);
 });
 
 test('unified manual card launch preserves title and comment drafts and prevents duplicate starts',async({page})=>{

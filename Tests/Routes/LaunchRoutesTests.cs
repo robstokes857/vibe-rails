@@ -113,6 +113,10 @@ public class LaunchRoutesTests
         builder.Services.AddSingleton<IBoardStore>(board);
         builder.Services.AddSingleton(Mock.Of<IAutomationScriptService>());
         var metadata = new Mock<VibeRails.DB.IRepository>();
+        var quickActionCache = new Dictionary<string, string>();
+        metadata.Setup(x => x.GetAllGlobalCacheAsync(It.IsAny<CancellationToken>())).ReturnsAsync(quickActionCache);
+        metadata.Setup(x => x.SetGlobalCacheValueAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback((string key, string value, CancellationToken _) => quickActionCache[key] = value).Returns(Task.CompletedTask);
         metadata.Setup(x => x.GetKnownProjectPathsAsync(It.IsAny<CancellationToken>())).ReturnsAsync([root]);
         metadata.Setup(x => x.GetProjectDisplayNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("Project");
         builder.Services.AddSingleton(metadata.Object);
@@ -132,7 +136,7 @@ public class LaunchRoutesTests
         var ct = TestContext.Current.CancellationToken;
         try
         {
-            foreach (var path in new[] { "/launch-catalog", "/launch-projects", "/presets", "/actions", "/trigger-bindings", "/runs", "/presets/missing/attachments",
+            foreach (var path in new[] { "/launch-catalog", "/quick-actions/preferences", "/launch-projects", "/presets", "/actions", "/trigger-bindings", "/runs", "/presets/missing/attachments",
                 "/runs/missing/attachments/missing/content", "/board/cards/missing/launches/runs" })
             {
                 foreach (var credentials in new[] { 0, 1, 2 })
@@ -147,6 +151,15 @@ public class LaunchRoutesTests
             using var created = await SendAsync(HttpMethod.Post, url + "/api/v1/presets", new SavePresetRequest("Agent", "", "codex", InitialPrompt: "Work"), ct);
             Assert.Equal(HttpStatusCode.OK, created.StatusCode);
             var saved = (await created.Content.ReadFromJsonAsync<SavedPreset>(ct))!;
+            using var hidden = await SendAsync(HttpMethod.Put, url + "/api/v1/quick-actions/preferences",
+                new QuickActionPreferenceRequest("preset:" + saved.Preset.Id, true), ct);
+            Assert.Equal(HttpStatusCode.NoContent, hidden.StatusCode);
+            using var preferences = await SendAsync(HttpMethod.Get, url + "/api/v1/quick-actions/preferences", null, ct);
+            Assert.Equal(["preset:" + saved.Preset.Id], (await preferences.Content.ReadFromJsonAsync<QuickActionPreferencesResponse>(ct))!.HiddenKeys);
+            using var invalidPreference = await SendAsync(HttpMethod.Put, url + "/api/v1/quick-actions/preferences",
+                new QuickActionPreferenceRequest("bad-key", true), ct);
+            Assert.Equal(HttpStatusCode.BadRequest, invalidPreference.StatusCode);
+            // Hiding a shortcut must leave the definition runnable through the normal API below.
             using var conflict = await SendAsync(HttpMethod.Put, url + "/api/v1/presets/" + saved.Preset.Id, new SavePresetRequest("Edit", "", "codex", ExpectedRevision: 42), ct);
             Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
             Assert.Equal(1, (await conflict.Content.ReadFromJsonAsync<LaunchError>(ct))!.CurrentRevision);

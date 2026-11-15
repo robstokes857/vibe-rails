@@ -1,32 +1,18 @@
 using System.Text.RegularExpressions;
 
-namespace VibeRails.Services.PrReviews;
+namespace VibeRails.Services.Git;
 
 /// <summary>
-/// A github.com repository from an explicit watch or a project's <c>origin</c> remote. Owner and name are
-/// validated against GitHub's own character rules because they are passed to <c>gh</c> and
-/// rendered into links; nothing else about the remote URL (credentials included) is kept.
+/// A github.com repository parsed from a project's <c>origin</c> remote. Owner and name are
+/// validated against GitHub's own character rules because they are passed to <c>gh</c>;
+/// nothing else about the remote URL (credentials included) is kept.
 /// </summary>
 public sealed partial record GitHubRepository(string Owner, string Name)
 {
     private static readonly string[] GitHubHosts = ["github.com", "www.github.com", "ssh.github.com"];
 
-    /// <summary><c>owner/name</c>, the key PR review records are stored under.</summary>
+    /// <summary><c>owner/name</c>, the repository identifier used by GitHub.</summary>
     public string FullName => $"{Owner}/{Name}";
-
-    public string Url => $"https://github.com/{FullName}";
-
-    public string PullRequestUrl(int number) => $"{Url}/pull/{number}";
-
-    /// <summary>Accepts only an owner/name identifier, with no URL, credentials or extra segments.</summary>
-    public static bool TryParseName(string? value, out GitHubRepository repository)
-    {
-        repository = null!;
-        var parts = value?.Trim().Split('/');
-        if (parts is not { Length: 2 } || !IsValidOwner(parts[0]) || !IsValidName(parts[1])) return false;
-        repository = new GitHubRepository(parts[0].ToLowerInvariant(), parts[1].ToLowerInvariant());
-        return true;
-    }
 
     /// <summary>
     /// Accepts the remote forms git and GitHub produce: <c>https://github.com/o/r(.git)</c> (with or

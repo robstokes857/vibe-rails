@@ -35,7 +35,7 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
   Agents and Quick Launches go to the dashboard (`launchDefinition`) for its template prompt.
   Library scripts are handed to the dashboard too (`runScript` with the registration ID), because
   it owns the private script terminal and any run PIN prompt; the panel is revealed for that.
-- `VibeRails: Refresh Launcher` (`viberails.launcher.refresh`), `VibeRails: Customize Launcher List…`
+- `VibeRails: Refresh Launcher` (`viberails.launcher.refresh`), `VibeRails: Manage Quick Actions…`
   (`viberails.launcher.customize`) and `VibeRails: Manage Automations` (`viberails.launcher.manage`) —
   Launch view title actions. Customize and Manage open the dashboard when needed and hand it the
   flyout footer's actions (`openLauncherCustomize`, `manageAutomations`).
@@ -56,7 +56,15 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 
 ## Architecture
 
-The Launch view reads two sources and must keep reading both (VIBE-311). Saved definitions
+The Launch view reads the launch catalog, script library and shared Quick actions preferences.
+`GET /api/v1/quick-actions/preferences` hides matching stable keys (`preset:<id>`,
+`action:<id>`, `script:<registration-id>`) without disabling definitions. The title action
+**Manage Quick Actions…** opens the dashboard's native visibility dialog via
+`openLauncherCustomize`; every saved switch sends `launcherChanged` to refresh the tree.
+Preferences also apply to the dashboard Play menu. Hidden items can always be restored in
+that dialog, even when the tree is empty.
+
+The Launch view keeps both catalog sources (VIBE-311). Saved definitions
 come from `GET /api/v1/launch-catalog`. Scripts added with **Add to VibeRails Scripts…** live in
 the separate signed script library, `GET /api/v1/python-scripts`; a view that reads only the
 catalog shows none of them. Only signed scripts are listed, as in the dashboard's Quick

@@ -73,7 +73,6 @@ viberails.ai. Reviewers can inspect the changes and session context, leave comme
 or reject. Signed approvals apply to the exact staged tree; a repository's configured approval
 rules determine when they are required. The VS Code sidebar includes **Reviews requested of you**.
 
-The **Reviews** page also tracks GitHub pull request reviews across configured repositories.
 **Send to…** summarizes a recorded session for another supported CLI or saved setup, giving a
 second agent context for the next task or review.
 
@@ -136,7 +135,7 @@ lines, build noise, and passing test output. It preserves user prompts and model
 marked trims let the agent request narrower output when needed. Savings depend on the workload
 and appear in the terminal's **tokens saved** meter.
 
-The built-in **MCP server** connects supported agents to Board work, handoffs, review tracking,
+The built-in **MCP server** connects supported agents to Board work, handoffs, pre-commit review requests,
 history search, rule validation, and TokenSaver controls. Use **MCP Explorer** to inspect tool
 descriptions and input schemas or call tools directly. This makes VibeRails workflows available
 to agents as well as to people using the dashboard.

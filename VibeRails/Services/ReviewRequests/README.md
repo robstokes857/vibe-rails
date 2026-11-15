@@ -142,7 +142,7 @@ the design decisions for the rest.
   pending. Landed decisions publish `review_request_updated` (id, status, card key, sent) so the
   card UI (slice E) can refresh.
 - **Reviewer desktop (slice D).** "Reviews requested of you" (view `review-inbox`, reached from the
-  PR Reviews header, and the VS Code view of the same name) lists the requests viberails.ai holds for
+  account menu's **Review requests** action, and the VS Code view of the same name) lists the requests viberails.ai holds for
   the account's verified email. `ReviewInboxService` fetches them with the account key from
   `GET https://viberails.ai/api/v1/review-requests/inbox` on the Board sync cadence
   (`ReviewInboxState`, `.review-inbox.json` beside state.db: 15 minutes while a listed request is

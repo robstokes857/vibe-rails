@@ -227,7 +227,8 @@ public sealed partial class BoardService(
         var name = NormalizeColumnName(request.Name) ?? "New lane";
         var color = NormalizeColor(request.Color) ?? "#64748b";
         await EnsureDefaultBoardAsync(projectPath, cancellationToken);
-        var column = await store.CreateColumnAsync(projectPath, name, color, cancellationToken, NormalizeBoardId(request.BoardId));
+        var column = await store.CreateColumnAsync(projectPath, name, color, cancellationToken, NormalizeBoardId(request.BoardId),
+            isDefaultForNewCards: request.IsDefaultForNewCards);
         return ToDto(column);
     }
 
@@ -239,7 +240,7 @@ public sealed partial class BoardService(
         var color = request.Color is null ? null : NormalizeColor(request.Color);
         if (request.Color is not null && color is null)
             throw new BoardValidationException("Lane color must be a hex color like #3b82f6.");
-        var column = await store.UpdateColumnAsync(projectPath, columnId, name, color, cancellationToken);
+        var column = await store.UpdateColumnAsync(projectPath, columnId, name, color, cancellationToken, request.IsDefaultForNewCards);
         return column is null ? null : ToDto(column);
     }
 
@@ -864,7 +865,7 @@ public sealed partial class BoardService(
     }
 
     internal static BoardColumnResponse ToDto(BoardColumnRecord column) =>
-        new(column.Id, column.Name, column.Position, column.Color, column.BoardId);
+        new(column.Id, column.Name, column.Position, column.Color, column.BoardId, column.IsDefaultForNewCards);
 
     internal static BoardSummaryResponse ToDto(BoardRecord board, IReadOnlyList<BoardColumnRecord> columns, IReadOnlyDictionary<string, int> counts) =>
         new(board.Id, board.Name, board.Position, board.CreatedUtc,

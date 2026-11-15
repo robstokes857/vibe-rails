@@ -314,10 +314,10 @@ namespace VibeRails.DTOs
     public record UpdateBoardLaneAutomationRequest(long? JobId = null, int? ExpectedRevision = null, IReadOnlyList<long>? JobIds = null);
     public record DeleteBoardResponse(bool Ok, int DeletedColumns, int DeletedCards);
 
-    public record BoardColumnResponse(string Id, string Name, int Position, string Color, string BoardId = "");
+    public record BoardColumnResponse(string Id, string Name, int Position, string Color, string BoardId = "", bool IsDefaultForNewCards = false);
     public record BoardColumnListResponse(List<BoardColumnResponse> Columns);
-    public record CreateBoardColumnRequest(string? Name = null, string? Color = null, string? BoardId = null);
-    public record UpdateBoardColumnRequest(string? Name = null, string? Color = null);
+    public record CreateBoardColumnRequest(string? Name = null, string? Color = null, string? BoardId = null, bool IsDefaultForNewCards = false);
+    public record UpdateBoardColumnRequest(string? Name = null, string? Color = null, bool? IsDefaultForNewCards = null);
     public record ReorderBoardColumnsRequest(List<string>? OrderedIds = null, string? BoardId = null);
     public record DeleteBoardColumnResponse(bool Ok, string MovedToColumnId, int MovedCards);
 
@@ -2281,18 +2281,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(DeviceLinkToken))]
     [JsonSerializable(typeof(UserScriptLibrary))]
     [JsonSerializable(typeof(PythonScriptSettingsRequest))]
-    // PR reviews (PrReviewRecords.cs); the store's records are the wire shape for PRs and reviews.
-    [JsonSerializable(typeof(PrReviewRequest))]
-    [JsonSerializable(typeof(VibeRails.DB.PrReviewerSettings))]
-    [JsonSerializable(typeof(VibeRails.DB.PrReviewDelivery))]
-    [JsonSerializable(typeof(PrReviewResolveLegacyRequest))]
-    [JsonSerializable(typeof(PrReviewListResponse))]
-    [JsonSerializable(typeof(PrReviewDetailResponse))]
-    [JsonSerializable(typeof(PrReviewWriteResponse))]
-    [JsonSerializable(typeof(PrReviewSyncResponse))]
-    [JsonSerializable(typeof(PrReviewDeleteResponse))]
-    [JsonSerializable(typeof(PrReviewQueueResponse))]
-    [JsonSerializable(typeof(VibeRails.DB.PrReview))]
 [JsonSerializable(typeof(SavePresetRequest))]
 [JsonSerializable(typeof(SaveActionRequest))]
 [JsonSerializable(typeof(SaveBindingRequest))]
@@ -2301,6 +2289,8 @@ namespace VibeRails.DTOs
 [JsonSerializable(typeof(ResolveUncertainLaunchRequest))]
 [JsonSerializable(typeof(LaunchError))]
 [JsonSerializable(typeof(LaunchCatalog))]
+[JsonSerializable(typeof(QuickActionPreferencesResponse))]
+[JsonSerializable(typeof(QuickActionPreferenceRequest))]
 [JsonSerializable(typeof(IReadOnlyList<LaunchProject>))]
 [JsonSerializable(typeof(IReadOnlyList<LaunchLaneEntry>))]
 [JsonSerializable(typeof(SavedPreset))]

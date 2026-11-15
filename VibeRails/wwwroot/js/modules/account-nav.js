@@ -72,6 +72,9 @@ export class AccountNavMenu {
                 } else {
                     this.app.navigate('settings', { tab: 'general' }, { resetStack: true });
                 }
+            } else if (name === 'review-inbox') {
+                this.close();
+                this.app.navigate('review-inbox', {}, { resetStack: true });
             } else if (name === 'sign-in' || name === 'switch') {
                 // The sign-in modal records the focused element; the chip gets it back on close.
                 this.close({ restoreFocus: true });

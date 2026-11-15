@@ -74,6 +74,7 @@ export const HEALTH_PATH = '/health';
 export const SHUTDOWN_PATH = '/api/v1/shutdown';
 /** Shared global definitions and project-scoped execution. */
 export const LAUNCH_CATALOG_PATH = '/api/v1/launch-catalog';
+export const QUICK_ACTION_PREFERENCES_PATH = '/api/v1/quick-actions/preferences';
 export const LAUNCH_RUNS_PATH = '/api/v1/runs';
 /** The signed script library's list; the Launch view shows its signed entries under Scripts. */
 export const SCRIPT_LIBRARY_PATH = '/api/v1/python-scripts';

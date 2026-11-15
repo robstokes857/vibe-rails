@@ -21,6 +21,14 @@ Known roots come from saved project/session/sandbox metadata, never a repository
 The AI Agents management view can still find definitions scoped elsewhere. Existing
 bindings and admitted runs remain stored; older binaries do not enforce the new scope.
 
+The dashboard Play menu and VS Code Launch tree share shortcut visibility through
+`GET/PUT /api/v1/quick-actions/preferences`. `QuickActionPreferences` stores one
+GlobalCache row per stable definition/script key in `state.db`; independent toggles
+do not overwrite each other across projects or backend instances. The native
+**Manage quick actions** dialog saves each switch immediately and notifies the
+extension to refresh. Visibility never changes launch eligibility, definition state,
+Board assignment or the terminal picker's separate preferences.
+
 ## Corporate gateways for Codex and Claude
 
 `LlmProxySettingsService` resolves each destination from the saved Enterprise Network Proxy,
@@ -163,6 +171,11 @@ independent and defaults off in new and older settings files. Nullable API updat
 each saved choice when an older client omits its field.
 For managed LLM launches with no nonblank initial message or continuation summary, `CommandService`
 reads the shared settings file and uses optional Board tracking guidance as the default prompt.
+That prompt also explains pre-commit `validate_vca` and the signed STOP-exception workflow:
+request human approval with `request_stop_bypass`, check `get_stop_bypass_status`, then retry the
+unchanged staged snapshot only after approval. It forbids substituting `--no-verify` and asks
+the agent to report missing tools as a runtime/version mismatch. The initial response remains
+ready-to-help only, without starting work or calling tools.
 User context is one system of four levels (VIBE-229), broadest first: **App context** (every LLM
 launch, any project or none), **Board context** (launches for one board), **Card context** (agents
 opened from any card on the board) and **Card type context** (a type's default, replace or append
@@ -183,7 +196,7 @@ existing project board. The ready-only tracking guidance remains a fallback for 
 task. The card context estimate, launch samples and `get_board_card` render the same block as the
 launch. `get_board_card` picks the Nudge switch from the calling session's recorded environment
 (`Sessions.EnvironmentName`), because a session attached through MCP has no link selection; other
-readers see what the card's saved selection would get. Existing task/summary precedence and provider argv conventions are preserved. The guidance asks agents to use their discretion, reuse an existing story and
+readers see what the card's saved selection would get. Existing task/summary precedence and provider argv conventions are preserved. The guidance asks agents to use their discretion and
 record progress/results and session history when useful. A guidance-only launch replies only that
 the agent is ready to help, without tools, work, or an invented request, then waits for a user task.
 The prompt names that exact reply because a bare "wait" left agents to fill the forced first turn;
@@ -641,39 +654,14 @@ the unused key on the site. No new local listener, callback, authentication exce
 database, daemon or OS registration is required. The hosted implementation must be deployed
 before clients can use sign-in; older sites leave the manual API key input usable.
 
-### PR review tracker
+### Retired PR Reviewer
 
-The **Reviews** page (`pr-reviews` view) and six MCP tools keep a lead-review log for the
-configured GitHub repositories, falling back to the current project's `origin` when the watch
-list is empty. Settings > PR Reviewer edits the machine-wide watch list one repository at a
-time with immediate-save Add/Remove actions in `pr_reviews.db`
-(`PrReviewerRepositories`, `pr-review-repositories/1`, additive); no checkout switch is required.
-List, queue and lifecycle sync aggregate watches; each PR/pass/queue entry identifies its
-repository, and single-PR REST/MCP actions require repository scope with multiple targets.
-Identifiers are validated and deduplicated ignoring case; removing watches retains history. Records live in `pr_reviews.db`
-(`pr-reviews/1`) keyed by `owner/name` and PR number. `PrReviewService` owns the rules (derived
-status, server-owned timestamps, idempotent start, draft checkpoints), `PrReviewQueue` picks the
-next PR by rank then age, and `GitHubPullRequestClient` reads open PRs, lifecycle states and a
-numbered PR's current head through the user's own `gh`, pinned to github.com. Settings > PR
-Reviewer enables new queue/start work and outbound publishing together (off by default, shared
-across projects). Completion atomically captures an immutable delivery snapshot in
-`PrReviewDeliveries` (`pr-review-delivery/1`); blockers publish real REQUEST_CHANGES reviews,
-other feedback COMMENT, using the authenticated user's identity and reviewed full SHA. Delivery
-states/receipts stay separate from local results. SQLite reserves dispatch across processes;
-unknown POSTs only reconcile and never resend. Turning off stops new work/reservations while
-existing local work and reserved posts may finish. Detail-page starts capture the current head; local form drafts survive other detail
-actions, with inputs locked until a save and re-read finish. Routes are root-only under
-`/api/v1/pr-reviews`. Contract: [PR Reviews guide](../VibeRails/Services/PrReviews/AGENTS.md);
-security notes: [API_SEC.md](../API_SEC.md#github-pull-requests-and-review-publishing-pr-reviews).
-
-All hosts/configurations use the same dedicated file through `IPrReviewStore`. Automatic
-legacy adoption reads `state.db` without changing it and atomically records per-PR fingerprints
-and stable review-id mappings. Later older-version writes adopt when the target PR has not
-diverged; conflicting authored edits archive both copies and offer inspection/resolution in
-Reviews without blocking other operations. Lifecycle refreshes do not count as authored edits.
-Resolution uses optimistic content tokens (409 on stale choices). Unchanged legacy
-rows cannot overwrite local edits or resurrect deletions. See the guide for this compatibility
-boundary and the independent generation-1 schema.
+The GitHub PR Reviewer, its settings, queue, publishing, REST routes and MCP tools have
+been removed. Existing `pr_reviews.db` and legacy PR tables in `state.db` are retained
+without reads, writes, adoption or cleanup. `docs/schema/pr_reviews.sql` records the
+retired schema for compatibility testing; current initialization does not create it.
+Board review workflows and pre-commit review requests remain supported. The shared
+`Services/Git/GitHubRepository.cs` parser still serves Board code-link landing checks.
 
 ### Review requests before a commit (VB-50)
 
@@ -2042,6 +2030,10 @@ for `complete_board_agent`, `get_board_agent_status`, optional Automation descri
 running-agent indicators, and root-owned cleanup of finished Automation terminals. Final agent
 reports live behind `IBoardStore` in `board.db`; process/run outcomes and recordings stay in
 `state.db`. Completion reports never bypass remaining workflow actions or recording finalization.
+Ordinary card launches omit blanket polling, severity and completion boilerplate; reviewer,
+delegated-worker and Automation roles retain their specific report and completion instructions.
+The status/review tools and card manager prompt recommend polling about once a minute while
+waiting. The board manager retains its `await_board_events` long poll.
 
 ## Shared session replay (2026-09-30)
 

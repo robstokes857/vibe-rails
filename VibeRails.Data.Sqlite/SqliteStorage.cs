@@ -14,7 +14,6 @@ public sealed record SqliteStoragePaths(string StatePath, string? VectorPath = n
 {
     internal string ProxyDatabasePath => ProxyPath ?? Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "proxy_exchanges.db");
     public string BoardDatabasePath => Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "board.db");
-    public string PrReviewDatabasePath => Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "pr_reviews.db");
     public string LaunchDatabasePath => Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "launches.db");
     public string SearchDatabasePath => Path.Combine(Path.GetDirectoryName(StatePath) ?? ".", "search.db");
 }
@@ -69,7 +68,6 @@ public static class SqliteStorage
         services.TryAddSingleton<ITokenSavingsStore>(sp => new TokenSavingsStore(StateConnectionString(sp)));
         services.TryAddSingleton<ITokenSavingsPublishStore>(sp => new TokenSavingsPublishStore(StateConnectionString(sp)));
         services.TryAddSingleton<ICodeAnalyzerIgnoreStore>(sp => new BoardCodeAnalyzerIgnoreStore(sp.GetRequiredService<IBoardStore>()));
-        services.TryAddSingleton<IPrReviewStore>(sp => CreatePrReviewStore(sp.GetRequiredService<SqliteStoragePaths>().StatePath));
         services.TryAddSingleton<ILlmExchangeLogStore>(sp => new LlmExchangeLogStore(ConnectionString(
             sp.GetRequiredService<SqliteStoragePaths>().ProxyDatabasePath)));
         services.TryAddSingleton<IDatabaseSnapshotStore, SqliteDatabaseSnapshotStore>();
@@ -87,22 +85,6 @@ public static class SqliteStorage
         services.TryAddSingleton<IBoardStore>(sp => CreateBoardStore(statePathFactory(sp)));
         return services;
     }
-
-    /// <summary>
-    /// PR review records alone, for hosts that do not register the full state storage (the
-    /// <c>vb mcp</c> stdio host). The store owns its schema, so no Repository migration pass runs.
-    /// </summary>
-    public static IServiceCollection AddSqlitePrReviewStorage(this IServiceCollection services,
-        Func<IServiceProvider, string> statePathFactory)
-    {
-        services.TryAddSingleton<IPrReviewStore>(sp => CreatePrReviewStore(statePathFactory(sp)));
-        return services;
-    }
-
-    /// <summary>Dedicated PR history, with automatic read-only adoption from the legacy state file.</summary>
-    public static IPrReviewStore CreatePrReviewStore(string stateDatabasePath) =>
-        new PrReviewStore(ConnectionString(new SqliteStoragePaths(stateDatabasePath).PrReviewDatabasePath),
-            legacyConnectionString: ConnectionString(stateDatabasePath));
 
     /// <summary>Fresh global launch definitions, in one normal path for every configuration.</summary>
     public static VibeRails.Launches.ILaunchStore CreateLaunchStore(string stateDatabasePath) =>
@@ -158,8 +140,6 @@ public static class SqliteStorage
             CodeAnalyzerIgnoreStore.EnsureSchema(connection);
             CompressionCapturesSchema.EnsureSchema(connection);
         }
-        using (var connection = SqliteConnectionFactory.Open(ConnectionString(paths.PrReviewDatabasePath)))
-            PrReviewStore.EnsureSchema(connection);
         using (var connection = SqliteConnectionFactory.Open(ConnectionString(paths.ProxyDatabasePath)))
             LlmExchangeLogStore.EnsureSchema(connection);
 

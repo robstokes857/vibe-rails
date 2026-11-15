@@ -67,9 +67,9 @@ Board state lives in `~/.vibe_rails/board.db` in all configurations, including D
 component split, not a development database. Legacy Board tables in `state.db` remain untouched;
 the current application does not read, write, migrate or synchronize them.
 
-PR Reviews lives in `~/.vibe_rails/pr_reviews.db` in all configurations, behind `IPrReviewStore`.
-Automatic adoption reads legacy PR history in `state.db` without changing its schema or data.
-See the [PR Reviews guide](VibeRails/Services/PrReviews/AGENTS.md) for older-version conflicts.
+PR Reviewer is retired. Existing `~/.vibe_rails/pr_reviews.db` and legacy PR-review tables
+in `state.db` remain untouched: no reads, writes, adoption or cleanup. Board code reviews
+and pre-commit review requests are separate, supported features.
 
 **Removing a feature does not authorize deleting its stored data, tables, or columns.** Stop
 reading and writing the retired fields/tables in the current code and leave them in place.
@@ -124,7 +124,6 @@ file; it is reference material, not instructions.
 | Storage, schema, migrations | [SQLite instructions](VibeRails.Data.Sqlite/AGENTS.md), [database reference](VibeRails.Data.Sqlite/DB/AGENTS.md), [Board store](VibeRails.Data.Sqlite/Board/AGENTS.md) |
 | VCA rules and git hooks | [VCA guide](VibeRails/Services/VCA/AGENTS.md), [git hook installation](docs/git-hooks.md) |
 | Python scripts | [Python scripts guide](VibeRails/Services/PythonScripts/AGENTS.md) |
-| PR review tracker (Reviews page, `*_pr_review*` MCP tools) | [PR Reviews guide](VibeRails/Services/PrReviews/AGENTS.md) |
 | Review requests before a commit (VB-50: bundle capture, approvals ledger, commit-hook application) | [Review requests contract](VibeRails/Services/ReviewRequests/README.md) |
 | Frontend modules | [wwwroot guide](VibeRails/wwwroot/AGENTS.md), [code report viewer contract](VibeRails/wwwroot/js/modules/code-report/README.md) |
 | Token saver and the local LLM proxy | [TokenSaver README](TokenSaver/README.md) |

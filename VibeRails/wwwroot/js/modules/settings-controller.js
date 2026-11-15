@@ -2,7 +2,6 @@ import { confirmDialog } from './utils.js';
 import { SettingsKeysPanel } from './settings-keys.js';
 import { SetupPanel, refreshSetupStatus } from './setup-panel.js';
 import { SetupInstallWindow } from './setup-install-window.js';
-import { PrReviewerSettingsPanel } from './settings-pr-reviewer.js';
 import { AiBoardManagerSettingsPanel } from './settings-ai-board-manager.js';
 import { BoardApi } from './board-api.js';
 import { contextEditorSection, mountContextEditor } from './board-settings.js';
@@ -327,8 +326,6 @@ export class SettingsController {
     unload() {
         this._disposeContextEditor?.();
         this._disposeContextEditor = null;
-        this._prReviewerPanel?.unload();
-        this._prReviewerPanel = null;
         this._aiBoardManagerPanel?.unload();
         this._aiBoardManagerPanel = null;
         this._keysPanel?.unload();
@@ -707,13 +704,6 @@ export class SettingsController {
                     BoardApi.attach(this.app);
                     container.innerHTML = contextEditorSection({ board: false });
                     this._disposeContextEditor = mountContextEditor(this.app, container.querySelector('[data-context-editor]'), { toastTitle: 'Settings' });
-                }
-            }
-            if (id === 'pr-reviewer') {
-                const container = root.querySelector('[data-settings-pr-reviewer]');
-                if (container) {
-                    this._prReviewerPanel ??= new PrReviewerSettingsPanel(this.app, container);
-                    void this._prReviewerPanel.load();
                 }
             }
             if (id === 'ai-board-manager') {

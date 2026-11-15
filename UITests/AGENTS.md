@@ -71,7 +71,7 @@ picker placement inside the native dialog, cleanup and 320–1440px layouts.
 
 From `UITests`, run `npx playwright test --config playwright.page-headers.config.js`.
 Also runs `design-system.spec.js` for button states/contrast, focus, fields, alerts,
-modal chrome, touch sizing and the VS Code theme adapter. Uses the five production views that share the header, with intercepted APIs, to compare title typography and header
+modal chrome, touch sizing and the VS Code theme adapter. Uses the four production views that share the header, with intercepted APIs, to compare title typography and header
 treatment at desktop, tablet and phone widths, exercise retained controls, and verify theme colors.
 The static fixture never opens application databases or launches a CLI.
 
@@ -98,13 +98,6 @@ It starts a temporary static server and never touches the machine's board databa
 picker timing. Wait for the board's loading state to clear before changing a snapshot fixture;
 the selected item updates before its board finishes loading. Wait for the search to be visible
 and focused before sending keyboard input; Tom Select opens it asynchronously.
-
-### Focused PR Reviews tests (No Backend Required)
-
-From `UITests`, run `npx playwright test --config playwright.pr-reviews.config.js`.
-Uses installed Chrome and the production frontend with intercepted APIs to check draft preservation
-across detail actions, save-time input locking, and starting a pass at the current GitHub head.
-No application database is opened and no GitHub request or CLI is launched.
 
 ### Focused public-card sharing tests
 

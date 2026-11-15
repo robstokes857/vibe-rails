@@ -1673,7 +1673,8 @@ export class BoardController {
 
         if (generation !== this._openCardGeneration) return;
 
-        const columnId = card?.columnId || this.state.columns[0]?.id || '';
+        const columnId = card?.columnId || this.state.columns.find(column => column.isDefaultForNewCards)?.id
+            || this.state.columns[0]?.id || '';
         const outsideBoard = this.app.currentView !== 'board';
         // cloneTemplate hoists the shared styles once; the Board page itself is not mounted.
         if (outsideBoard) this.app.cloneTemplate('board-template');
@@ -3476,6 +3477,15 @@ export class BoardController {
                     <output for="board-lane-color" class="small font-monospace" data-board-color-value>${escapeHtml(this.state.editingColumnColor)}</output>
                 </div>
 
+                <div class="mt-3">
+                    <label class="d-flex align-items-center justify-content-between gap-3 py-3" for="board-lane-default">
+                        <span>Newly created cards land here</span>
+                        <input type="checkbox" class="form-check-input flex-shrink-0 m-0" id="board-lane-default"
+                            aria-describedby="board-lane-default-help" ${column?.isDefaultForNewCards ? 'checked' : ''}>
+                    </label>
+                    <p class="board-editor-muted mb-0" id="board-lane-default-help">Used when no lane is chosen, even while this lane is collapsed. Save to replace this board's current default.</p>
+                </div>
+
                 <div class="board-editor-actions mt-4">
                     ${column ? `<button type="button" class="btn btn-sm btn-outline-danger" data-board-delete-lane>
                         <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete lane
@@ -3490,6 +3500,7 @@ export class BoardController {
         const container = document.getElementById('modal-container');
         const editor = container?.querySelector('[data-board-lane-editor]');
         if (!editor) return;
+        editor._boardDefaultLaneBaseline = column?.isDefaultForNewCards === true;
         if (column) this.boardSettingsDispose = mountLaneAutomation(this.app, editor.querySelector('[data-lane-automation]'), column.id,
             settings => this.laneAgents.updateColumnCount(column.id, settings));
 
@@ -3524,13 +3535,17 @@ export class BoardController {
             return;
         }
         const color = this.state.editingColumnColor;
+        const isDefaultForNewCards = editor.querySelector('#board-lane-default')?.checked === true;
+        const wasDefault = editor._boardDefaultLaneBaseline === true;
+        const changes = { name, color };
+        if (isDefaultForNewCards !== wasDefault) changes.isDefaultForNewCards = isDefaultForNewCards;
 
         try {
             if (this.state.editingColumnId) {
-                await BoardApi.updateBoardColumnAsync(this.state.editingColumnId, { name, color });
+                await BoardApi.updateBoardColumnAsync(this.state.editingColumnId, changes);
                 this.app.showToast('Board', 'Lane saved.', 'success');
             } else {
-                await BoardApi.createBoardColumnAsync({ name, color, boardId: this.state.boardId });
+                await BoardApi.createBoardColumnAsync({ ...changes, boardId: this.state.boardId });
                 this.app.showToast('Board', 'Lane added.', 'success');
             }
             this.app.closeModal();

@@ -21,6 +21,25 @@ function dependencies(overrides: Partial<RunLauncherDependencies> = {}) {
     return { deps, calls, errors, messages, refreshes: () => refreshes };
 }
 suite('Global launch catalog', () => {
+    test('shared quick action visibility filters definitions and scripts and can restore every item', async () => {
+        let hiddenKeys = ['preset:agent', 'action:check', 'script:reg_run'];
+        const provider = new LauncherTreeDataProvider({
+            isBackendReady: () => true,
+            fetchItems: async () => ({ items: [item('agent'), item('check', { definitionType: 'action' })] }),
+            fetchScripts: async () => ({ scripts: [{ id:'reg_run', name:'run.ps1', status:'approved' }] }),
+            fetchPreferences: async () => ({ hiddenKeys })
+        });
+        await provider.refresh();
+        assert.deepEqual(provider.getItems(), []);
+        assert.equal(provider.getMessage(), LAUNCHER_EMPTY_MESSAGE);
+        hiddenKeys = ['preset:agent'];
+        await provider.refresh();
+        assert.deepEqual(provider.getItems().map(row => row.key), ['action:check', 'script:reg_run']);
+        hiddenKeys = [];
+        await provider.refresh();
+        assert.deepEqual(provider.getItems().map(row => row.key), ['preset:agent', 'action:check', 'script:reg_run']);
+        provider.dispose();
+    });
     test('refresh drops definitions removed by project scope and stale direct runs report server rejection', async () => {
         let entries = [item('local'), item('elsewhere', { definitionType: 'action' })];
         const provider = new LauncherTreeDataProvider({ isBackendReady: () => true, fetchItems: async () => ({ items: entries }) });

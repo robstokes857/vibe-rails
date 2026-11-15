@@ -38,7 +38,8 @@ public sealed record BoardColumnRecord(
     string Color,
     DateTime CreatedUtc,
     DateTime UpdatedUtc,
-    string BoardId = "");
+    string BoardId = "",
+    bool IsDefaultForNewCards = false);
 
 public sealed record BoardColumnDeleteResult(string DeletedColumnId, string MovedToColumnId, int MovedCards);
 
@@ -227,7 +228,7 @@ public sealed record BoardCommitRecord(
 public sealed record BoardCommitLinkResult(BoardCommitRecord Commit, IReadOnlyList<string> CardIds);
 
 /// <summary>
-/// <see cref="BoardId"/> picks the board whose left-most lane takes the card when
+/// <see cref="BoardId"/> picks the board whose default new-card lane (otherwise its left-most lane) takes the card when
 /// <see cref="ColumnId"/> is omitted; null means the project's default (first) board.
 /// </summary>
 public sealed record NewBoardCard(

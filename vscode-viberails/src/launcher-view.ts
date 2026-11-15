@@ -33,7 +33,7 @@ const LAUNCHER_GROUPS: LauncherGroup[] = [
 ];
 export const LAUNCHER_LOAD_FAILED_MESSAGE = 'Could not load AI Agents.';
 export const LAUNCHER_NONE_RUNNABLE_MESSAGE = 'No eligible launches. Manage definitions in AI Agents.';
-export const LAUNCHER_EMPTY_MESSAGE = 'No definitions yet. Create one in AI Agents.';
+export const LAUNCHER_EMPTY_MESSAGE = 'No quick actions shown. Use Manage quick actions to show hidden items, or create one in AI Agents.';
 export const LAUNCHER_ITEM_CONTEXT = 'launcherItem';
 export function normalizeLauncherItems(raw: unknown): LauncherItem[] {
     if (!Array.isArray(raw)) return [];
@@ -87,6 +87,8 @@ export interface LauncherProviderDependencies {
     fetchItems(): Promise<unknown>;
     /** Resolves the body of `GET /api/v1/python-scripts`. Optional so the catalog stands alone. */
     fetchScripts?(): Promise<unknown>;
+    /** Shared with the dashboard Play menu; a missing preference defaults to visible. */
+    fetchPreferences?(): Promise<unknown>;
 }
 
 export class LauncherTreeDataProvider implements vscode.TreeDataProvider<LauncherNode>, vscode.Disposable {
@@ -176,17 +178,21 @@ export class LauncherTreeDataProvider implements vscode.TreeDataProvider<Launche
         }
 
         // The script library is a separate store: when it cannot be read the definitions still
-        // list, and only a failed catalog is reported as a load failure.
+        // list. A failed catalog or visibility read is reported instead of showing hidden items.
         // Async wrappers: a dependency may throw before it returns a promise (backend stopped).
-        const [catalog, library] = await Promise.allSettled([
+        const [catalog, library, preferences] = await Promise.allSettled([
             (async () => this.dependencies.fetchItems())(),
-            (async () => this.dependencies.fetchScripts?.() ?? null)()
+            (async () => this.dependencies.fetchScripts?.() ?? null)(),
+            (async () => this.dependencies.fetchPreferences?.() ?? null)()
         ]);
         let items: LauncherItem[] | null = null;
-        if (catalog.status === 'fulfilled') {
+        if (catalog.status === 'fulfilled' && preferences.status === 'fulfilled') {
             items = normalizeLauncherItems((catalog.value as { items?: unknown } | null | undefined)?.items);
             if (library.status === 'fulfilled')
                 items.push(...normalizeLibraryScripts((library.value as { scripts?: unknown } | null | undefined)?.scripts));
+            const hiddenKeys = (preferences.value as { hiddenKeys?: unknown } | null)?.hiddenKeys;
+            const hidden = new Set(Array.isArray(hiddenKeys) ? hiddenKeys : []);
+            items = items.filter(item => !hidden.has(item.key));
         }
 
         // The backend may have stopped while the request was in flight.

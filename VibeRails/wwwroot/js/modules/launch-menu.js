@@ -1,8 +1,9 @@
 import { escapeHtml } from './utils.js';
 import { LaunchApi } from './launch-api.js';
 import { launchPresentation, libraryScripts } from './launch-presentation.js';
+import { hiddenQuickActions, quickActionKey, openQuickActionPreferences } from './quick-action-preferences.js';
 
-const footer = '<div class="launch-menu-footer"><button type="button" class="btn btn-link launch-menu-manage" data-launch-manage>Manage AI Agents<i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></div>';
+const footer = '<div class="launch-menu-footer"><button type="button" class="btn btn-link launch-menu-manage" data-launch-customize>Manage quick actions…</button><button type="button" class="btn btn-link launch-menu-manage" data-launch-manage>Manage AI Agents<i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></div>';
 
 /** One row for a saved launch (`data-launch-id`) or a signed library script (`data-script-id`). */
 function menuRow(name, presentation, target) {
@@ -68,13 +69,14 @@ export class LaunchMenu {
             // controller reports its own load failure as an empty list, so a library that
             // cannot be read never hides the agents.
             const library = this.app.aiAgentsController?.pythonScripts;
-            const [{ items }] = await Promise.all([
+            const [{ items }, hidden] = await Promise.all([
                 new LaunchApi(this.app).catalog({ signal: abort.signal }),
+                hiddenQuickActions(this.app, { signal: abort.signal }),
                 library?.refresh({ quiet: true })
             ]);
             if (abort.signal.aborted) return;
-            const available = items.filter((item) => item.canLaunch);
-            const scripts = libraryScripts(library?.state).filter((script) => script.canRun);
+            const available = items.filter((item) => item.canLaunch && !hidden.has(quickActionKey(item)));
+            const scripts = libraryScripts(library?.state).filter((script) => script.canRun && !hidden.has(`script:${script.id}`));
             const rows = [
                 ...available.map((item) => menuRow(item.name, launchPresentation(item), `data-launch-id="${escapeHtml(item.id)}"`)),
                 ...scripts.map((script) => menuRow(script.name, script, `data-script-id="${escapeHtml(script.id)}"`))
@@ -82,7 +84,7 @@ export class LaunchMenu {
             panel.innerHTML = '<h2 class="launch-menu-heading">Quick actions</h2>' +
                 (rows.length
                     ? `<ul class="launch-menu-list">${rows.join('')}</ul>`
-                    : '<p class="launch-menu-empty" role="status">No quick actions available. Manage AI Agents to add one.</p>') +
+                    : '<p class="launch-menu-empty" role="status">No quick actions shown. Manage quick actions to show hidden items, or add one in AI Agents.</p>') +
                 footer;
             panel.addEventListener(
                 'click',
@@ -106,6 +108,7 @@ export class LaunchMenu {
                         void library.run(script.id).catch((error) =>
                             this.app.showError(error?.message || 'Could not run that script.'));
                     else if (button.hasAttribute('data-launch-manage')) this.app.navigate('ai-agents');
+                    else if (button.hasAttribute('data-launch-customize')) openQuickActionPreferences(this.app, trigger);
                 },
                 { signal: abort.signal }
             );
@@ -122,6 +125,6 @@ export class LaunchMenu {
     }
     openCustomizationFromHost() {
         this.closeFlyout();
-        this.app.navigate('ai-agents');
+        openQuickActionPreferences(this.app, document.querySelector('[data-action="automation-launcher"]') || this.trigger);
     }
 }

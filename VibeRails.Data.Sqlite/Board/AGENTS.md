@@ -1,5 +1,14 @@
 # Board persistence
 
+`board-default-column/1` adds nullable `Boards.DefaultColumnId`, referencing `BoardColumns`
+with `ON DELETE SET NULL`. No backfill or generation change. Lane creation/updates write it
+in the same scoped, writable-board transaction as the lane; a single board value makes
+replacing the default atomic. Clearing another lane never clears the selected one. The
+column reader projects `IsDefaultForNewCards` only for a lane still belonging to that board.
+Card insertion without an explicit lane resolves this preference inside its write transaction,
+falling back to the first lane. The existing Boards change-stamp trigger covers the preference.
+Older writers can omit the new column and keep their previous behavior.
+
 `board-change-stamp/1` (VIBE-322, additive) adds the one-row `BoardChangeStamp` and AFTER
 INSERT/UPDATE/DELETE triggers on the 24 tables the Board poll and the card editor's refresh read
 (`BoardStore.ChangeStampTables`). Each trigger rewrites the row with `random()`, so every writer

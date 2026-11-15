@@ -93,7 +93,7 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
     }
 
     [McpServerTool]
-    [Description("Validates staged files against VCA rules defined in vc.rules.md files. Supports '- [WARN] Rule' and '- Rule (WARN)' formats. Call this BEFORE attempting to commit changes. Returns validation results with any COMMIT-level violations that require acknowledgment.")]
+    [Description("Validates staged files against VCA rules defined in vc.rules.md files. Supports '- [WARN] Rule' and '- Rule (WARN)' formats. Call this BEFORE attempting to commit changes. COMMIT-level violations require acknowledgment. For intentional changes blocked by STOP, request human approval using request_stop_bypass with a reason and intended commit message. Check get_stop_bypass_status; retry the commit only after approval, without changing the staged snapshot. Never substitute --no-verify. If these tools are missing, report the runtime/version mismatch.")]
     public async Task<string> ValidateVca()
     {
         var report = await ValidateVcaReportAsync(snapshotProvider, Directory.GetCurrentDirectory(), exemptions: exemptions);

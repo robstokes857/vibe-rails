@@ -214,6 +214,16 @@ before calling scoped services; ordinary REST and transactional membership check
 Omitted targets keep the launching card/current-project defaults. Cross-project writes never
 auto-attach a session, and explicit session attachments remain within the current project.
 
+## Default lane for new cards
+
+Lane settings' **Newly created cards land here** checkbox saves with **Save lane** (or
+**Create lane**). One lane per local board can be selected; choosing another replaces it.
+The card editor and card creation through the service/MCP use that lane when no lane is
+explicitly chosen, even when it is collapsed. Existing cards and explicit lane choices stay
+where directed. Clearing the choice or deleting its lane restores the first-lane fallback.
+The preference is local board metadata, not part of the hosted sync protocol.
+`IsDefaultForNewCards` is projected onto lane records/responses; omitted updates preserve it.
+
 ## New-board review defaults (VIBE-23)
 
 New local boards create only the Backlog / Ready / Build / Review / Done lanes. They do not
@@ -267,8 +277,11 @@ Calling `begin_board_review` is an explicit reviewer declaration for the current
 including ordinary terminals that were not launched from the Board for review. Reuse the session's
 existing attempt, preserve launch origins and old comments, and require attachment to the target
 card before registration. Desktop presence does not grant ownership of a terminal's review.
-Both worker/reviewer prompts must name `get_board_reviews` and explain polling and fixing agreed
-blocking findings. High (including critical) and medium-high findings block completion of reviewed
+Ordinary card prompts omit the blanket polling, severity and completion block. Reviewer prompts
+still require a scoped, durable report; Automation and delegated roles keep their specific
+completion instructions. `get_board_agent_status` and `get_board_reviews` describe polling about
+once a minute while waiting, as does the card manager prompt. The board manager continues to use
+`await_board_events`. High (including critical) and medium-high findings block completion of reviewed
 work. Medium-low and low findings are non-blocking notes: the worker chooses to fix now or defer
 to a backlog card, referencing the originating card/finding there and linking the backlog key in
 an originating-card comment. These notes alone do not require another review. Judge severity by

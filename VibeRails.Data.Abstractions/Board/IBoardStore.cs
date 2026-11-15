@@ -57,8 +57,9 @@ public partial interface IBoardStore
     Task<IReadOnlyDictionary<string, int>> CountCardsByColumnAsync(string projectPath, CancellationToken cancellationToken = default, string? boardId = null);
     Task<BoardColumnRecord?> GetColumnAsync(string projectPath, string columnId, CancellationToken cancellationToken = default);
     /// <summary>Adds a lane at the end of the board, or with <paramref name="first"/> before every other lane.</summary>
-    Task<BoardColumnRecord> CreateColumnAsync(string projectPath, string name, string color, CancellationToken cancellationToken = default, string? boardId = null, bool first = false);
-    Task<BoardColumnRecord?> UpdateColumnAsync(string projectPath, string columnId, string? name, string? color, CancellationToken cancellationToken = default);
+    Task<BoardColumnRecord> CreateColumnAsync(string projectPath, string name, string color, CancellationToken cancellationToken = default, string? boardId = null, bool first = false, bool isDefaultForNewCards = false);
+    /// <summary>Updates a lane. A true default replaces the board's previous choice; null preserves it.</summary>
+    Task<BoardColumnRecord?> UpdateColumnAsync(string projectPath, string columnId, string? name, string? color, CancellationToken cancellationToken = default, bool? isDefaultForNewCards = null);
     Task<BoardColumnDeleteResult?> DeleteColumnAsync(string projectPath, string columnId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BoardColumnRecord>> ReorderColumnsAsync(string projectPath, IReadOnlyList<string> orderedIds, CancellationToken cancellationToken = default, string? boardId = null);
 

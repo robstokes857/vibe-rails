@@ -1,5 +1,17 @@
 # Vibe Board architecture and review
 
+## Default lane for new cards
+
+The lane editor can select one default destination per local board. `BoardService` carries
+the optional `IsDefaultForNewCards` lane update to `IBoardStore`; `BoardStore` persists a
+single nullable `Boards.DefaultColumnId` in the lane write transaction. Lane reads project
+the selection so the editor can seed new drafts without considering collapse state.
+`InsertCardAsync` resolves the same preference for API/MCP callers that omit a lane.
+Explicit destinations win. Clearing/deleting the selected lane restores the first-lane
+fallback, and changing the preference never moves existing cards. The additive
+`board-default-column/1` migration runs automatically and leaves older writers compatible;
+the preference does not extend hosted Board sync.
+
 ## AI board manager (VIBE-52 follow-up, VIBE-204)
 
 The per-card manager below is kept, and a board-level one is added above it, behind the

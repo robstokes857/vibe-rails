@@ -50,7 +50,7 @@ test('code quality checks are presented like every other Action: nothing filters
 
 test('Quick actions lists signed library scripts after the saved launches and runs them through the library', () => {
     const menu = source('launch-menu.js');
-    assert.match(menu, /libraryScripts\(library\?\.state\)\.filter\(\(script\) => script\.canRun\)/);
+    assert.match(menu, /libraryScripts\(library\?\.state\)\.filter\(\(script\) => script\.canRun &&/);
     assert.ok(menu.indexOf('...available.map') < menu.indexOf('...scripts.map'), 'scripts follow the agents and Actions');
     assert.match(menu, /library\.run\(script\.id\)/);
 });

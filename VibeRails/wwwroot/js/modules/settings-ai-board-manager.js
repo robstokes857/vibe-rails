@@ -1,5 +1,5 @@
 // The AI board manager switch (VIBE-204): one machine-wide setting, off by default. It saves at
-// once and never joins the general settings form, like the PR Reviewer switch. While it is off the
+// once and never joins the general settings form. While it is off the
 // board shows no manager chip, Board settings has no Manager tab, and the card editor offers no
 // "Use the board manager"; the backend refuses to save or start a board manager.
 export const AI_BOARD_MANAGER_PATH = '/api/v1/board/ai-board-manager';

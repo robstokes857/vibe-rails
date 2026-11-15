@@ -42,10 +42,13 @@ export function mountLaneAgentBody({
                 (entries
                     .map(
                         ({ entry, run, cardLabel, definitionName }) => `
-                <article class="board-automation-run">
-                    <strong>${escapeHtml(cardLabel)} · ${escapeHtml(definitionName)}</strong>
-                    <span>Process: ${escapeHtml(run?.status || entry.processStatus)} · Result: ${escapeHtml(entry.verdict || run?.verdict || 'Not reported')}</span>
-                    <span>${escapeHtml(entry.summary || run?.error || '')}</span>
+                <article class="board-automation-run board-lane-run">
+                    <strong class="board-lane-run-title">${escapeHtml(cardLabel)} · ${escapeHtml(definitionName)}</strong>
+                    <span class="board-lane-run-status">Process: ${escapeHtml(run?.status || entry.processStatus)} · Result: ${escapeHtml(entry.verdict || run?.verdict || 'Not reported')}</span>
+                    ${entry.summary || run?.error ? `<details class="board-lane-run-report" data-lane-report="${escapeHtml(entry.id)}">
+                        <summary>Report<span class="visually-hidden"> for ${escapeHtml(cardLabel)} · ${escapeHtml(definitionName)}</span></summary>
+                        <p>${escapeHtml(entry.summary || run.error)}</p>
+                    </details>` : ''}
                     <div class="launch-run-actions">
                         ${run?.sessionId ? `<button type="button" class="btn btn-sm btn-link" data-lane-running-id="${escapeHtml(entry.id)}">Open session</button>` : ''}
                         ${!entry.skipRequested && entry.verdict !== 'passed' ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-lane-skip="${escapeHtml(entry.id)}">Stop and skip</button>` : ''}
@@ -55,7 +58,18 @@ export function mountLaneAgentBody({
                     )
                     .join('') ||
                     '') : '';
-            if (markup !== next) activity.innerHTML = markup = next;
+            if (markup !== next) {
+                const expanded = new Set([...activity.querySelectorAll('[data-lane-report][open]')]
+                    .map(report => report.dataset.laneReport));
+                const focused = activity.querySelector('[data-lane-report] > summary:focus')
+                    ?.parentElement.dataset.laneReport;
+                activity.innerHTML = markup = next;
+                for (const report of activity.querySelectorAll('[data-lane-report]')) {
+                    report.open = expanded.has(report.dataset.laneReport);
+                    if (report.dataset.laneReport === focused)
+                        report.querySelector('summary').focus({ preventScroll: true });
+                }
+            }
         } catch (error) {
             if (current()) { activity.textContent = error.message; markup = ''; }
         } finally {

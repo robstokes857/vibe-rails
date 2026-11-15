@@ -64,6 +64,8 @@ public sealed class BoardAgentCompletionTests : IDisposable
         Assert.Contains("Tests passed", status);
         Assert.Contains("Checking regressions", status);
         Assert.Contains("liveness unknown", status); // A stdio host has no live PTY probe.
+        Assert.Contains("Poll about once a minute while waiting", status);
+        Assert.DoesNotContain("10 seconds", status);
         await repository.CompleteSessionAsync(session, 7);
         Assert.Contains("exit code 7", await secondClient.GetBoardAgentStatus(card.Key, session, Ct));
         Assert.Empty(await store.GetAgentCompletionsAsync(Path.Combine(root, "other"), card.Id, Ct));

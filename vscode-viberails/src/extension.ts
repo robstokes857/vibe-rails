@@ -16,6 +16,7 @@ import { bindSidebarTreeView } from './sidebar-tree-view';
 import { confirmWarning, showError, showInfo, showWarning } from './notifications';
 import {
     LAUNCH_CATALOG_PATH,
+    QUICK_ACTION_PREFERENCES_PATH,
     BOOTSTRAP_REQUEST_TIMEOUT_MS,
     BOOTSTRAP_RETRY_ATTEMPTS,
     BOOTSTRAP_RETRY_DELAY_MS,
@@ -353,6 +354,7 @@ function registerLauncherView(context: vscode.ExtensionContext, registeredComman
     const provider = new LauncherTreeDataProvider({
         isBackendReady,
         fetchItems: () => requestJson(getBackendConnection(), 'GET', LAUNCH_CATALOG_PATH),
+        fetchPreferences: () => requestJson(getBackendConnection(), 'GET', QUICK_ACTION_PREFERENCES_PATH),
         fetchScripts: () => requestJson(getBackendConnection(), 'GET', SCRIPT_LIBRARY_PATH)
     });
     launcherProvider = provider;

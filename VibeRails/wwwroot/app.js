@@ -15,7 +15,6 @@ import { SetupAlert } from './js/modules/setup-panel.js';
 import { RemoteAccountLinkPanel } from './js/modules/remote-account-link.js';
 import { AccountNavMenu, accountSummary } from './js/modules/account-nav.js';
 import { McpController } from './js/modules/mcp-controller.js';
-import { PrReviewsController } from './js/modules/pr-reviews-controller.js';
 import { ReviewInboxController } from './js/modules/review-inbox-controller.js';
 import { AiAgentsController } from './js/modules/ai-agents-controller.js';
 import { PythonScriptWorkbench } from './js/modules/python-script-workbench.js';
@@ -63,7 +62,6 @@ export class VibeControlApp {
         this.settingsController = new SettingsController(this);
         this.setupAlert = new SetupAlert(this);
         this.mcpController = new McpController(this);
-        this.prReviewsController = new PrReviewsController(this);
         this.reviewInboxController = new ReviewInboxController(this);
         this.aiAgentsController = new AiAgentsController(this);
         this.jobController = this.aiAgentsController;
@@ -107,12 +105,11 @@ export class VibeControlApp {
         // it off the serial cold-start path. The controller falls back to canonical
         // defaults if the request fails, so a failure never blocks startup either.
         const llmPickerPreferencesReady = this.llmPickerController.loadPreferences();
-        const prReviewerSettingsReady = this.loadPrReviewerSettings();
         await this.fetchConfigs();
         this.applyDocumentTitle();
         await this.applyInitialSettings();
         this.updateAccountNav();
-        await Promise.all([llmPickerPreferencesReady, prReviewerSettingsReady]);
+        await llmPickerPreferencesReady;
         this.terminalController.bindSessionEvents(this.appEventClient);
 
         // Persistent proxy/token-compression indicator. It intentionally listens to the dedicated proxy
@@ -618,7 +615,6 @@ export class VibeControlApp {
             'settings',
             'terminal-focus',
             'mcp',
-            'pr-reviews',
             'ai-agents',
             'automations',
             'review-inbox',
@@ -859,8 +855,6 @@ export class VibeControlApp {
         // Tear down the MCP Explorer's global listener / xterm instances when navigating away
         // (and before re-entering, which rebuilds them). Idempotent.
         this.mcpController?.unload?.();
-        // Stops the PR Reviews poll and aborts its requests; re-entry rebuilds them.
-        this.prReviewsController?.unload?.();
         this.reviewInboxController?.unload?.();
         this.applyViewLayoutState(view);
         this.queueScrollPageToTop();
@@ -880,9 +874,7 @@ export class VibeControlApp {
             'settings': () => this.settingsController.loadSettings(data),
             'terminal-focus': () => this.terminalController.loadTerminalFocusView(data),
             'mcp': () => this.mcpController.loadView(),
-            // The list, or one PR's detail page when data carries { number }.
-            'pr-reviews': () => this.prReviewsController.loadView(data),
-            // Reviews requested of this account (VB-50 slice D); reached from the PR Reviews header.
+            // Reviews requested of this account (VB-50 slice D); reached from the account menu.
             'review-inbox': () => this.reviewInboxController.loadView(),
             // Legacy launch URLs share the same definition management screen.
             'ai-agents': () => this.aiAgentsController.loadView(data),
@@ -1168,21 +1160,6 @@ export class VibeControlApp {
             action.disabled = managed;
         }
         this.accountNav?.render(account);
-    }
-
-    async loadPrReviewerSettings() {
-        try {
-            const settings = await this.apiCall('/api/v1/pr-reviews/settings', 'GET', null, { showLoading: false });
-            this.updatePrReviewerNav(settings);
-        } catch (error) {
-            console.error('Failed to fetch PR Reviewer settings:', error);
-        }
-    }
-
-    updatePrReviewerNav(settings) {
-        for (const link of document.querySelectorAll('.app-subnav-link[data-view="pr-reviews"]')) {
-            link.hidden = settings.enabled !== true;
-        }
     }
 
     async refreshAccountSettings() {

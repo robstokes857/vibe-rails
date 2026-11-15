@@ -168,7 +168,6 @@ export class ReviewInboxController {
             if (!button || !this.root?.contains(button)) return;
             const action = button.dataset.riAction;
             if (action === 'refresh') { void this.refreshNow(); return; }
-            if (action === 'back') { this.app.navigate('pr-reviews'); return; }
             const row = button.closest('[data-ri-row]');
             const reference = row?.dataset.riRow;
             if (!reference) return;

@@ -51,7 +51,7 @@ public sealed partial class BoardTool
         catch (Exception ex) when (ex is not OperationCanceledException) { return Fail("report agent completion", ex); }
     }
 
-    [McpServerTool, Description("Check the newest ten agents working on a card (or one linked session): their completion reports, process exit outcomes, latest comment/note, pending lane entries, and the newest 20 Automation runs (including queued or failed-before-launch runs). Use after moving a card to Review to discover its review run, then poll every 10 seconds until the required agent reports done or the run ends. No side effects; unknown process liveness is explicitly reported.")]
+    [McpServerTool, Description("Check the newest ten agents working on a card (or one linked session): their completion reports, process exit outcomes, latest comment/note, pending lane entries, and the newest 20 Automation runs (including queued or failed-before-launch runs). Use after moving a card to Review to discover its review run, then poll about once a minute until the required agent reports done or the run ends. No side effects; unknown process liveness is explicitly reported.")]
     public async Task<string> GetBoardAgentStatus(
         [Description("Card key or id. Omit for this terminal's original card.")] string? card = null,
         [Description("Optional linked session id to inspect one agent.")] string? sessionId = null,
@@ -104,7 +104,7 @@ public sealed partial class BoardTool
                 if (entries.Count == 0) text.AppendLine("No current-model lane entries.");
             }
             text.AppendLine(CheckSummary(await store.GetLatestChecksAsync(target.Project, detail.Id, cancellationToken)));
-            text.Append("Poll again in about 10 seconds while waiting. A completion report is the agent's result; the run process status and explicit lane verdict are separate.");
+            text.Append("Poll about once a minute while waiting. A completion report is the agent's result; the run process status and explicit lane verdict are separate.");
             text.Append("\n").Append(await GetBoardReviews(card, cancellationToken: cancellationToken));
             return text.ToString();
         }

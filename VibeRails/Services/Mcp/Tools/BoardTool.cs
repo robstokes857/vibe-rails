@@ -403,7 +403,7 @@ public sealed partial class BoardTool(
     public async Task<string> CreateBoardCard(
         [Description("Card title (required).")] string title,
         [Description("Longer description of the work. Optional.")] string? description = null,
-        [Description("Lane name or id to create the card in. Defaults to the left-most lane.")] string? column = null,
+        [Description("Lane name or id to create the card in. Defaults to the board's chosen new-card lane, or the left-most lane when none is set.")] string? column = null,
         [Description("critical | high | medium | low. Defaults to medium.")] string? priority = null,
         [Description("Comma-separated tags. Optional.")] string? tags = null,
         [Description("task | bug | feature | research-spike | chore. Defaults to task.")] string? type = null,

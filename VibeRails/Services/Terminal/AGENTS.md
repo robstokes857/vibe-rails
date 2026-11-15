@@ -194,8 +194,13 @@ from `CliLoop` (`ComposeAutomationPrompt`'s `userContext`) and passes `contextIn
 `RunCliWithWebAsync`. Empty levels send nothing. Task/summary precedence is
 preserved. The default tracking guidance
 tells the agent to reply only that it is ready to help (no tools, work, or invented request) and
-then wait for a user task; story creation stays discretionary, and an existing story
-should be reused. This uses the normal provider prompt argv, never TUI input or rewritten provider
+then wait for a user task; story creation stays discretionary.
+It also explains the later commit workflow: call `validate_vca`, request human approval for
+intentional STOP exceptions with `request_stop_bypass(reason, commitMessage)`, and check
+`get_stop_bypass_status` before retrying the unchanged staged snapshot. Never substitute
+`--no-verify`; missing tools indicate a runtime/version mismatch to report. This guidance does
+not turn the initial ready-to-help message into a task or grant approval for a STOP exception.
+This uses the normal provider prompt argv, never TUI input or rewritten provider
 config. Disabling it affects new sessions. It does not set `AuthorizeBoardTools`, grant tool
 permissions, remove explicit Board instructions, or apply to plain shell sessions.
 

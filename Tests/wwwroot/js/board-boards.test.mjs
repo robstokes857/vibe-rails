@@ -38,7 +38,7 @@ test('the controller loads boards first, records the selection, and scopes lanes
     assert.match(source, /BoardApi\.getBoardColumnsAsync\(boardId\)/);
     assert.match(source, /BoardApi\.getBoardCardPageAsync\(boardId, this\.state\.filters,/);
     assert.match(source, /BoardApi\.reorderBoardColumnsAsync\(orderedIds, this\.state\.boardId\)/);
-    assert.match(source, /createBoardColumnAsync\(\{ name, color, boardId: this\.state\.boardId \}\)/);
+    assert.match(source, /createBoardColumnAsync\(\{[^}]*boardId: this\.state\.boardId \}\)/);
     assert.match(source, /picker\?\.addEventListener\('change', \(\) => this\.switchBoard\(picker\.value\)\)/);
     assert.match(source, /case 'new-board':\s*this\.openBoardEditor\(null\)/);
     assert.match(source, /case 'edit-board':\s*this\.openBoardEditor\(this\.state\.boardId\)/);

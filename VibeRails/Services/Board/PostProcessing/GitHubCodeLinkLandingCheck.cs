@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Text.Json;
 using VibeRails.Services.Cli;
 using VibeRails.Services.Git;
-using VibeRails.Services.PrReviews;
 
 namespace VibeRails.Services.Board.PostProcessing;
 

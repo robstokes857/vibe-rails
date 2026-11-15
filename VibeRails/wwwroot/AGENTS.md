@@ -102,7 +102,10 @@ The **Create an agent in AI Agents** link below the picker opens the AI Agents p
 through guarded app navigation, preserving the unsaved-lane confirmation and cleanup.
 New VCA checks use working-tree scope; new code-quality checks use card-linked commits.
 `board-lane-agent-body.js` polls current per-card lane progress, with explicit verdicts,
-retry, skip and session links. `board-card-automations.js` queues definitions with the
+retry, skip and session links. Card runs keep names, status and actions visible, with
+regular-weight muted report text inside a native Report disclosure, collapsed initially.
+Omit empty disclosures; preserve expanded reports and disclosure focus across polling.
+`board-card-automations.js` queues definitions with the
 saved card context. Managers and ordinary Start work use their existing Board contracts.
 Retired selections remain visibly unavailable; do not resolve them by label.
 
@@ -128,9 +131,8 @@ boards/lanes and a card search, confirms the destination and lane Automation cou
 to replace an editor with unsaved drafts. Dispose it on close/replacement/unload. The existing
 navbar **Sign in** opens the device approval flow when signed out. The top navigation is the
 only application navigation. Quality is third and Rules fourth; they are separate destinations.
-AI Agents follows Rules, then MCP and Reviews. Reviews stays hidden until the saved
-**Enable PR Reviewer and GitHub publishing** setting is on, and updates immediately after
-the setting is loaded or saved. The standalone play button opens
+AI Agents follows Rules, then MCP. The account menu opens **Review requests**, the
+separate pre-commit inbox. The standalone play button opens
 Quick actions for eligible Agents, Quick Launches and Actions. Application Settings opens from
 **Account settings** in the account dropdown; when signed out, a text **Settings** link
 stays visible beside **Sign in / Sign up**. There is no standalone Settings icon.
@@ -225,11 +227,9 @@ Use microtasks, not short-delay `setTimeout` batching, for webview activity even
 | [js/modules/python-script-workbench.js](js/modules/python-script-workbench.js) | `python-script` view: Monaco editor beside the script's agent pane (see "Python script workbench" below) |
 | [js/modules/script-agent-pane.js](js/modules/script-agent-pane.js) | The workbench's agent pane: one xterm (`TerminalTab`) for one script's agent in an owned backend tab, never listed on the Terminals page (VIBE-159) |
 | [js/modules/python-run-window.js](js/modules/python-run-window.js) | The little run window: argument rows + stdin in, exit code / output / return value out, no terminal (see "Python script run window" below) |
-| [js/modules/automation-launcher.js](js/modules/automation-launcher.js) | Nav "Launch" flyout (agents, automations and signed scripts; unsigned or modified scripts omitted) and its order/show-hide customize modal over `/api/v1/automation-nav/preferences`; `openCustomizationFromHost()` serves the VS Code launcher view, and a saved/reset list calls `__viberails_launcherChanged__` |
+| [js/modules/launch-menu.js](js/modules/launch-menu.js) | Nav Play flyout (saved launches and signed scripts) with the shared show/hide dialog in `quick-action-preferences.js` over `/api/v1/quick-actions/preferences`; `openCustomizationFromHost()` serves the VS Code Launch view, and saved switches call `__viberails_launcherChanged__` |
 | [js/modules/vscode-launcher-bridge.js](js/modules/vscode-launcher-bridge.js) | VS Code Activity Bar launcher view → dashboard commands (`runScript`, `openLauncherCustomize`, `manageAutomations`, `automationQueued`), each routed to the exact call the nav flyout makes; installed before the script-import bridge posts the ready signal that releases queued host messages. Also relays `PythonScriptsController.onStateChange` to `__viberails_launcherChanged__` when a script's id, display name, file name or approval changed (signed, revoked, renamed, edited, imported, deleted), so the view re-sorts; an identical refresh stays quiet |
-| [js/modules/pr-reviews-controller.js](js/modules/pr-reviews-controller.js) | `pr-reviews` view (nav **Reviews**): the PR review list, or one PR's detail page when `data.number` is set. The list polls the queue, GitHub lifecycle sync and list once a minute while visible; the detail page never polls, so an unsaved review is not re-rendered away. See [PR Reviews](../Services/PrReviews/AGENTS.md) |
-| [js/modules/pr-reviews-view.js](js/modules/pr-reviews-view.js) | PR Reviews wording (states, verdicts, queue reasons), list arithmetic (`summarizePullRequests`: live-only working lists, status counts within the lifecycle filter) and escape-first markup; node-tested in `pr-reviews-view.test.mjs` |
-| [js/modules/review-inbox-controller.js](js/modules/review-inbox-controller.js) | `review-inbox` view ("Reviews requested of you", VB-50 slice D; reached from the PR Reviews header): the hosted review requests addressed to the account as the root last fetched them, Check now, an inline Reject comment, and Approve, which only opens the signing popup. Re-reads the local cache once a minute while visible (every 5 s while a popup is open). Nothing on the page signs. See [Review requests](../Services/ReviewRequests/README.md) |
+| [js/modules/review-inbox-controller.js](js/modules/review-inbox-controller.js) | `review-inbox` view ("Reviews requested of you", VB-50 slice D; reached from Review requests in the account menu): the hosted review requests addressed to the account as the root last fetched them, Check now, an inline Reject comment, and Approve, which only opens the signing popup. Re-reads the local cache once a minute while visible (every 5 s while a popup is open). Nothing on the page signs. See [Review requests](../Services/ReviewRequests/README.md) |
 | [js/modules/review-inbox-view.js](js/modules/review-inbox-view.js) | Inbox wording (statuses, popup outcomes, the checked/next-check line), `canAct`, and escape-first rows that link only a vetted `https://viberails.ai/Reviews/requests/rvw_…` page; node-tested in `review-inbox-view.test.mjs` |
 | [js/modules/board-card-request-review.js](js/modules/board-card-request-review.js) | The saved card editor's **Request review** section (VB-50 slice E, the `board-card-sharing.js` pattern): the staged preview (`/api/v1/review-requests/staged`: files with `+/−`, omissions, tree, matched Signed Approval rules prefilling reviewers), the Sessions-rail picker, Create, and the project's requests with status, trailer Copy, Send… (the disclosure in `confirmDialog` first), Cancel and Delete. Also the header badge (`reviewStatusBadge`) and the Commits-rail badge (`commitApprovalBadge`, from `/commit-approvals`). Refreshes on `review_request_updated`. Node-tested in `board-card-request-review.test.mjs`; Playwright case in `board-ux.spec.js` |
 | [js/modules/board-controller.js](js/modules/board-controller.js) | `board` view: the lane board — drag cards between lanes, drag lanes to reorder, filter, and the card editor with comments |
@@ -361,7 +361,7 @@ launches; its card viewer disables editing while preserving history/session/atta
 The foreign-project card response also carries `shared` so its editor enforces the same rule.
 Backend guards remain authoritative for every write and launch.
 **AI board manager (VIBE-52 follow-up, VIBE-204).** Settings > **AI board manager**
-(`settings-ai-board-manager.js`) is an immediate-save, default-off switch like PR Reviewer. While it
+(`settings-ai-board-manager.js`) is an immediate-save, default-off switch. While it
 is off the manager status says `enabled: false`: the header chip is hidden, Board settings has no
 **Manager** tab (`boardSettingsNavigation({ manager })`), the card editor offers no **Use the board
 manager**, and board-managed tiles behave like any Agent card without a manager; a saved card
@@ -1458,6 +1458,21 @@ forms. `Check commit message for` requires a plain comma-separated list of forbi
 whole words/phrases (case insensitive), such as `WIP, fix later, temporary`. The frontend
 materializes `Check commit message for: ...`; empty lists/entries, control characters,
 and CSV quote wrappers are rejected. Backend write validation remains authoritative.
+
+## Quick actions visibility
+
+The top-bar Play menu (`launch-menu.js`) and VS Code Launch view use
+`GET /api/v1/quick-actions/preferences`. **Manage quick actions…** opens the same
+native dialog from either surface (`quick-action-preferences.js`); show/hide switches
+save immediately with `PUT { key, hidden }` and notify the extension through
+`__viberails_launcherChanged__`. Hidden items remain in the dialog for restoration.
+Keys are `preset:<id>`, `action:<id>` or `script:<registration-id>` and survive renames.
+The backend stores one GlobalCache row per shortcut in normal `state.db`, under
+`ui.quick-actions.hidden.v1.`, avoiding lost updates between different shortcuts or
+projects. Missing choices default to visible. This does not change definition Enabled,
+project scope, signing, Board pickers or terminal-picker preferences. Retired definitions
+and unsigned library scripts remain excluded from Quick actions. The AI Agents harness
+tests both menu entry points, reloads, failures, restoration and narrow-screen layout.
 
 ## Customizable LLM Pickers
 
