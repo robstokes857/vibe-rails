@@ -268,6 +268,45 @@ public sealed class StopBypassTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MessageViolationAfterScissorsStillBlocksWithAnUnrelatedSignedException()
+    {
+        await File.WriteAllTextAsync(Path.Combine(root, "vc.rules.md"),
+            $"## Vibe Rails Rules\n- {Rule} (STOP)\n- Check commit message for: wip (STOP)\n", Ct);
+        await Git("add", "vc.rules.md");
+        await Approve("Repair");
+        var result = await Hook("commit-msg", "Repair\n# ------------------------ >8 ------------------------\nWIP retained text\n");
+        Assert.Equal(1, result.Code);
+        Assert.Contains("Check commit message for: wip", result.Output);
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData(null, false)]
+    [InlineData("whitespace", true)]
+    [InlineData("whitespace", false)]
+    [InlineData("verbatim", true)]
+    [InlineData("verbatim", false)]
+    [InlineData("scissors", true)]
+    [InlineData("scissors", false)]
+    public async Task ScissorsCannotHideRuleViolationsInNonEditorCommits(string? cleanup, bool fromFile)
+    {
+        await Stage("Check commit message for: wip");
+        if (cleanup is not null) await Git("config", "commit.cleanup", cleanup);
+        const string message = "Complete change\n# ------------------------ >8 ------------------------\nWIP should block\n";
+        var result = await Hook("commit-msg", message);
+        Assert.Equal(1, result.Code);
+        Assert.Contains("Check commit message for: wip", result.Output);
+
+        // This fixture has no installed hooks: independently establish what Git would retain.
+        var inputPath = Path.Combine(root, ".git", "message-input");
+        await File.WriteAllTextAsync(inputPath, message, Ct);
+        await Git("commit", fromFile ? "-F" : "-m", fromFile ? inputPath : message);
+        var recorded = await GitCli.RunAsync(root, ["log", "-1", "--format=%B"], Ct);
+        Assert.True(recorded.Succeeded, recorded.StdErr);
+        Assert.Contains("WIP should block", recorded.StdOut);
+    }
+
+    [Fact]
     public async Task CustomCommentScissorsKeepsEvidenceAboveTheDiscardedDiff()
     {
         await Approve();
@@ -275,6 +314,14 @@ public sealed class StopBypassTests : IAsyncLifetime
         var result = await Hook("commit-msg", "Repair\n; ------------------------ >8 ------------------------\ndiff text\n");
         Assert.Equal(0, result.Code);
         Assert.NotNull(StopBypassFormat.Parse(StopBypassFormat.BeforeScissors(result.Message)));
+        var inputPath = Path.Combine(root, ".git", "message-input");
+        await File.WriteAllTextAsync(inputPath, result.Message, Ct);
+        // ':' is the shell's no-op builtin: exercise a real edited/scissors commit without a UI.
+        await Git("-c", "core.editor=:", "commit", "--edit", "--cleanup=scissors", "-F", inputPath);
+        var recorded = await GitCli.RunAsync(root, ["log", "-1", "--format=%B"], Ct);
+        Assert.True(recorded.Succeeded, recorded.StdErr);
+        Assert.DoesNotContain("diff text", recorded.StdOut);
+        Assert.NotNull(StopBypassFormat.Parse(recorded.StdOut));
     }
 
     [Fact]

@@ -43,6 +43,7 @@ public sealed class VcaRulesHookValidationService(
         var validateCommitMessage = invocation.Kind is VcaHookKind.CommitMessage
             or VcaHookKind.AcknowledgeCommitMessage;
         string? commitMessage = null;
+        string? rawMessage = null;
 
         if (validateCommitMessage)
         {
@@ -58,10 +59,8 @@ public sealed class VcaRulesHookValidationService(
                         RequiredAcknowledgments: []));
             }
 
-            commitMessage = await VcaCommitMessageCleaner.StripCommentsAsync(
-                StopBypassFormat.BeforeScissors(await File.ReadAllTextAsync(invocation.CommitMessagePath, cancellationToken)),
-                workingDirectory,
-                cancellationToken);
+            rawMessage = await File.ReadAllTextAsync(invocation.CommitMessagePath, cancellationToken);
+            commitMessage = await VcaCommitMessageCleaner.StripCommentsAsync(rawMessage, workingDirectory, cancellationToken);
         }
 
         VerifiedStopBypass? stopBypass = null;
@@ -71,17 +70,23 @@ public sealed class VcaRulesHookValidationService(
         {
             try
             {
+                // Evidence must survive even when Git truncates at scissors. General rule
+                // evaluation must still see the tail: non-editor commits can retain it.
+                var evidenceMessage = rawMessage is null ? null : await VcaCommitMessageCleaner.StripCommentsAsync(
+                    StopBypassFormat.BeforeScissors(rawMessage), workingDirectory, cancellationToken);
                 var result = await new StopBypassService(snapshotProvider, verifier: stopBypassVerifier).ResolveAsync(
-                    snapshot, validateCommitMessage ? invocation.CommitMessagePath : null, commitMessage, cancellationToken);
+                    snapshot, validateCommitMessage ? invocation.CommitMessagePath : null, evidenceMessage, cancellationToken);
                 bypassError = result.Error;
                 stopBypass = result.Verified;
                 // ResolveAsync may append the approved audit trailers. Evaluate the message Git
                 // will record, including the reason, so unrelated message rules still apply.
                 if (validateCommitMessage)
                 {
-                    commitMessage = await VcaCommitMessageCleaner.StripCommentsAsync(
-                        StopBypassFormat.BeforeScissors(await File.ReadAllTextAsync(invocation.CommitMessagePath!, cancellationToken)), workingDirectory, cancellationToken);
-                    if (stopBypass is not null && (StopBypassFormat.Parse(commitMessage) is not { } evidence
+                    rawMessage = await File.ReadAllTextAsync(invocation.CommitMessagePath!, cancellationToken);
+                    commitMessage = await VcaCommitMessageCleaner.StripCommentsAsync(rawMessage, workingDirectory, cancellationToken);
+                    evidenceMessage = await VcaCommitMessageCleaner.StripCommentsAsync(
+                        StopBypassFormat.BeforeScissors(rawMessage), workingDirectory, cancellationToken);
+                    if (stopBypass is not null && (StopBypassFormat.Parse(evidenceMessage) is not { } evidence
                         || !StopBypassFormat.BuildPayload(evidence.Scope).SequenceEqual(StopBypassFormat.BuildPayload(stopBypass.Scope))))
                     {
                         bypassError = "Git's message cleanup removed or changed the signed STOP reason or evidence. The complete signed exception must remain in the commit message.";

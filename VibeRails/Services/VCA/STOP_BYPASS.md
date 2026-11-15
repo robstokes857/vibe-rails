@@ -25,6 +25,8 @@ rule text. `VCA-STOP-Bypass: v1 <base64>` contains the signed scope and signatur
 The readable lines must match the signed scope exactly. Removing or altering them invalidates
 the exception. Audit text is inserted before a Git scissors line and existing line endings are
 retained. A malformed supplied exception blocks; it is not silently repaired from local state.
+Only signature evidence uses this conservative pre-scissors boundary. General message rules
+still evaluate the tail, which Git can retain in non-editor commits and some cleanup modes.
 Genuine trailers carried forward by an amend can be replaced by a freshly signed exception
 for the new snapshot; stale evidence alone still blocks.
 
