@@ -39,6 +39,28 @@ public class McpStdioHostTests
             provider.GetRequiredService<IGitWorkingTreeSnapshotProvider>());
     }
 
+    [Fact]
+    public void ConfigureServices_EveryRegistrationHasItsDependencies()
+    {
+        // Retiring PR Reviewer removed the registration that had been supplying ICliWrapper to this
+        // host. GitHubCodeLinkLandingCheck (BoardService -> ghost service -> landing check) still
+        // needed it, so every Board and Launch tool failed over stdio with a generic "An error
+        // occurred invoking" while the descriptor tests above stayed green. The test above mocks
+        // IBoardService and so never walked that chain. ValidateOnBuild checks each type-activated
+        // registration's constructor without invoking factories, so no database or model is opened.
+        var services = new ServiceCollection();
+        McpStdioHost.ConfigureServices(services);
+        services.AddLogging();
+
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateOnBuild = true,
+            ValidateScopes = true,
+        });
+
+        Assert.Contains(services, d => d.ServiceType == typeof(VibeRails.Services.Cli.ICliWrapper));
+    }
+
     [Theory]
     [InlineData(new[] { "mcp" }, true)]
     [InlineData(new[] { "MCP" }, true)]

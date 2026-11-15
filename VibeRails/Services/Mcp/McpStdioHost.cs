@@ -1,5 +1,6 @@
 using VibeRails.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
@@ -148,6 +149,10 @@ public static class McpStdioHost
         services.AddSingleton<VibeRails.Services.Board.IBoardLiveSessionProbe, VibeRails.Services.Board.NullBoardLiveSessionProbe>();
         services.AddScoped<VibeRails.Services.Board.IBoardService, VibeRails.Services.Board.BoardService>();
         services.AddSingleton<VibeRails.Services.Board.PostProcessing.IBoardDefaultBranchCheck, VibeRails.Services.Board.PostProcessing.GitDefaultBranchCheck>();
+        // The landing check runs `gh` through ICliWrapper. This host used to get it as a side effect
+        // of the PR-review registration; when PR Reviewer was retired every Board tool died with
+        // "Unable to resolve service for type ICliWrapper", so it is registered here explicitly.
+        services.TryAddSingleton<VibeRails.Services.Cli.ICliWrapper, VibeRails.Services.Cli.CliWrapper>();
         services.AddSingleton<VibeRails.Services.Board.PostProcessing.IBoardCodeLinkLandingCheck, VibeRails.Services.Board.PostProcessing.GitHubCodeLinkLandingCheck>();
         services.AddSingleton<VibeRails.Services.Board.PostProcessing.GhostCardPostProcessor>();
         services.AddSingleton<VibeRails.Services.Board.PostProcessing.BoardGhostService>();
