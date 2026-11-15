@@ -216,6 +216,7 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
             var commitViolations = new List<(string RuleText, string SourceFile, string Slug)>();
             var requiredAcknowledgments = new List<string>();
             var findings = new List<VcaRuleFinding>();
+            var ruleViolations = new List<VcaRuleViolation>();
             var hasStopViolation = false;
             var evaluatedRuleCount = 0;
 
@@ -297,6 +298,10 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
                     var sourceId = GetRuleSourceId(sourceFile, gitRoot);
                     var sourcePath = GetRuleSourcePath(sourceFile, gitRoot);
                     var slug = GenerateRuleSlug(ruleText);
+                    ruleViolations.Add(new(ruleText, sourcePath, enforcement, message,
+                        scopedFiles.SelectMany(file => file.PreviousRelativePath is { } previous
+                            ? new[] { file.RelativePath, previous } : new[] { file.RelativePath })
+                            .Distinct(StringComparer.Ordinal).ToArray()));
 
                     if (enforcement == "WARN")
                     {
@@ -451,7 +456,8 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
                 RequiredAcknowledgments: requiredAcknowledgments.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
                 StagedFileCount: stagedFiles.Count,
                 ApplicableRuleCount: evaluatedRuleCount,
-                Findings: findings);
+                Findings: findings,
+                Violations: ruleViolations);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1387,7 +1393,8 @@ internal sealed record VcaToolValidationReport(
     IReadOnlyList<string> RequiredAcknowledgments,
     int StagedFileCount,
     int ApplicableRuleCount,
-    IReadOnlyList<VcaRuleFinding> Findings)
+    IReadOnlyList<VcaRuleFinding> Findings,
+    IReadOnlyList<VcaRuleViolation>? Violations = null)
 {
     public static VcaToolValidationReport Pass(
         string output,

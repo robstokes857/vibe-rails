@@ -179,8 +179,10 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
                     null, null, null, null, null, "", "");
                 var prepared = await services.GetRequiredService<IAutomationScriptService>().PrepareAsync(
                     run.Snapshot.Context.WorkingDirectory, run.Snapshot.Context.Root, scriptInput, cancel.Token);
+                var contextPath = await RuleLaunchDelivery.WriteContextAsync(run, cancel.Token);
+                var environment = RuleLaunchDelivery.EnvironmentFor(run, contextPath, prepared.EnvironmentVariables);
                 var result = await services.GetRequiredService<ICliWrapper>().RunAsync(new CliRequest(prepared.Executable,
-                    prepared.Arguments, prepared.WorkingDirectory, prepared.EnvironmentVariables,
+                    prepared.Arguments, prepared.WorkingDirectory, environment,
                     script.TimeoutSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : Timeout.InfiniteTimeSpan,
                     OnStarted: async pid =>
                     {

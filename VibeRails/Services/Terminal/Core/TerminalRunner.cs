@@ -124,6 +124,13 @@ public class TerminalRunner
         // PrepareSessionAsync bakes into the launch are the same string.
         // initialUserInput remains for callers that record something other than the
         // launched prompt.
+        string? ruleContextPath = null;
+        if (launch is not null)
+        {
+            ruleContextPath = await VibeRails.Services.Launches.RuleLaunchDelivery.WriteContextAsync(launch.Run, ct);
+            if (ruleContextPath is not null)
+                initialPrompt = VibeRails.Services.Launches.RuleLaunchDelivery.AppendPrompt(initialPrompt, ruleContextPath);
+        }
         var userInputToRecord = initialUserInput ?? initialPrompt;
         var initialSize = isNativeCli && NativeConsoleGeometry.TryGetSize(out var nativeSize)
             ? nativeSize
@@ -177,6 +184,9 @@ public class TerminalRunner
             {
                 preparedSession.Environment[kvp.Key] = kvp.Value;
             }
+            if (launch is not null)
+                foreach (var kvp in VibeRails.Services.Launches.RuleLaunchDelivery.EnvironmentFor(launch.Run, ruleContextPath))
+                    preparedSession.Environment[kvp.Key] = kvp.Value!;
             _stateService.PublishSessionStart(sessionId, LlmParser.ToWireName(llm), workDir, envName, preparedSession.SetupCommands, preparedSession.LaunchCommand);
 
             // Environment Steps run here — after the session row exists (so a failure is recorded

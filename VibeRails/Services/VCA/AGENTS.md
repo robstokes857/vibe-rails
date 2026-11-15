@@ -164,6 +164,14 @@ wrong in all three validators:
 
 ## Enforcement levels
 
+Rule violations may queue an AI Agent or script Action through a project-scoped launch binding
+(VB-46). This does not change enforcement or add rule-file syntax. Only real pre-commit and
+commit-msg invocations opt into admission; validation services and check Actions remain pure.
+Keep explicit violation records separate from display warnings: unrecognized/deferred rules
+must never launch work. STOP remediation is admitted before the generic before-commit skip.
+See [rule responses](../Launches/README.md#vca-rule-responses-vb-46) for identity, captured context,
+deduplication, loop prevention and tests.
+
 `Require VibeRails session link` requires at least one public session replay URL in the final
 commit message. It defers at pre-commit and in Rules-page validation, then follows the normal
 WARN/COMMIT/STOP policy at commit-msg (including message-only commits). `SessionShareCommitRule`

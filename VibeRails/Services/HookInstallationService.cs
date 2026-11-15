@@ -994,7 +994,7 @@ namespace VibeRails.Services
 
                 var expectedInvocation = hookName switch
                 {
-                    "commit-msg" => "--vca-hook commit-msg",
+                    "commit-msg" => "--vca-hook commit-msg --enqueue-automations",
                     "post-commit" => "--job-trigger post-commit",
                     _ => "--vca-hook pre-commit --enqueue-automations"
                 };

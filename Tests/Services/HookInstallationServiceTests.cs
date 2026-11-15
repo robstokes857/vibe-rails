@@ -49,7 +49,7 @@ VIBERAILS_EXECUTABLE='__VIBERAILS_EXECUTABLE__'
 VIBERAILS_EXECUTABLE_ARGUMENT='__VIBERAILS_EXECUTABLE_ARGUMENT__'
 VIBERAILS_CHAINED_HOOK='__VIBERAILS_CHAINED_HOOK__'
 if [ -n ""$VIBERAILS_CHAINED_HOOK"" ]; then ""$VIBERAILS_CHAINED_HOOK"" ""$@""; fi
-vb --vca-hook commit-msg --commit-message ""$1""
+vb --vca-hook commit-msg --enqueue-automations --commit-message ""$1""
 # End Vibe Rails Hook
 ";
             File.WriteAllText(Path.Combine(_scriptsDir, "commit-msg-hook.sh"), commitMsgScript);
@@ -118,13 +118,15 @@ if [ -n ""$VIBERAILS_CHAINED_HOOK"" ]; then ""$VIBERAILS_CHAINED_HOOK"" ""$@""; 
             Assert.Contains("# End Vibe Rails Hook", content);
         }
 
-        [Fact]
-        public async Task GetStatusAsync_MarksAPreCommitHookWithoutAutomationAuthorizationAsStale()
+        [Theory]
+        [InlineData("pre-commit")]
+        [InlineData("commit-msg")]
+        public async Task GetStatusAsync_MarksAHookWithoutAutomationAuthorizationAsStale(string hook)
         {
             Assert.True((await _service.InstallHooksAsync(
                 _testRepoPath,
                 TestContext.Current.CancellationToken)).Success);
-            var hookPath = Path.Combine(_hooksDir, "pre-commit");
+            var hookPath = Path.Combine(_hooksDir, hook);
             var content = await File.ReadAllTextAsync(hookPath, TestContext.Current.CancellationToken);
             await File.WriteAllTextAsync(
                 hookPath,
@@ -135,7 +137,7 @@ if [ -n ""$VIBERAILS_CHAINED_HOOK"" ]; then ""$VIBERAILS_CHAINED_HOOK"" ""$@""; 
                 _testRepoPath,
                 TestContext.Current.CancellationToken);
 
-            Assert.Equal(GitHookFileState.Stale, status.PreCommit.State);
+            Assert.Equal(GitHookFileState.Stale, hook == "pre-commit" ? status.PreCommit.State : status.CommitMessage.State);
         }
 
         [Fact]

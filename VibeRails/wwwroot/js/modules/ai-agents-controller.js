@@ -26,7 +26,7 @@ import {
 } from './board-launch-options.js';
 import { mountLlmPicker } from './pickers/llm-picker.js';
 import { runHistorySection, mountRunHistory } from './launch-history.js';
-import { bindingSection, mountBindings } from './launch-bindings.js';
+import { bindingSection, mountBindings, bindingTrigger } from './launch-bindings.js';
 import { PythonScriptsController } from './python-scripts-controller.js';
 import { openLaunchTerminal, waitForNativeLaunch } from './launch-terminal.js';
 import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
@@ -456,7 +456,9 @@ export class AiAgentsController {
             enabled() && scope.includesCurrent() && (!isPreset || Boolean(prompt.value.trim()));
         const binding = mountBindings(editor, initialBindings, {
             project,
-            eligible
+            eligible,
+            ruleEligible: () => isPreset || get('kind')?.value === 'script',
+            loadRules: signal => this.api.call('agents', 'GET', null, { signal })
         });
         disposers.push(binding.dispose);
         let bindingBaseline = new Map(
@@ -744,6 +746,8 @@ export class AiAgentsController {
                 get('name').focus();
                 return;
             }
+            const bindingError = binding.validate();
+            if (bindingError) { report(bindingError); return; }
             lock(true);
             try {
                 await waitForBoardLaunchDefaults(editor);
@@ -810,7 +814,8 @@ export class AiAgentsController {
                     const returned = await this.api.saveBinding(draft.id, {
                         definitionId: definition.id,
                         definitionType: type,
-                        trigger: draft.trigger,
+                        trigger: bindingTrigger(draft.trigger),
+                        rule: Number(draft.trigger.kind) === 6 ? draft.rule : null,
                         enabled: draft.enabled,
                         expectedRevision: draft.revision || 0
                     });

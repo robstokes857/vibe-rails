@@ -10,7 +10,9 @@ public enum JobTriggerKind
     Commit = 2,
     Manual = 3,
     PreCommit = 4,
-    BoardLane = 5
+    BoardLane = 5,
+    // Rule-specific launch binding; never a legacy Job trigger.
+    RuleViolation = 6
 }
 
 public enum JobScheduleKind

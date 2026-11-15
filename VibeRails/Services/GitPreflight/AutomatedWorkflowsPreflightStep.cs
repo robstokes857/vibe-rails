@@ -25,12 +25,49 @@ public sealed class AutomatedWorkflowsPreflightStep(
         GitPreflightStepContext context,
         CancellationToken cancellationToken)
     {
+        List<string> ruleOutput = [];
+        var invocation = context.Request.Invocation;
+        // Run before the generic before-commit gate: a blocked STOP must still queue remediation.
+        if (context.Request.EnqueueAutomatedJobs && invocation.EnqueueAutomatedJobs
+            && invocation.Kind is VcaHookKind.PreCommit or VcaHookKind.CommitMessage
+            && !invocation.DemoUi && !invocation.WorkingTreeScope
+            && !context.Request.WorkingTreeChanges && !context.Request.UnpushedChanges
+            && (launches is not null || jobStoreAccessor is null))
+        {
+            var violations = context.CompletedSteps?.FirstOrDefault(step => step.StepId == VcaPreflightStep.Id)
+                ?.VcaSummary?.Violations ?? [];
+            if (violations.Count > 0)
+            {
+                try
+                {
+                    var ruleEvents = launches ?? VibeRails.Services.Launches.LaunchEventService.Create();
+                    ruleOutput.AddRange(await ruleEvents.EnqueueRuleViolationsAsync(context.Snapshot, invocation.Kind,
+                        violations, cancellationToken));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    ruleOutput.Add("VCA responses could not queue: " + ex.Message + ". Commit enforcement is unchanged.");
+                }
+            }
+        }
+        foreach (var line in ruleOutput) await context.WriteOutputAsync(line, null, cancellationToken);
+
+        async Task<GitPreflightStepResult> FinishAsync(GitPreflightStepContext stepContext,
+            GitPreflightStepStatus status, string message, CancellationToken ct)
+        {
+            await stepContext.WriteOutputAsync(message, null, ct);
+            // The styled hook console collapses passed/skipped transcripts. A response to a
+            // violation (including failed admission) needs visible, non-blocking diagnostics.
+            if (ruleOutput.Count > 0) status = GitPreflightStepStatus.Warning;
+            return new(Id, DisplayName, status, message, [.. ruleOutput, message], DurationMs: 0, Blocking: false);
+        }
+
         if (context.Request.Invocation.Kind is not VcaHookKind.PreCommit)
         {
             return await FinishAsync(
                 context,
                 GitPreflightStepStatus.Skipped,
-                "Automated workflows run from the pre-commit hook, not here.",
+                "Generic before-commit automations do not run at this hook stage.",
                 cancellationToken);
         }
 
@@ -87,20 +124,4 @@ public sealed class AutomatedWorkflowsPreflightStep(
         return vca is { Status: GitPreflightStepStatus.Blocked or GitPreflightStepStatus.Error };
     }
 
-    private async Task<GitPreflightStepResult> FinishAsync(
-        GitPreflightStepContext context,
-        GitPreflightStepStatus status,
-        string message,
-        CancellationToken cancellationToken)
-    {
-        await context.WriteOutputAsync(message, null, cancellationToken);
-        return new GitPreflightStepResult(
-            Id,
-            DisplayName,
-            status,
-            message,
-            [message],
-            DurationMs: 0,
-            Blocking: false);
-    }
 }

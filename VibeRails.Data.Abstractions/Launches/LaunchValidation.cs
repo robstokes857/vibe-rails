@@ -16,9 +16,13 @@ public static partial class LaunchValidation
             || string.IsNullOrWhiteSpace(context.WorkingDirectory)
             || string.IsNullOrWhiteSpace(context.OccurrenceId) || context.OccurrenceId.Length > 1_000
             || context.OccurrenceId.Any(char.IsControl)
-            || context.TriggerKind is not ("manual" or "board" or "board-lane" or "schedule" or "before-commit" or "after-commit" or "binding"))
+            || context.TriggerKind is not ("manual" or "board" or "board-lane" or "schedule" or "before-commit" or "after-commit" or "binding" or "rule-violation"))
             throw new LaunchValidationException("The run requires a valid project, occurrence and supported trigger context.");
         if ((snapshot.Preset is null) == (snapshot.Action is null)) throw new LaunchValidationException("A run must contain exactly one preset or Action.");
+        if (context.TriggerKind == "rule-violation" && context.RuleViolation is null)
+            throw new LaunchValidationException("A rule response requires captured violation context.");
+        if (context.RuleViolation is not null && snapshot.Action is { Kind: not "script" })
+            throw new LaunchValidationException("A rule response must use an AI Agent or script Action.");
         RejectRetiredPrompt(snapshot.Preset?.InitialPrompt);
         RejectRetiredPrompt(snapshot.Context.PromptPrefix);
         RejectRetiredPrompt(snapshot.Context.PromptOverride);

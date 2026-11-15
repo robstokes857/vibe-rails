@@ -81,6 +81,7 @@ public sealed class VcaRulesHookValidationService(
                 report.RequiredAcknowledgments,
                 report.StagedFileCount,
                 report.ApplicableRuleCount,
-                report.Findings));
+                report.Findings,
+                report.Violations));
     }
 }

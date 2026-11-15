@@ -67,11 +67,11 @@ if [ -n "$VIBERAILS_CHAINED_HOOK" ] && [ -f "$VIBERAILS_CHAINED_HOOK" ]; then
 fi
 
 if [ -n "$viberails_console_arg" ]; then
-    viberails_run --vca-hook commit-msg --co-authors-cleaned --commit-message "$1" --workdir "$viberails_repo_root" "$viberails_prompt_arg" "$viberails_console_arg"
+    viberails_run --vca-hook commit-msg --enqueue-automations --co-authors-cleaned --commit-message "$1" --workdir "$viberails_repo_root" "$viberails_prompt_arg" "$viberails_console_arg"
 elif [ -n "$viberails_prompt_arg" ]; then
-    viberails_run --vca-hook commit-msg --co-authors-cleaned --commit-message "$1" --workdir "$viberails_repo_root" "$viberails_prompt_arg"
+    viberails_run --vca-hook commit-msg --enqueue-automations --co-authors-cleaned --commit-message "$1" --workdir "$viberails_repo_root" "$viberails_prompt_arg"
 else
-    viberails_run --vca-hook commit-msg --co-authors-cleaned --commit-message "$1" --workdir "$viberails_repo_root"
+    viberails_run --vca-hook commit-msg --enqueue-automations --co-authors-cleaned --commit-message "$1" --workdir "$viberails_repo_root"
 fi
 viberails_exit_code=$?
 

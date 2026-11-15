@@ -9,7 +9,7 @@ public sealed record SavePresetRequest(string Name, string? Description, string 
 public sealed record SaveActionRequest(string Name, string? Description, string Kind, ScriptAction? Script = null,
     CheckAction? Check = null, bool Enabled = true, long ExpectedRevision = 0, string[]? ProjectPaths = null);
 public sealed record SaveBindingRequest(string DefinitionId, string DefinitionType, JobTriggerRequest Trigger,
-    bool Enabled = true, long ExpectedRevision = 0);
+    bool Enabled = true, long ExpectedRevision = 0, RuleLaunchTrigger? Rule = null);
 public sealed record LaunchRequest(string DefinitionId, string DefinitionType = "preset", string? OccurrenceId = null,
     string? PromptPrefix = null, string? InitialPrompt = null, long? ExpectedRevision = null,
     bool NativeTerminal = false);

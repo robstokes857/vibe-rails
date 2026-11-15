@@ -144,6 +144,60 @@ UTF-8 Markdown/TXT (default 40,000, maximum 250,000 characters), or images up to
 older run snapshots remain readable through the run route. No fake Board card,
 relationship or comment is created.
 
+## VCA rule responses (VB-46)
+
+In **AI Agents**, edit a saved AI Agent or script Action, choose **Create schedule or event**,
+then **Rule violation** and a repository rule. Save to associate that target with the rule;
+turn off the binding's **Enabled** switch to disable it. This is a project-scoped association
+in `launches.db`, not new `vc.rules.md` syntax. Rules remain in their declaring files.
+The existing revision-checked `/trigger-bindings` contract accepts `trigger:{kind:6}` and
+`rule:{sourcePath,ruleText}`. The source is stored as a repository-relative Git path; the
+exact parsed rule text and declaring file identify it together. Enforcement changes do not
+change identity. Moving a rule or editing its text requires updating the selection. Duplicate
+declarations of the same text in one file represent the same rule response.
+
+The shared rule reader validates new/enabled selections. Disabled bindings can retain a
+missing rule. The editor retains unavailable selections and reports rule-list failures.
+Only prompt-bearing Agents and approved script Actions qualify; check Actions and Quick
+Launches do not. Normal project scope, revision, disable/retire and script-byte approval
+checks still apply. Admission rechecks the binding within the run's writer transaction.
+
+Only installed pre-commit and commit-msg hooks pass `--enqueue-automations`. The latter
+evaluates deferred message rules. The non-blocking automated-workflows step consumes explicit
+`VcaRuleViolation` records before the generic before-commit STOP skip. Passing, deferred,
+unrecognized, SKIP and DISABLED rules never produce those records. Recognized but unevaluable
+rules retain their normal violation policy. Ordinary validation, check Actions and previews
+have no admission side effects. WARN/COMMIT/STOP behavior is unchanged: STOP still blocks,
+COMMIT still needs its message acknowledgment, and either can queue a response. Queue/storage
+or eligibility failures appear in the hook transcript without changing enforcement.
+
+`LaunchEventService` snapshots `RuleLaunchContext` in the normal immutable run. It contains
+rule identity/text, declaring file, enforcement, reason, scoped changed paths (including both
+sides of renames), repository, base commit when one exists, base tree, staged tree and hook stage.
+No future commit hash is required. The occurrence key hashes the rule identity, target type/ID
+and base-commit/base-tree/staged-tree tuple, scoped by project. Repeated hooks, concurrent delivery,
+duplicate bindings and evaluation in both hook stages converge on one run. Changed staged
+content or a changed base makes a new occurrence. Unstaged edits and message-only edits against
+the same snapshot do not. A different target is an independent response; failed eligibility
+does not consume an occurrence. Explicit run retries retain original evidence.
+
+At execution, `RuleLaunchDelivery` materializes the captured JSON under the install's
+`launch-context` directory. Both scripts and Agents receive `VIBERAILS_RULE_CONTEXT_PATH`;
+Agents also receive a prompt pointing to it after normal placeholder resolution. Rule text
+never becomes shell source or a placeholder template. Run history shows the rule and reason,
+with the full context in Run configuration. Context files are derived evidence; the queued
+snapshot remains authoritative and recreates them on execution.
+
+Response processes receive `VIBERAILS_RULE_RESPONSE`, inherited by their child Git hooks.
+Those hooks suppress rule responses for all rules/targets and explain why, while still applying
+the commit gate. This prevents automatic response chains within the process tree; it is loop
+prevention, not a security boundary against a process deliberately removing its environment.
+No backend-global environment is changed. Hook admission opens only `launches.db`, not
+`board.db`. Durable runs wait for an open root's existing scheduler; no daemon is introduced.
+
+Regressions: `RuleLaunchTests`, `rule-launch-bindings.test.mjs` and
+`UITests/playwright.rule-launches.config.js` (real editor, mocked API, 320/375/768/1024px).
+
 ## Execution and recovery
 
 For a native run, the root claims capacity and uses the existing OS-terminal launcher

@@ -30,6 +30,17 @@ public sealed partial class LaunchStore
             if (await reader.ReadAsync(ct)) return ReadRun(reader);
 
         if ((snapshot.Preset is null) == (snapshot.Action is null)) throw new LaunchValidationException("Choose exactly one preset or Action.");
+        if (sourceRunId is null && snapshot.Context.RuleViolation is { } violation)
+        {
+            var binding = snapshot.Context.BindingId is { } bindingId
+                ? await ReadDefinition(db, tx, "TriggerBindings", bindingId, StorageJsonSerializerContext.Default.LaunchTriggerBinding, ct)
+                : null;
+            if (binding is null || !binding.Enabled || binding.ProjectPath != snapshot.Context.ProjectPath
+                || binding.DefinitionId != snapshot.DefinitionId || binding.DefinitionType != snapshot.DefinitionType
+                || binding.Trigger.Kind != JobTriggerKind.RuleViolation || binding.Rule is not { } rule
+                || !rule.Matches(violation.SourcePath, violation.RuleText))
+                throw new LaunchConflictException("The rule response changed or was disabled before enqueue. Try the commit again.");
+        }
         if (sourceRunId is not null)
         {
             using var source = Command(db, "SELECT Snapshot,Status FROM Runs WHERE Id=$id AND ProjectPath=$project;", tx,

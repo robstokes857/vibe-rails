@@ -126,14 +126,23 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
             throw new LaunchValidationException("Select a preset or Action by stable ID.");
         var error = JobScheduleCalculator.Validate(request.Trigger);
         if (error is not null) throw new LaunchValidationException(error);
-        if (request.Trigger.Kind is not (JobTriggerKind.Schedule or JobTriggerKind.PreCommit or JobTriggerKind.Commit))
-            throw new LaunchValidationException("Use a schedule, before-commit or after-commit binding. Board lanes own their own ordered selections.");
-        if (request.Enabled) await SnapshotAsync(request.DefinitionType, request.DefinitionId,
-            Keyed(new(project, project, "binding", "validation")), ct);
+        if (request.Trigger.Kind is not (JobTriggerKind.Schedule or JobTriggerKind.PreCommit or JobTriggerKind.Commit or JobTriggerKind.RuleViolation))
+            throw new LaunchValidationException("Use a schedule, commit event or rule violation binding. Board lanes own their own ordered selections.");
+        var rule = request.Trigger.Kind == JobTriggerKind.RuleViolation
+            ? await RuleLaunchIdentity.ValidateAsync(project, request.Rule, request.Enabled, ct) : null;
+        if (request.Rule is not null && rule is null)
+            throw new LaunchValidationException("Only rule violation bindings may select a rule.");
+        if (request.Enabled)
+        {
+            var snapshot = await SnapshotAsync(request.DefinitionType, request.DefinitionId,
+                Keyed(new(project, project, "binding", "validation")), ct);
+            if (rule is not null && snapshot.Action is { Kind: not "script" })
+                throw new LaunchValidationException("Select an AI Agent or approved script Action for a rule response.");
+        }
         var binding = new LaunchTriggerBinding(id ?? "binding_" + Guid.NewGuid().ToString("N"), request.DefinitionId,
             request.DefinitionType, ProjectKey(project), request.Trigger, request.Enabled, 0, default, default,
             request.Trigger.Kind == JobTriggerKind.Schedule ? JobScheduleCalculator.ComputeNext(request.Trigger, DateTime.UtcNow) : null,
-            ProjectRoot(project));
+            ProjectRoot(project), rule);
         return await store.SaveBindingAsync(binding, request.ExpectedRevision, ct);
     }
 

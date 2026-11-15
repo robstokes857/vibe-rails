@@ -40,7 +40,7 @@ public sealed record VcaHookInvocation(
     // installed before that pass existed do not pass it, and those invocations still clean the
     // message inline so an un-upgraded repository keeps the policy.
     bool CoAuthorsAlreadyCleaned = false,
-    // Only the installed pre-commit hook passes this. Manual validation and the Git Guard
+    // Only the installed pre-commit/commit-msg hooks pass this. Manual validation and the Git Guard
     // console reuse the pre-commit pipeline, but must remain previews that do not start agents.
     bool EnqueueAutomatedJobs = false,
     // SignCommitMessage only: what to sign and what to show the person signing it.
@@ -104,7 +104,12 @@ public sealed record VcaHookValidationSummary(
     IReadOnlyList<string> RequiredAcknowledgments,
     int StagedFileCount = 0,
     int ApplicableRuleCount = 0,
-    IReadOnlyList<VcaRuleFinding>? Findings = null);
+    IReadOnlyList<VcaRuleFinding>? Findings = null,
+    IReadOnlyList<VcaRuleViolation>? Violations = null);
+
+/// <summary>An evaluated violation, separate from deferred checks and unrecognized-rule warnings.</summary>
+public sealed record VcaRuleViolation(string Rule, string SourcePath, string Enforcement,
+    string Reason, string[] ChangedFiles);
 
 public sealed record VcaHookValidationResult(
     string Output,

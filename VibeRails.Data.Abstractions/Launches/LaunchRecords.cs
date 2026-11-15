@@ -37,14 +37,30 @@ public sealed record CheckAction(string Scope, string? FailGrade = null, string?
 /// before VIBE-296 have no root and fall back to the key.</remarks>
 public sealed record LaunchTriggerBinding(string Id, string DefinitionId, string DefinitionType,
     string ProjectPath, JobTriggerRequest Trigger, bool Enabled, long Revision,
-    DateTime CreatedUtc, DateTime UpdatedUtc, DateTime? NextRunUtc = null, string? ProjectRoot = null);
+    DateTime CreatedUtc, DateTime UpdatedUtc, DateTime? NextRunUtc = null, string? ProjectRoot = null,
+    RuleLaunchTrigger? Rule = null);
+
+/// <summary>Exact rule text and repository-relative declaring file; enforcement is independent.</summary>
+public sealed record RuleLaunchTrigger(string SourcePath, string RuleText)
+{
+    /// <summary>Uses the same Windows path comparison as VCA; rule text remains exact.</summary>
+    public bool Matches(string sourcePath, string ruleText) => RuleText == ruleText
+        && string.Equals(SourcePath, sourcePath, OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+}
+
+/// <summary>Immutable evidence from a real commit attempt. No prospective commit hash is invented.</summary>
+public sealed record RuleLaunchContext(string RuleId, string SourcePath, string RuleText,
+    string Enforcement, string Reason, string[] ChangedFiles, string RepositoryPath,
+    string BaseTree, string StagedTree, string? BaseCommit, string HookStage);
 
 public sealed record LaunchExecutionContext(string ProjectPath, string WorkingDirectory,
     string TriggerKind, string OccurrenceId, string? BindingId = null, string? BoardId = null,
     string? CardId = null, string? LaneEntryId = null, string? PromptPrefix = null,
     bool AuthorizeBoardTools = false, bool ContextIncluded = false, string? ComposedPrompt = null,
     string? SessionOrigin = null, string? Selection = null, string? PromptOverride = null,
-    string? ProjectRoot = null, string? SessionTitle = null, bool NativeTerminal = false)
+    string? ProjectRoot = null, string? SessionTitle = null, bool NativeTerminal = false,
+    RuleLaunchContext? RuleViolation = null)
 {
     /// <summary>
     /// The project as the queuing root spelled it. <see cref="ProjectPath"/> is the comparison key

@@ -50,6 +50,7 @@ export function mountRunHistory(app, root, api, getId) {
                 <strong>${escapeHtml(new Date(run.queuedUtc).toLocaleString())}</strong>
                 <p>Process: <strong>${escapeHtml(run.status)}</strong> · Result: <strong>${escapeHtml(run.verdict || 'Not reported')}</strong>${run.exitCode == null ? '' : ` · Exit ${Number(run.exitCode)}`}</p>
                 ${run.error ? `<p class="text-danger">${escapeHtml(run.error)}</p>` : ''}
+                ${run.snapshot?.context?.ruleViolation ? `<p class="board-editor-muted">Rule response: ${escapeHtml(run.snapshot.context.ruleViolation.sourcePath)} · ${escapeHtml(run.snapshot.context.ruleViolation.ruleText)}<br>${escapeHtml(run.snapshot.context.ruleViolation.reason)}</p>` : ''}
                 <div class="launch-run-actions">
                     ${run.tabId && !isRunFinished(run) ? `<button class="btn btn-sm btn-outline-secondary" data-run-open="${escapeHtml(run.id)}">Open terminal</button>` : ''}
                     ${run.sessionId ? `<button class="btn btn-sm btn-outline-secondary" data-run-replay="${escapeHtml(run.id)}">Recorded terminal</button>` : ''}

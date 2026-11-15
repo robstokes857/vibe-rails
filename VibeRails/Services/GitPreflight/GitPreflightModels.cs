@@ -109,8 +109,8 @@ public sealed record GitPreflightRequest(
     // in step output ("unpushed" instead of "changed"/"staged") so the user can tell
     // at a glance which scan they're reading.
     bool UnpushedChanges = false,
-    // Only the standalone native pre-commit hook sets this. Browser/Rules previews use
-    // the same pipeline and may report matching before-commit Automations, but must never
+    // Only the standalone native pre-commit/commit-msg hooks set this. Browser/Rules previews use
+    // the same pipeline and may report matching Automations, but must never
     // enqueue real runs.
     bool EnqueueAutomatedJobs = false,
     string? ScopeLabel = null,
