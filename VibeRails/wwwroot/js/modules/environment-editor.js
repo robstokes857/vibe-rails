@@ -2,6 +2,7 @@ import { agentPurposeOptions } from './agent-purpose.js';
 import { getEnabledLlmItems, mountLlmPicker, setLlmPickerValue } from './pickers/llm-picker.js';
 import { normalizeSteps, openStepsEditor, renderStepsSummaryButton, serializeSteps, summarizeSteps } from './environment-steps.js';
 import { hasStartingMessage } from './launch-kind.js';
+import { refreshLlmModelCatalog, renderLlmModelOptions } from './llm-model-catalog.js';
 
 /** A form-scoped lookup, also accepting Document and the lightweight unit-test documents. */
 export function environmentField(root, id) {
@@ -144,6 +145,11 @@ export function mountEnvironmentEditor(controller, host, {
         context: 'environment-provider', placeholder: null, selectedValue: initialCli, includeGroups: false
     });
     renderSettings(initialCli, cliSettings);
+    refreshLlmModelCatalog(app).then(changed => {
+        if (!changed || disposed) return;
+        const model = host.querySelector('select[id$="-model"]');
+        if (model) model.innerHTML = renderLlmModelOptions(currentCli, model.value);
+    });
     cliSelect.addEventListener('change', () => {
         if (savedEnvironment) return;
         drafts.set(currentCli, controller.extractCliSettingsPayload(currentCli, host));

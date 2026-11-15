@@ -328,6 +328,18 @@ namespace VibeRails
             serviceCollection.AddScoped<IGetUserText, GetUserText>();
             serviceCollection.AddScoped<IProjectCache, ProjectCache>();
             serviceCollection.AddScoped<IGlobalCache, GlobalCache>();
+            serviceCollection.AddMemoryCache();
+            Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddSingleton(serviceCollection, TimeProvider.System);
+            serviceCollection.AddSingleton<Services.LlmClis.ModelCatalogClient>();
+            serviceCollection.AddHttpClient(Services.LlmClis.ModelCatalogClient.ClientName, client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(5);
+                client.MaxResponseContentBufferSize = 1024 * 1024;
+            }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false, UseCookies = false,
+                ConnectTimeout = TimeSpan.FromSeconds(3), MaxResponseHeadersLength = 16
+            });
             serviceCollection.AddScoped<Services.Setup.ISetupStatusService, Services.Setup.SetupStatusService>();
             // PR review tracker: routes are root-only, the registration is harmless elsewhere.
             // Storage comes from AddSqliteStorage above.

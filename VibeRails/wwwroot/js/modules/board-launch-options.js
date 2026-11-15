@@ -1,5 +1,5 @@
 import { escapeHtml } from './utils.js';
-import { codexModelSupportsSpeed, codexModelSupportsEffort, normalizeCodexModelEffort, normalizeLlmModel, renderLlmModelOptions } from './llm-model-catalog.js';
+import { codexModelSupportsSpeed, codexModelSupportsEffort, normalizeCodexModelEffort, normalizeLlmModel, renderLlmModelOptions, refreshLlmModelCatalog } from './llm-model-catalog.js';
 
 const pinnedModels = Object.freeze({
     'glm-5.2': 'zai/glm-5.2', 'glm-5.3': 'zai-coding-plan/glm-5.3',
@@ -128,6 +128,12 @@ export function bindBoardLaunchOptions(container, selection, { app, useDefaults 
     let disposed = false;
     let edited = false;
     const alive = () => !disposed && container.isConnected !== false;
+    refreshLlmModelCatalog(app).then(changed => {
+        if (!changed || !alive() || !model) return;
+        // Preserve the current draft, including a choice made while the request was in flight.
+        model.innerHTML = renderLlmModelOptions(cli, model.value);
+        synchronize();
+    });
     const markEdited = () => { edited = true; abort.abort(); };
     const endpoint = `/api/v1/llm-picker/defaults/${encodeURIComponent(cli || '')}`;
     const saveDefault = async () => {

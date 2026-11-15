@@ -7,6 +7,12 @@ public static class LlmPickerRoutes
 {
     public static void Map(WebApplication app, bool isActiveRootBackend = true)
     {
+        // Normal session + tab authentication applies; there is no new middleware exception.
+        app.MapGet("/api/v1/llm-picker/models", async (
+            [Microsoft.AspNetCore.Mvc.FromServices] Services.LlmClis.ModelCatalogClient catalog, CancellationToken cancellationToken) =>
+            await catalog.GetAsync(cancellationToken) is { } snapshot ? Results.Ok(snapshot) :
+                Results.Json(new ErrorResponse("Model catalog is temporarily unavailable."), statusCode: 503))
+            .WithName("GetLlmModelCatalog");
         app.MapGet("/api/v1/llm-picker/preferences", async (
             ILlmPickerPreferenceService service,
             CancellationToken cancellationToken) =>

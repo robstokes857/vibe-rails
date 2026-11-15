@@ -2316,6 +2316,8 @@ namespace VibeRails.DTOs
 [JsonSerializable(typeof(LaunchAttachment))]
 [JsonSerializable(typeof(IReadOnlyList<LaunchAttachment>))]
 [JsonSerializable(typeof(LaunchAttachmentRequest))]
+    [JsonSerializable(typeof(Services.LlmClis.ModelCatalogSnapshot))]
+    [JsonSerializable(typeof(Services.LlmClis.CachedModelCatalog))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
     }

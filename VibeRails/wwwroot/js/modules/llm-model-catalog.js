@@ -36,7 +36,7 @@ export function normalizeCodexModelEffort(model, effort) {
 }
 
 // Shared pinned catalog for Environments and board launch options.
-export const LLM_MODEL_OPTIONS = Object.freeze({
+export let LLM_MODEL_OPTIONS = Object.freeze({
     'codex': [
         ['', 'Default (Codex recommended)'],
         ['gpt-6-astra', 'gpt-6-astra'],
@@ -158,6 +158,44 @@ export function renderLlmModelOptions(cli, selectedModel = '') {
     const rendered = options.map(([value, label]) => `<option value="${escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(label)}</option>`);
     if (selected && !options.some(([value]) => value === selected)) rendered.push(`<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)} (custom)</option>`);
     return rendered.join('');
+}
+
+const bundledModels = LLM_MODEL_OPTIONS;
+let catalogRevision = 0;
+let refreshAfter = 0;
+let pendingCatalog;
+
+/** Apply only a complete, validated names-only snapshot. Empty lists deliberately leave Default. */
+export function applyRemoteModelCatalog(snapshot) {
+    if (snapshot?.version !== 1 || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 1 ||
+        !Array.isArray(snapshot.models) || snapshot.models.length > 500) return false;
+    const next = Object.fromEntries(Object.entries(bundledModels).map(([cli, pairs]) => [cli, [pairs[0]]]));
+    const seen = new Set();
+    for (const item of snapshot.models) {
+        if (!item || !Object.hasOwn(next, item.cli) || typeof item.value !== 'string' || item.value.length > 200 ||
+            item.value !== item.value.trim() || !/^[A-Za-z0-9][A-Za-z0-9._/: ()\-]*(\[1m\])?$/.test(item.value) ||
+            (item.cli !== 'claude' && item.value.endsWith('[1m]')) || typeof item.label !== 'string' ||
+            !item.label.trim() || item.label.length > 200 || /[\u0000-\u001f\u007f-\u009f]/.test(item.label)) return false;
+        const key = item.cli + '\n' + item.value;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        next[item.cli].push([item.value, item.label]);
+    }
+    if (snapshot.revision < catalogRevision) return false;
+    catalogRevision = snapshot.revision;
+    LLM_MODEL_OPTIONS = Object.freeze(next);
+    return true;
+}
+
+/** The authenticated local API owns hourly remote reads; this layer only coalesces UI reads. */
+export function refreshLlmModelCatalog(app) {
+    if (!app?.apiCall || Date.now() < refreshAfter) return Promise.resolve();
+    if (!pendingCatalog) pendingCatalog = Promise.resolve().then(() => app.apiCall('/api/v1/llm-picker/models', 'GET', null,
+        { showLoading: false })).then(applyRemoteModelCatalog).catch(() => false).finally(() => {
+            refreshAfter = Date.now() + 60000;
+            pendingCatalog = null;
+        });
+    return pendingCatalog;
 }
 
 // Trims a saved model value and, for Claude, upgrades a bare ID whose [1m] form is pinned
