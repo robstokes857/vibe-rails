@@ -81,6 +81,41 @@ public sealed class LaunchTests : IDisposable
         await LaunchExecution.CompleteSessionAsync("literal-session", 0);
     }
 
+    [Theory]
+    [InlineData(true, false, "Review this change")]
+    [InlineData(true, true, "Review this change")]
+    [InlineData(false, false, "Review this change")]
+    [InlineData(false, true, "Review this change")]
+    [InlineData(true, false, null)]
+    [InlineData(true, false, "")]
+    [InlineData(true, false, " \n")]
+    [InlineData(false, false, "")]
+    public async Task BoardAwareAdmissionOnlyAddsReadyGuidanceWhenThereIsNoUserTask(bool nudge, bool emptyOverride, string? message)
+    {
+        var boards = new Mock<IBoardStore>(MockBehavior.Strict);
+        boards.Setup(b => b.GetAppContextSettingsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AppContextSettingsRecord("App instructions", 1));
+        boards.Setup(b => b.GetEveryContextSettingsAsync(root, "board", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BoardEveryContextSettingsRecord("Board instructions", 1));
+        var launch = new LaunchService(store, Mock.Of<IAutomationScriptService>(), boards.Object,
+            () => new VibeRails.Utils.Settings { CreateVibeStoryTracking = nudge });
+        var preset = (await Preset(emptyOverride ? "{{context default=\"\"}}" : "")).Preset;
+        var run = await launch.EnqueueAsync("preset", preset.Id, new(root, root, "manual", "nudged-message",
+            BoardId: "board", PromptOverride: emptyOverride ? "" : null, UserMessage: message), Ct);
+        var composed = run.Snapshot.Context.ComposedPrompt ?? "";
+        Assert.True(run.Snapshot.Context.ContextIncluded);
+        Assert.Equal(nudge && string.IsNullOrWhiteSpace(message), composed.Contains(VibeRails.Services.Terminal.VibeStoryTrackingPrompt.Guidance));
+        Assert.Equal(nudge, composed.Contains("App instructions"));
+        Assert.Equal(nudge, composed.Contains("Board instructions"));
+        var resolved = await new VibeRails.Services.Environments.PromptPlaceholderService().ResolveLaunchAsync(
+            NativeLaunchRunner.ComposePrompt(run.Snapshot), new(root, UserMessage: run.Snapshot.Context.UserMessage), Ct);
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            Assert.DoesNotContain(VibeRails.Services.Terminal.VibeStoryTrackingPrompt.Guidance, resolved.Prompt!);
+            Assert.EndsWith(message, resolved.Prompt);
+        }
+    }
+
     [Fact]
     public async Task LostAcknowledgmentFindsOriginalEvenAfterPromptCleared()
     {

@@ -12,7 +12,8 @@ namespace VibeRails.Services.Launches;
 /// Without <paramref name="boards"/> (the git-hook enqueue path, which must never open board.db), a
 /// preset snapshot leaves the nudge and App/Board context to the root that starts its session.
 /// </remarks>
-public sealed class LaunchService(ILaunchStore store, IAutomationScriptService scripts, IBoardStore? boards = null)
+public sealed class LaunchService(ILaunchStore store, IAutomationScriptService scripts, IBoardStore? boards = null,
+    Func<Settings>? launchSettings = null)
 {
     /// <summary>Comparison and lease key. Upper-cased where paths compare case-insensitively; never a working directory.</summary>
     public static string ProjectKey(string project) => LaunchProjectScope.Key(project);
@@ -243,8 +244,9 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
             }
             else
             {
-                var nudge = Config.LoadFresh().CreateVibeStoryTracking;
-                if (nudge && string.IsNullOrWhiteSpace(prompt)) prompt = VibeStoryTrackingPrompt.Guidance;
+                var nudge = (launchSettings ?? Config.LoadFresh)().CreateVibeStoryTracking;
+                if (nudge && string.IsNullOrWhiteSpace(prompt) && string.IsNullOrWhiteSpace(context.UserMessage))
+                    prompt = VibeStoryTrackingPrompt.Guidance;
                 if (nudge)
                     prompt = VibeRails.Services.Terminal.ContextLevels.Prefix(await VibeRails.Services.Terminal.ContextLevels.ResolveNudgedAsync(boards, context.Root, context.BoardId, ct)) + prompt;
                 snapshot = snapshot with { Context = context with { ComposedPrompt = prompt, ContextIncluded = true } };
