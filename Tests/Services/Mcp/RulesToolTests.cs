@@ -178,6 +178,53 @@ public class RulesToolTests
         Assert.Contains("plain acknowledgment cannot bypass STOP", finding.Guidance, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("request_stop_bypass", finding.Guidance, StringComparison.Ordinal);
         Assert.Null(finding.Acknowledgment);
+        // VIBE-331: the exact fix first, then where the rule lives and what gets a deliberate change past it.
+        Assert.StartsWith("Add \"- src/app.cs: what changed\" under ## Files in vc.rules.md.", finding.Guidance, StringComparison.Ordinal);
+        Assert.Contains("edit or lower the rule at vc.rules.md line 3", finding.Guidance, StringComparison.Ordinal);
+        Assert.Contains("have a person sign an exception with a reason", finding.Guidance, StringComparison.Ordinal);
+        Assert.Contains(finding.Guidance, report.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("no-verify", report.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ValidateVcaReportAsync_StopGuidanceNamesTheLineOfARuleWithoutAKnownFix()
+    {
+        var snapshot = CreateSnapshot(
+            "Pty.Net/vc.rules.md",
+            "# Policy\n\nIntro.\n\n## Vibe Rails Rules\n- Log all file changes (WARN)\n- Package file changes (STOP)\n",
+            "Pty.Net/Pty.Net.csproj");
+
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
+            cancellationToken: TestContext.Current.CancellationToken,
+            stagedSnapshot: snapshot);
+
+        var stop = Assert.Single(report.Findings, finding => finding.Kind == VcaRuleFindingKind.Blocked);
+        Assert.Equal("Package file changes", stop.Rule);
+        Assert.StartsWith("Fix the issue. For a deliberate change, edit or lower the rule at Pty.Net/vc.rules.md line 7 (COMMIT",
+            stop.Guidance, StringComparison.Ordinal);
+        // The Files lines a nested policy wants are relative to its own directory, as the reader resolves them.
+        var warn = Assert.Single(report.Findings, finding => finding.Kind == VcaRuleFindingKind.Warning);
+        Assert.Equal("Add \"- Pty.Net.csproj: what changed\" under ## Files in Pty.Net/vc.rules.md. WARN rules do not block the commit.",
+            warn.Guidance);
+    }
+
+    [Fact]
+    public async Task ValidateVcaReportAsync_CommitFindingListsEveryMissingFilesEntryBesideTheToken()
+    {
+        var snapshot = CreateSnapshot(
+            "nested/vc.rules.md",
+            "## Vibe Rails Rules\n- Log all file changes (COMMIT)\n## Files\n- documented.cs\n",
+            ["nested/a.cs", "nested/sub/b.cs", "nested/documented.cs"]);
+
+        var report = await RulesTool.ValidateVcaReportAsync(new VibeRails.Services.GitPreflight.GitStagedSnapshotProvider(),
+            cancellationToken: TestContext.Current.CancellationToken,
+            stagedSnapshot: snapshot);
+
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal(VcaRuleFindingKind.AcknowledgmentRequired, finding.Kind);
+        Assert.Equal("Add one \"- path: what changed\" line per file under ## Files in nested/vc.rules.md: a.cs, sub/b.cs. "
+            + "Or include the shown acknowledgment token and a meaningful reason in the final commit message.", finding.Guidance);
+        Assert.Contains("Or fix it: Add one", report.Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -507,6 +554,7 @@ public class RulesToolTests
         var finding = Assert.Single(report.Findings);
         Assert.Equal("nested/vc.rules.md", finding.SourcePath);
         Assert.Equal($"1 file(s) not documented in vc.rules.md Files section: nested/{changedPath}", finding.Reason);
+        Assert.StartsWith($"Add \"- {changedPath}: what changed\" under ## Files in nested/vc.rules.md.", finding.Guidance, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -605,6 +653,18 @@ public class RulesToolTests
         return new GitStagedSnapshot(
             root,
             files,
+            [new GitIndexTextFile(agentPath, agentContent)]);
+    }
+
+    private static GitStagedSnapshot CreateSnapshot(string agentPath, string agentContent, string[] changedPaths)
+    {
+        var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "vca-structured-tests"));
+        var agent = new GitStagedFileSnapshot(agentPath, Path.Combine(root, agentPath.Replace('/', Path.DirectorySeparatorChar)),
+            GitStagedChangeKind.Modified, ExistsInIndex: true, IsBinary: false, ChangedLineCount: 4, Content: agentContent);
+        return new GitStagedSnapshot(
+            root,
+            [agent, .. changedPaths.Select(path => new GitStagedFileSnapshot(path, Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)),
+                GitStagedChangeKind.Modified, ExistsInIndex: true, IsBinary: false, ChangedLineCount: 3, Content: "staged content"))],
             [new GitIndexTextFile(agentPath, agentContent)]);
     }
 

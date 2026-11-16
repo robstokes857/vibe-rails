@@ -2,8 +2,8 @@ import { getFileTypeVisual } from './file-type-icons.js';
 
 const ENFORCEMENT_LEVELS = [
     { value: 'WARN', icon: '⚠️', blurb: 'Warn, but let the commit through.' },
-    { value: 'COMMIT', icon: '💬', blurb: 'Require an explanation in the commit message.' },
-    { value: 'STOP', icon: '🛑', blurb: 'Block the commit until it is fixed.' }
+    { value: 'COMMIT', icon: '💬', blurb: 'Require a reason in the commit message. Git Guard asks for one when you commit.' },
+    { value: 'STOP', icon: '🛑', blurb: 'Block the commit until it is fixed, or until a person signs an exception with a reason.' }
 ];
 
 const PATH_LOCK_RULES = [
@@ -569,7 +569,8 @@ export class AgentController {
                 : `<ul class="rules-rule-list">${ruleRows}</ul>`}
             <p class="rules-files-detail-foot">
                 Enforcement: <strong>WARN</strong> reports it · <strong>COMMIT</strong> needs a reason in the
-                commit message · <strong>STOP</strong> blocks the commit.
+                commit message, which Git Guard asks for · <strong>STOP</strong> blocks the commit until it is
+                fixed or a person signs an exception with a reason and a Settings &gt; KEYS key.
             </p>`;
 
         host.querySelector('[data-rule-editor-rename]')?.addEventListener('click',
@@ -1657,8 +1658,8 @@ export class AgentController {
         const enforcementOptions = ['WARN', 'COMMIT', 'STOP'];
         const enforcementDescriptions = {
             'WARN': 'Warn the user but allow the action to proceed',
-            'COMMIT': 'Require an explanation in the commit/PR message',
-            'STOP': 'Block the commit/PR until the violation is fixed'
+            'COMMIT': 'Require a reason in the commit message',
+            'STOP': 'Block the commit until the violation is fixed or a person signs an exception'
         };
         const enforcementIcons = {
             'WARN': '⚠️',

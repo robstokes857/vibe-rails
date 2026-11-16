@@ -25,7 +25,7 @@ viberails_run() {
     fi
 
     echo "VibeRails VCA could not run because the vb executable was not found." >&2
-    echo "Repair the hooks from VibeRails, or use git commit --no-verify for an intentional bypass." >&2
+    echo "Open VibeRails and use Repair Git Guard on the Rules page, or reinstall VibeRails." >&2
     return 127
 }
 

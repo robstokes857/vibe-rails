@@ -160,7 +160,9 @@ public static class VcaHookProcessHost
         // A successful/non-blocking popup closes as soon as its transcript is complete, so
         // Git never waits for an unnecessary Enter key. Blocking results remain visible long
         // enough to read, with Enter/timeout escape hatches. The parent never reaches here.
-        if (invocation.ConsoleWindowAttached && exitCode != 0)
+        // A person who just closed the STOP exception offer has already had that pause.
+        if (invocation.ConsoleWindowAttached && exitCode != 0
+            && provider.GetService<IStopBypassPrompt>()?.Declined != true)
         {
             await PauseForEnterAsync(
                 output,
@@ -404,6 +406,8 @@ public static class VcaHookProcessHost
         services.AddSingleton<IVcaHookPresenter>(_ =>
             new VcaConsoleHookPresenter(new VcaHookConsoleOptions(output, error, input, enableSpinner, style)));
         services.AddSingleton<IHumanSignaturePrompt>(_ => new HumanSignaturePromptLauncher(output, error, style));
+        services.AddSingleton<IStopBypassPrompt>(sp =>
+            new StopBypassHookPrompt(output, error, sp.GetRequiredService<IGitStagedSnapshotProvider>(), style));
     }
 
     private static string StatePath()

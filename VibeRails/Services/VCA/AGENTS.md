@@ -218,6 +218,29 @@ Installed hooks verify the exception and record readable `VCA-STOP-Reason` / `VC
 trailers plus signed `VCA-STOP-Bypass` evidence. Ordinary tree signatures do not bypass STOP.
 Full format, lifetime and security contract: [STOP_BYPASS.md](STOP_BYPASS.md).
 
+**From the commit (VIBE-331).** A person does not need an agent to ask. When pre-commit is blocked
+by STOP and by nothing else (a validation error is never signed away), and the hook may prompt
+(`--prompt-acknowledgment`, which the pre-commit script now passes by the commit-msg rule),
+`StopBypassHookPrompt` asks for a reason below the transcript. A reason creates the request from
+the pre-commit rules only (`StopBypassService.CreateAsync` with no message: message rules are
+judged on the final message, where an uncovered STOP still blocks). The same approval popup then
+runs, in Git Guard's window when the hook is already there, otherwise in a new one, so a password
+is never read from a terminal. The runner re-validates: only the stored, verified approval lets
+pre-commit pass, never the window's exit code. Commit-msg writes the trailers as it does for an
+agent's request. Enter alone, Esc, or `ConsolePauseTimeout` (30 s) without a keypress closes the
+offer, and the window closes without a second pause, so an unattended agent commit waits no longer
+than before. Git gives hooks a null stdin and a redirected stdout (checked
+with Git 2.54 in a real console on 2026-11-16), so on Windows the scripts' `--console-window`
+branch runs for terminal commits as well as Git GUIs. Installed scripts from an older version
+lack the flag and show only the guidance until the next version reinstalls them. Tests:
+`StopBypassTests.FromTheCommit.cs`.
+
+Blocked guidance says what to do next for whoever reads it: the rule's file and line, that COMMIT
+accepts a reason in the message, that a person can sign an exception, and that an agent asks with
+`request_stop_bypass`. `Log all file changes` and `Log file changes > N lines` lead with the exact
+`## Files` lines to add, relative to the declaring vc.rules.md. Hook scripts and Git Guard messages
+never suggest `--no-verify`, which skips every hook (`HookScriptGuidanceTests`).
+
 ## Signed commits: `Human verified` and `Signed Approval` (2026-10-20)
 
 Two rules a person satisfies by signing the commit with a Settings > KEYS signing key
@@ -413,6 +436,7 @@ author junk. Reads no longer filter, so hand-edited junk is shown rather than hi
 | `Hooks/HumanSignaturePopup.cs`, `Hooks/HumanSignaturePrompt.cs` | The signing popup and the launcher that decides where it may run. |
 | `Hooks/ReviewSignaturePopup.cs`, `Hooks/SigningKeyPrompt.cs` | The review approval popup (`--vca-hook sign-review --review <rvw_…>`, VB-50 slice D: fetches the request, proves the tree in the local clone, then signs) and the key-and-password prompt both popups share. Contract: [Services/ReviewRequests/README.md](../ReviewRequests/README.md). |
 | `Hooks/HumanSignatureBoardCards.cs` | The Board card lines in the popup summary (read-only, bounded). |
+| `StopBypassService.cs`, `Hooks/StopBypassPopup.cs`, `Hooks/StopBypassHookPrompt.cs` | Signed STOP exceptions: requests and verification, the approval popup, and the offer Git Guard makes at a blocked commit (VIBE-331). |
 | `../GitPreflight/` | Step pipeline (VCA → MintLint → automated workflows) and its event stream. |
 
 ## Testing

@@ -74,13 +74,15 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
         RuleValidationState State,
         string Message,
         // Set when a person can resolve the violation by signing in the Git Guard popup.
-        HumanSignatureRequest? SignatureRequest = null)
+        HumanSignatureRequest? SignatureRequest = null,
+        // The exact fix, when the validator knows it (the Files lines to add). Leads the guidance.
+        string? FixHint = null)
     {
         public static RuleValidationResult Pass(string message) =>
             new(RuleValidationState.Passed, message);
 
-        public static RuleValidationResult Violation(string message) =>
-            new(RuleValidationState.Violated, message);
+        public static RuleValidationResult Violation(string message, string? fixHint = null) =>
+            new(RuleValidationState.Violated, message, FixHint: fixHint);
 
         public static RuleValidationResult SignatureNeeded(string message, HumanSignatureRequest request) =>
             new(RuleValidationState.Violated, message, request);
@@ -318,6 +320,7 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
                     var message = validation.Message;
                     var sourceId = GetRuleSourceId(sourceFile, gitRoot);
                     var sourcePath = GetRuleSourcePath(sourceFile, gitRoot);
+                    var location = DescribeRuleLocation(rule, sourcePath);
                     var slug = GenerateRuleSlug(ruleText);
                     ruleViolations.Add(new(ruleText, sourcePath, enforcement, message,
                         scopedFiles.SelectMany(file => file.PreviousRelativePath is { } previous
@@ -345,7 +348,9 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
                             BuildFindingGuidance(
                                 VcaRuleFindingKind.Warning,
                                 message,
-                                sourcePath),
+                                sourcePath,
+                                location,
+                                validation.FixHint),
                             SignatureRequest: validation.SignatureRequest));
                     }
                     else if (enforcement == "COMMIT")
@@ -353,7 +358,8 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
                         commitViolations.Add((ruleText, sourceFile, slug));
                         var token = $"[VCA:{sourceId}:{slug}]";
                         requiredAcknowledgments.Add(token);
-                        violations.Add($"[COMMIT] {ruleText}: {message}\n  Acknowledgment needed: {token} Reason: <your explanation>");
+                        violations.Add($"[COMMIT] {ruleText}: {message}\n  Acknowledgment needed: {token} Reason: <your explanation>"
+                            + (validation.FixHint is { } commitFix ? $"\n  Or fix it: {commitFix}" : ""));
                         findings.Add(new VcaRuleFinding(
                             VcaRuleFindingKind.AcknowledgmentRequired,
                             enforcement,
@@ -363,24 +369,29 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
                             BuildFindingGuidance(
                                 VcaRuleFindingKind.AcknowledgmentRequired,
                                 message,
-                                sourcePath),
+                                sourcePath,
+                                location,
+                                validation.FixHint),
                             token,
                             validation.SignatureRequest));
                     }
                     else if (enforcement == "STOP")
                     {
                         hasStopViolation = true;
-                        violations.Add($"[STOP] {ruleText}: {message}\n  Fix it, or request a signed STOP bypass with a reason using request_stop_bypass. A plain acknowledgment cannot bypass STOP.");
+                        var guidance = BuildFindingGuidance(
+                            VcaRuleFindingKind.Blocked,
+                            message,
+                            sourcePath,
+                            location,
+                            validation.FixHint);
+                        violations.Add($"[STOP] {ruleText}: {message}\n  {guidance}");
                         findings.Add(new VcaRuleFinding(
                             VcaRuleFindingKind.Blocked,
                             enforcement,
                             ruleText,
                             message,
                             sourcePath,
-                            BuildFindingGuidance(
-                                VcaRuleFindingKind.Blocked,
-                                message,
-                                sourcePath),
+                            guidance,
                             SignatureRequest: validation.SignatureRequest));
                     }
                 }
@@ -824,7 +835,8 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
                     ? $" and {undocumentedFiles.Count - 3} more"
                     : string.Empty;
                 return RuleValidationResult.Violation(
-                    $"{undocumentedFiles.Count} file(s) not documented in vc.rules.md Files section: {fileList}{suffix}");
+                    $"{undocumentedFiles.Count} file(s) not documented in vc.rules.md Files section: {fileList}{suffix}",
+                    DescribeMissingFilesEntries(undocumentedFiles, sourceAgent));
             }
 
             return RuleValidationResult.Pass("All changed files requiring documentation are documented");
@@ -854,16 +866,19 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
             }
 
             var documentedFiles = ParseDocumentedFiles(sourceAgent, gitRoot);
-            var violations = filesRequiringDocumentation
+            var oversized = filesRequiringDocumentation
                 .Where(file => file.ChangedLineCount > threshold)
                 .Where(file => !documentedFiles.Contains(file.RelativePath))
+                .ToList();
+            var violations = oversized
                 .Select(file => $"{file.RelativePath} ({file.ChangedLineCount} staged lines changed)")
                 .ToList();
 
             return violations.Count == 0
                 ? RuleValidationResult.Pass("All staged deltas within threshold or documented")
                 : RuleValidationResult.Violation(
-                    $"{violations.Count} staged file delta(s) over {threshold} lines not documented: {string.Join(", ", violations.Take(3))}");
+                    $"{violations.Count} staged file delta(s) over {threshold} lines not documented: {string.Join(", ", violations.Take(3))}",
+                    DescribeMissingFilesEntries(oversized.Select(file => file.RelativePath).ToList(), sourceAgent));
         }
 
         if (ruleLower.Contains("cyclomatic complexity disabled", StringComparison.Ordinal))
@@ -1301,28 +1316,76 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
     private static string GetRuleSourcePath(string sourceFile, string gitRoot) =>
         NormalizeGitPath(Path.GetRelativePath(gitRoot, sourceFile).Replace('\\', '/'));
 
+    /// <summary>
+    /// What to do next, said to whoever reads the transcript: a person at Git Guard's window or an
+    /// agent reading <c>validate_vca</c>. A blocked finding names the rule's file and line, because
+    /// "fix it or bypass it" is no help to someone who has forgotten which file declared the rule
+    /// or which level accepts a reason (VIBE-331). Never suggest <c>--no-verify</c> here: it skips
+    /// every hook, not just this rule.
+    /// </summary>
     private static string BuildFindingGuidance(
         VcaRuleFindingKind kind,
         string reason,
-        string sourcePath)
+        string sourcePath,
+        string? location = null,
+        string? fixHint = null)
     {
         if (reason.StartsWith("UNSUPPORTED:", StringComparison.OrdinalIgnoreCase))
         {
             return $"Git Guard cannot evaluate this rule as written. Update or disable it in {sourcePath}, or replace it with a supported rule before committing.";
         }
 
+        var fix = fixHint ?? "Fix the issue.";
         return kind switch
         {
-            VcaRuleFindingKind.Warning =>
-                "Review this finding before committing. WARN rules do not block the commit.",
+            VcaRuleFindingKind.Warning => fixHint is null
+                ? "Review this finding before committing. WARN rules do not block the commit."
+                : $"{fixHint} WARN rules do not block the commit.",
             VcaRuleFindingKind.Deferred =>
                 "No pre-commit action is required. This rule will run against the final commit message.",
-            VcaRuleFindingKind.AcknowledgmentRequired =>
-                "Fix the issue, or include the shown acknowledgment token and a meaningful reason in the final commit message.",
+            VcaRuleFindingKind.AcknowledgmentRequired => fixHint is null
+                ? "Fix the issue, or include the shown acknowledgment token and a meaningful reason in the final commit message."
+                : $"{fixHint} Or include the shown acknowledgment token and a meaningful reason in the final commit message.",
             VcaRuleFindingKind.Blocked =>
-                "Fix the issue, or use request_stop_bypass to ask a person for a signed exception with a reason. A plain acknowledgment cannot bypass STOP.",
+                $"{fix} For a deliberate change, edit or lower the rule at {location ?? sourcePath} (COMMIT lets a commit "
+                    + "through with a reason in its message), or have a person sign an exception with a reason using a "
+                    + "Settings > KEYS key; an agent requests one with request_stop_bypass. A plain acknowledgment cannot bypass STOP.",
             _ => "Review this finding before committing."
         };
+    }
+
+    /// <summary>
+    /// "path line N" for a rule the staged vc.rules.md declares. A rule enforced from the committed
+    /// policy (removed or weakened in this commit) has no line in the staged file, so it gets the path.
+    /// </summary>
+    private static string DescribeRuleLocation(VcaRuleSnapshot rule, string sourcePath)
+    {
+        if (rule.RemovedFromPolicy)
+            return sourcePath + " (as committed)";
+        var line = AgentRuleSectionReader.ParseDocument(rule.Source.Content).Rules
+            .FirstOrDefault(located => string.Equals(located.Rule.RuleText, rule.RuleText, StringComparison.Ordinal)
+                && string.Equals(located.Rule.Enforcement, rule.Enforcement, StringComparison.Ordinal));
+        return line is null ? sourcePath : $"{sourcePath} line {line.LineIndex + 1}";
+    }
+
+    /// <summary>
+    /// The Files lines a documentation rule wants, written the way the reader resolves them:
+    /// relative to the directory of the vc.rules.md that declares the rule.
+    /// </summary>
+    private static string DescribeMissingFilesEntries(IReadOnlyList<string> repositoryPaths, AgentFileSnapshot sourceAgent)
+    {
+        const int shown = 5;
+        var directory = sourceAgent.RelativePath.Replace('\\', '/');
+        var slash = directory.LastIndexOf('/');
+        var prefix = slash < 0 ? "" : directory[..(slash + 1)];
+        var entries = repositoryPaths
+            .Select(path => prefix.Length > 0 && path.StartsWith(prefix, GitPathComparison) ? path[prefix.Length..] : path)
+            .ToList();
+        if (entries.Count == 1)
+            return $"Add \"- {entries[0]}: what changed\" under ## Files in {sourceAgent.RelativePath}.";
+        var more = entries.Count > shown ? $" and {entries.Count - shown} more" : "";
+        return $"Add one \"- path: what changed\" line per file under ## Files in {sourceAgent.RelativePath}: "
+            + string.Join(", ", entries.Take(shown)) + more + ".";
     }
 
     // Every git invocation here goes through GitCli, the one helper with the no-shell, kill-on-timeout,

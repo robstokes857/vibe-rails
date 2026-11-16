@@ -25,12 +25,13 @@ viberails_run() {
     fi
 
     echo "VibeRails VCA could not run because the vb executable was not found." >&2
-    echo "Repair the hooks from VibeRails, or use git commit --no-verify for an intentional bypass." >&2
+    echo "Open VibeRails and use Repair Git Guard on the Rules page, or reinstall VibeRails." >&2
     return 127
 }
 
 viberails_repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 viberails_console_arg=
+viberails_prompt_arg=
 
 # Git GUI clients (VS Code SCM panel, SourceTree, etc.) capture hook output into a panel
 # the user may never look at. On Git for Windows, ask the hook host to re-spawn itself in
@@ -49,8 +50,17 @@ case "$(uname -s 2>/dev/null)" in
         ;;
 esac
 
+# A person who can answer is offered a signed exception when STOP blocks a deliberate change.
+# Git gives hooks a null stdin, so in practice that person is at the Git Guard console above.
+# Automated and redirected commits receive the normal blocking transcript without waiting.
+if { [ -t 0 ] && [ -t 1 ]; } || [ -n "$viberails_console_arg" ]; then
+    viberails_prompt_arg=--prompt-acknowledgment
+fi
+
 if [ -n "$viberails_console_arg" ]; then
-    viberails_run --vca-hook pre-commit --enqueue-automations --workdir "$viberails_repo_root" "$viberails_console_arg"
+    viberails_run --vca-hook pre-commit --enqueue-automations --workdir "$viberails_repo_root" "$viberails_prompt_arg" "$viberails_console_arg"
+elif [ -n "$viberails_prompt_arg" ]; then
+    viberails_run --vca-hook pre-commit --enqueue-automations --workdir "$viberails_repo_root" "$viberails_prompt_arg"
 else
     viberails_run --vca-hook pre-commit --enqueue-automations --workdir "$viberails_repo_root"
 fi
@@ -58,7 +68,7 @@ viberails_exit_code=$?
 
 if [ "$viberails_exit_code" -ne 0 ]; then
     echo ""
-    echo "VibeRails VCA blocked this commit. Fix the reported issue or use --no-verify to bypass intentionally." >&2
+    echo "VibeRails VCA blocked this commit. Follow the guidance above: fix the issue, change the rule, or sign an exception for a deliberate change." >&2
     exit "$viberails_exit_code"
 fi
 

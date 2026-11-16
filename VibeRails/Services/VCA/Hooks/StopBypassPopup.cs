@@ -62,7 +62,8 @@ public sealed class StopBypassPopup(TextWriter output, IHumanSignatureConsole co
         if (!StopBypassFormat.Matches(request.Scope, await snapshots.CaptureAsync(repository, ct)))
             return await FinishAsync("stale", "The staged snapshot changed while the prompt was open. Request a new approval.");
         await store.SaveAsync(repository, request with { Status = "approved", Approval = approval }, request.Id, ct);
-        await output.WriteLineAsync("STOP bypass approved. Retry the commit without restaging. Git Guard will record the signed exception and reason.");
+        await output.WriteLineAsync("STOP bypass approved. Git Guard records the signed exception and its reason in the commit message. "
+            + "A commit waiting on this window continues; otherwise retry the commit without restaging.");
         return 0;
 
         async Task<int> FinishAsync(string status, string message)

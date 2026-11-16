@@ -72,32 +72,48 @@ public sealed class StopBypassService(IGitStagedSnapshotProvider snapshots,
 
     public async Task<string> RequestAsync(string repository, string reason, string? commitMessage, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("Explain why the STOP rules must be bypassed.");
-        var snapshot = await snapshots.CaptureAsync(repository, ct);
-        var identity = snapshot.StagedIdentity ?? throw new ArgumentException("The staged snapshot is unavailable.");
-        // Pure evaluation only: this must never enqueue remediation or itself approve anything.
-        var report = await RulesTool.ValidateVcaReportAsync(snapshots, snapshot.RepositoryPath,
-            commitMessage ?? "", validateCommitMessage: true, cancellationToken: ct, stagedSnapshot: snapshot);
-        if (report.HasError) throw new ArgumentException("VCA could not evaluate the staged snapshot. Fix the validation error before requesting a bypass.");
-        var rules = (report.Violations ?? []).Where(rule => rule.Enforcement == "STOP")
-            .Select(rule => new StopBypassRule(rule.SourcePath, rule.Rule)).Distinct()
-            .OrderBy(rule => rule.SourcePath, StringComparer.Ordinal).ThenBy(rule => rule.RuleText, StringComparer.Ordinal).ToArray();
-        if (rules.Length == 0) return "No STOP violations need a bypass. Supply the intended commit message to evaluate message rules.";
-        var scope = new StopBypassScope(StopBypassFormat.RepositoryId(snapshot.RepositoryPath), identity.BaseCommit,
-            identity.BaseTree, identity.StagedTree, reason.Trim(), rules);
-        StopBypassFormat.Validate(scope);
-        var request = new StopBypassRequest(Guid.NewGuid().ToString("N"), scope, DateTimeOffset.UtcNow);
-        await store.SaveAsync(snapshot.RepositoryPath, request, null, ct);
-        var error = (launcher ?? new StopBypassPromptLauncher()).Launch(snapshot.RepositoryPath, request.Id);
+        var (request, repositoryPath) = await CreateAsync(repository, reason, commitMessage ?? "", ct);
+        if (request is null) return "No STOP violations need a bypass. Supply the intended commit message to evaluate message rules.";
+        var rules = request.Scope.Rules;
+        var error = (launcher ?? new StopBypassPromptLauncher()).Launch(repositoryPath, request.Id);
         if (error is not null)
         {
-            await store.SaveAsync(snapshot.RepositoryPath, request with { Status = "failed", Error = error }, request.Id, ct);
+            await store.SaveAsync(repositoryPath, request with { Status = "failed", Error = error }, request.Id, ct);
             return "STOP bypass not approved. " + error;
         }
         return $"STOP bypass request {request.Id} is pending human approval for {rules.Length} rule(s). "
             + "The signing popup shows the exact staged changes and reason. The person chooses a key and enters its password there; "
             + "never request or transmit the password through MCP. Poll get_stop_bypass_status. After approval, retry the commit without restaging; "
             + "the hook adds the signed bypass and its reason to the message. Any uncovered STOP rule still blocks.";
+    }
+
+    /// <summary>
+    /// Captures the staged snapshot's STOP violations and saves them as a pending request, replacing
+    /// any earlier one. Opens nothing and approves nothing. A null <paramref name="commitMessage"/>
+    /// leaves message rules out (pre-commit, before the message exists): they are judged again on
+    /// the final message, where an uncovered STOP still blocks. Returns a null request when no STOP
+    /// rule is violated.
+    /// </summary>
+    internal async Task<(StopBypassRequest? Request, string RepositoryPath)> CreateAsync(
+        string repository, string reason, string? commitMessage, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("Explain why the STOP rules must be bypassed.");
+        var snapshot = await snapshots.CaptureAsync(repository, ct);
+        var identity = snapshot.StagedIdentity ?? throw new ArgumentException("The staged snapshot is unavailable.");
+        // Pure evaluation only: this must never enqueue remediation or itself approve anything.
+        var report = await RulesTool.ValidateVcaReportAsync(snapshots, snapshot.RepositoryPath,
+            commitMessage, validateCommitMessage: commitMessage is not null, cancellationToken: ct, stagedSnapshot: snapshot);
+        if (report.HasError) throw new ArgumentException("VCA could not evaluate the staged snapshot. Fix the validation error before requesting a bypass.");
+        var rules = (report.Violations ?? []).Where(rule => rule.Enforcement == "STOP")
+            .Select(rule => new StopBypassRule(rule.SourcePath, rule.Rule)).Distinct()
+            .OrderBy(rule => rule.SourcePath, StringComparer.Ordinal).ThenBy(rule => rule.RuleText, StringComparer.Ordinal).ToArray();
+        if (rules.Length == 0) return (null, snapshot.RepositoryPath);
+        var scope = new StopBypassScope(StopBypassFormat.RepositoryId(snapshot.RepositoryPath), identity.BaseCommit,
+            identity.BaseTree, identity.StagedTree, reason.Trim(), rules);
+        StopBypassFormat.Validate(scope);
+        var request = new StopBypassRequest(Guid.NewGuid().ToString("N"), scope, DateTimeOffset.UtcNow);
+        await store.SaveAsync(snapshot.RepositoryPath, request, null, ct);
+        return (request, snapshot.RepositoryPath);
     }
 
     public async Task<string> StatusAsync(string repository, CancellationToken ct)

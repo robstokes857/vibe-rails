@@ -17,6 +17,7 @@ public sealed class VcaHookRunner : IVcaHookRunner
     private readonly ICommitMessageCoAuthorCleaner _coAuthorCleaner;
     private readonly IHumanSignaturePrompt? _signaturePrompt;
     private readonly IStoredCommitApprovalSource? _storedApprovals;
+    private readonly IStopBypassPrompt? _stopBypassPrompt;
 
     /// <summary>How many times one commit-msg run offers the signing popup.</summary>
     internal const int MaxSignatureRounds = 3;
@@ -27,7 +28,8 @@ public sealed class VcaHookRunner : IVcaHookRunner
         IVcaHookPresenter presenter,
         ICommitMessageCoAuthorCleaner coAuthorCleaner,
         IHumanSignaturePrompt? signaturePrompt = null,
-        IStoredCommitApprovalSource? storedApprovals = null)
+        IStoredCommitApprovalSource? storedApprovals = null,
+        IStopBypassPrompt? stopBypassPrompt = null)
     {
         _preflightPipeline = preflightPipeline;
         _analyzer = analyzer;
@@ -35,6 +37,7 @@ public sealed class VcaHookRunner : IVcaHookRunner
         _coAuthorCleaner = coAuthorCleaner;
         _signaturePrompt = signaturePrompt;
         _storedApprovals = storedApprovals;
+        _stopBypassPrompt = stopBypassPrompt;
     }
 
     public async Task<int> RunAsync(VcaHookInvocation invocation, CancellationToken cancellationToken)
@@ -108,7 +111,12 @@ public sealed class VcaHookRunner : IVcaHookRunner
                     workingDirectory,
                     cancellationToken),
                 VcaHookKind.Preview => 0,
-                _ => RunPreCommitValidation(summary)
+                _ => await RunPreCommitValidationAsync(
+                    invocation,
+                    workingDirectory,
+                    preflightRequest,
+                    summary,
+                    cancellationToken)
             };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -270,8 +278,64 @@ public sealed class VcaHookRunner : IVcaHookRunner
     // Commit-level (acknowledgment-required) violations are surfaced in the transcript but
     // do not block the pre-commit stage; they are enforced later by the commit-msg hook.
     // Only STOP-level violations and errors block here.
-    private int RunPreCommitValidation(VcaHookValidationSummary summary) =>
-        _analyzer.ShouldBlockPreCommit(summary) ? 1 : 0;
+    private async Task<int> RunPreCommitValidationAsync(
+        VcaHookInvocation invocation,
+        string workingDirectory,
+        GitPreflightRequest preflightRequest,
+        VcaHookValidationSummary summary,
+        CancellationToken cancellationToken)
+    {
+        if (!_analyzer.ShouldBlockPreCommit(summary))
+            return 0;
+        return await TryStopBypassAsync(invocation, workingDirectory, preflightRequest, summary, cancellationToken) ? 0 : 1;
+    }
+
+    /// <summary>
+    /// A STOP block is where a person who made a deliberate change is offered the signed exception
+    /// (VIBE-331). Offered only while nothing else blocks (an error is not something to sign away) and
+    /// only where the hook resolves stored exceptions, so the approval is one the recheck can see; the
+    /// commit-msg hook then writes its reason into the message. The recheck, not the prompt's answer,
+    /// decides whether the commit continues.
+    /// </summary>
+    private async Task<bool> TryStopBypassAsync(
+        VcaHookInvocation invocation,
+        string workingDirectory,
+        GitPreflightRequest preflightRequest,
+        VcaHookValidationSummary summary,
+        CancellationToken cancellationToken)
+    {
+        if (_stopBypassPrompt is null
+            || summary.HasError
+            || !summary.HasStopViolation
+            || invocation.Kind != VcaHookKind.PreCommit
+            || invocation.DemoUi
+            || invocation.WorkingTreeScope
+            || !invocation.EnqueueAutomatedJobs
+            || !invocation.PromptForAcknowledgment)
+        {
+            return false;
+        }
+
+        var blocked = (summary.Findings ?? []).Count(finding => finding.Kind == VcaRuleFindingKind.Blocked);
+        if (blocked == 0
+            || !await _stopBypassPrompt.OfferAsync(invocation, workingDirectory, blocked, cancellationToken))
+        {
+            return false;
+        }
+
+        await _presenter.WriteSuccessAsync("Exception approved. Checking the commit again...");
+        var recheck = await RunPreflightAsync(preflightRequest, cancellationToken);
+        if (recheck.VcaSummary is { } rechecked && !_analyzer.ShouldBlockPreCommit(rechecked))
+        {
+            await _presenter.WriteSuccessAsync(
+                "The signed exception covers this commit. Git Guard adds its reason to the commit message.");
+            return true;
+        }
+
+        await _presenter.WriteFailureAsync(
+            "The commit is still blocked. If the staged changes moved while the window was open, commit again to start over.");
+        return false;
+    }
 
     private async Task<int> RunCommitMessageValidationAsync(
         VcaHookInvocation invocation,

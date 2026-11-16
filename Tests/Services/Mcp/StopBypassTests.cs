@@ -15,7 +15,7 @@ using Xunit;
 
 namespace Tests.Services.Mcp;
 
-public sealed class StopBypassTests : IAsyncLifetime
+public sealed partial class StopBypassTests : IAsyncLifetime
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "stop-bypass-" + Guid.NewGuid().ToString("N"));
     private readonly RSA rsa = RSA.Create(2048);
@@ -80,11 +80,12 @@ public sealed class StopBypassTests : IAsyncLifetime
         await store.SaveAsync(root, request with { Status = "approved", Approval = approval }, request.Id, Ct);
         return approval;
     }
-    private async Task<(int Code, string Output, string Message)> Hook(string kind = "pre-commit", string message = "Repair")
+    private async Task<(int Code, string Output, string Message)> Hook(string kind = "pre-commit", string message = "Repair",
+        string[]? extraArgs = null, Action<IServiceCollection>? extraServices = null)
     {
         var path = Path.Combine(root, ".git", "COMMIT_EDITMSG");
         await File.WriteAllTextAsync(path, message, Ct);
-        string[] args = ["--vca-hook", kind, "--enqueue-automations", "--workdir", root, "--commit-message", path];
+        string[] args = ["--vca-hook", kind, "--enqueue-automations", "--workdir", root, "--commit-message", path, .. extraArgs ?? []];
         var launches = new Mock<ILaunchStore>();
         launches.Setup(x => x.ListBindingsAsync(It.IsAny<string?>(), null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<LaunchTriggerBinding>());
@@ -96,6 +97,7 @@ public sealed class StopBypassTests : IAsyncLifetime
             services.AddSingleton(Mock.Of<IBoardStore>());
             services.AddSingleton(Mock.Of<VibeRails.DB.IJobStore>(MockBehavior.Strict));
             services.AddSingleton(Mock.Of<VibeRails.DB.IReviewRequestStore>(MockBehavior.Strict));
+            extraServices?.Invoke(services);
         }, output, output, cancellationToken: Ct);
         return (code, output.ToString(), await File.ReadAllTextAsync(path, Ct));
     }

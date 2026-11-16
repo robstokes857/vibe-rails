@@ -130,7 +130,7 @@ internal static class VcaHookConsoleRespawn
                     _ = TerminateProcess(processInfo.hProcess, (uint)PostLaunchFailureExitCode);
                     await error.WriteLineAsync(
                         $"VibeRails VCA: lost track of the popup console (Win32 error {win32Error}). "
-                        + "Commit blocked; re-run the commit or use git commit --no-verify to bypass.");
+                        + "Commit blocked; commit again to retry.");
                     await error.FlushAsync();
                     return PostLaunchFailureExitCode;
                 }
@@ -147,7 +147,7 @@ internal static class VcaHookConsoleRespawn
                 var win32Error = Marshal.GetLastWin32Error();
                 await error.WriteLineAsync(
                     $"VibeRails VCA: could not read the popup console result (Win32 error {win32Error}). "
-                    + "Commit blocked; re-run the commit or use git commit --no-verify to bypass.");
+                    + "Commit blocked; commit again to retry.");
                 await error.FlushAsync();
                 return PostLaunchFailureExitCode;
             }
@@ -159,7 +159,7 @@ internal static class VcaHookConsoleRespawn
                 // run by returning null.
                 await error.WriteLineAsync(
                     "VibeRails VCA: popup console returned an ambiguous result. "
-                    + "Commit blocked; re-run the commit or use git commit --no-verify to bypass.");
+                    + "Commit blocked; commit again to retry.");
                 await error.FlushAsync();
                 return PostLaunchFailureExitCode;
             }

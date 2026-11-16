@@ -31,7 +31,7 @@ VibeRails includes a sophisticated git hook installation system that automatical
    - Runs the standalone `vb --vca-hook pre-commit` host against the Git index snapshot (not unstaged working-tree edits)
    - Shows a dedicated console when a Windows Git GUI captures hook output
    - Blocks STOP violations and validation errors; COMMIT violations continue to commit-msg
-   - Allows bypass with `git commit --no-verify`
+   - For a deliberate change blocked only by STOP, asks a person for a reason and a signed exception (VIBE-331, [STOP_BYPASS.md](../VibeRails/Services/VCA/STOP_BYPASS.md))
 
 2. **commit-msg-hook.sh** - Validates COMMIT-level acknowledgments
    - Runs `vb --vca-hook commit-msg` through the same validation engine

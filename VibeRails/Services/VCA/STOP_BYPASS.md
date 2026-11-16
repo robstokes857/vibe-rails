@@ -13,6 +13,12 @@ Cancellation, an unavailable popup, an invalid signature and offline verificatio
 Named approvers in `Signed Approval` rules remain required. Ordinary STOP rules accept a key
 registered to a verified account, as with `Human verified`.
 
+A person committing gets the same approval without an agent (VIBE-331): when STOP blocks
+pre-commit and someone can answer, Git Guard asks for the reason below its transcript, saves the
+request for the pre-commit STOP rules (message rules are left to the final message) and opens
+this popup. The commit continues only when the re-run validation finds the stored, verified
+approval. Details: [From the commit](AGENTS.md#signed-stop-exceptions).
+
 The popup and status live independently of a pending `git commit`. After approval, retry the
 commit without restaging. The pre-commit hook checks the stored signed exception; commit-msg
 adds its audit trailers and verifies them against the same snapshot. The final message is then
