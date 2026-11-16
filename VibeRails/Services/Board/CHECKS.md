@@ -24,7 +24,13 @@ Check actions store their validated scope vector in the existing `ArgumentsJson`
 
 New lane Code quality actions and newly added Code quality steps default to **card** scope.
 Existing explicitly configured scopes are retained; edit an existing Automation to select
-**Linked commits on the card**. VCA's defaults are unchanged. A card with no linked commits gets
+**Linked commits on the card**. The lane picker (`launch-lane-editor.js`) asks for the scope of a
+new VCA or Code quality check: linked commits (the default for both, VIBE-271), unpushed, working
+tree or repository. Card work is committed before it reaches a later lane, so a working-tree check
+there sees only other sessions' edits. A pinned commit or range is set in the AI Agents editor.
+The picker reuses an existing check with the same kind and scope (no minimum grade or pinned
+commits) instead of saving a copy; the catalog's `check` field carries each Action's scope for
+that and for labelling. A card with no linked commits gets
 **Needs review**, with “no code attached to this card”; a Research spike is **Skipped/not applicable**.
 Other non-code work can explicitly skip the lane check. A standalone run without a card must use
 another scope, such as **One commit**. Results never move a card or set its attention flag.

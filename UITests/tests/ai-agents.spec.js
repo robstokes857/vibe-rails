@@ -952,8 +952,9 @@ test('ordered lane selections retain compatibility data and lock editing during 
     await expect(page.getByRole('button',{name:'Move Review up',exact:true})).toBeEnabled();
 });
 
-for (const [kind, name, scope] of [['vca', 'VCA check', 'working-tree'], ['code-quality', 'Code quality check', 'card']])
-test(`lane picker adds ${kind} without running or saving the lane early`, async ({ page }) => {
+// VIBE-271: the scope is chosen in the lane, defaulting to the card's linked commits for both kinds.
+for (const [kind, name, scope, choose] of [['vca', 'VCA check · Working tree', 'working-tree', true], ['code-quality', 'Code quality check · Linked commits', 'card', false]])
+test(`lane picker adds ${kind} in ${scope} scope without running or saving the lane early`, async ({ page }) => {
     const state = await setup(page);
     let savedLane, release;
     await page.route('**/api/v1/board/columns/lane/launches', route => {
@@ -976,15 +977,26 @@ test(`lane picker adds ${kind} without running or saving the lane early`, async 
     const picker = page.locator('[data-lane-add-choice]');
     await expect(page.locator('[data-lane-add]')).toBeDisabled();
     await expect(page.locator('.ts-control')).toBeVisible();
+    const scopeChoice = page.getByRole('combobox', { name: 'Check scope', exact: true });
+    await expect(scopeChoice).toBeHidden();
     await picker.evaluate((node, kind) => node.tomselect.setValue(`new:${kind}`), kind);
     await expect(page.locator('.ts-control img')).toHaveAttribute('src', 'assets/img/logo.png');
+    await expect(scopeChoice).toHaveValue('card');
+    await expect(scopeChoice).toHaveAccessibleDescription(/linked commits/);
+    expect(await scopeChoice.locator('option').evaluateAll(options => options.map(option => option.value)))
+        .toEqual(['card', 'unpushed', 'working-tree', 'repository']);
+    if (choose) {
+        await scopeChoice.selectOption(scope);
+        await expect(scopeChoice).toHaveAccessibleDescription(/uncommitted and untracked files/);
+    }
     await page.locator('[data-lane-add]').click();
     await expect.poll(() => Boolean(release)).toBe(true);
     await expect(page.locator('[data-lane-save]')).toBeDisabled();
     expect(await picker.evaluate(node => node.tomselect.isDisabled)).toBe(true);
     release();
     await expect(page.locator('[data-lane-selection-list] strong')).toHaveText(name);
-    expect(state.actions[0]).toMatchObject({ kind, check: { scope }, expectedRevision: 0 });
+    expect(state.actions[0]).toMatchObject({ name, kind, check: { scope }, expectedRevision: 0 });
+    await expect(scopeChoice).toBeHidden();
     expect(savedLane).toBeUndefined();
     expect(state.runs).toHaveLength(0);
     await page.locator('[data-lane-save]').click();
@@ -992,6 +1004,34 @@ test(`lane picker adds ${kind} without running or saving the lane early`, async 
     expect(savedLane.selections[0]).not.toHaveProperty('gate');
     await page.evaluate(() => window.disposeLane());
     await expect(page.locator('.launch-lane-dropdown')).toHaveCount(0);
+});
+
+test('lane picker labels existing checks by scope and reuses an identical one instead of creating a copy', async ({ page }) => {
+    const state = await setup(page);
+    // What an earlier quick-add saved: the bare name, working-tree scope.
+    state.actions.push({ id: 'old_vca', name: 'VCA check', kind: 'vca', enabled: true, revision: 1, check: { scope: 'working-tree' } },
+        { id: 'card_vca', name: 'Card rules', kind: 'vca', enabled: true, revision: 1, check: { scope: 'card' } });
+    let posts = 0;
+    await page.route('**/api/v1/board/columns/lane/launches', route => route.fulfill({ json: { revision: 1, selections: [] } }));
+    await page.route('**/api/v1/actions', route => { posts++; return route.fulfill({ status: 500, json: { error: 'unexpected' } }); });
+    await page.evaluate(async () => {
+        const { mountLaunchLane } = await import('/js/modules/launch-lane-editor.js');
+        const host = document.createElement('div');
+        document.querySelector('#app-content').replaceChildren(host);
+        mountLaunchLane(window.app, host, 'lane');
+    });
+    const picker = page.locator('[data-lane-add-choice]');
+    await page.locator('.ts-control').click();
+    await expect(page.locator('.launch-lane-dropdown .option:not([data-value=""])')).toHaveText(['VCA check · Working tree', 'Card rules · VCA check · Linked commits', 'VCA check', 'Code quality check']);
+    await page.keyboard.press('Escape');
+    for (let attempt = 0; attempt < 2; attempt++) {
+        await picker.evaluate(node => node.tomselect.setValue('new:vca'));
+        await expect(page.getByRole('combobox', { name: 'Check scope', exact: true })).toHaveValue('card');
+        await page.locator('[data-lane-add]').click();
+    }
+    await expect(page.locator('[data-lane-selection-list] strong')).toHaveText(['Card rules']);
+    await expect(page.locator('[data-lane-error]')).toHaveText('This lane already runs “Card rules”.');
+    expect(posts).toBe(0);
 });
 
 test('terminal picker manages Agents and Quick Launches in the shared editor', async ({ page }) => {

@@ -66,6 +66,21 @@ public sealed class LaunchTests : IDisposable
     }
 
     [Fact]
+    public async Task CatalogTellsPickersWhatEachCheckAnalyzes()
+    {
+        // VIBE-271: the lane picker labels and reuses checks by scope, so the catalog carries it.
+        await Preset();
+        var vca = await service.SaveActionAsync(root, null, new("VCA check · Linked commits", "", "vca", Check: new("card")), Ct);
+        var quality = await service.SaveActionAsync(root, null, new("Gate", "", "code-quality", Check: new("unpushed", FailGrade: "B")), Ct);
+        var catalog = await service.CatalogAsync(root, Ct);
+        Assert.Null(Assert.Single(catalog.Items, item => item.DefinitionType == "preset").Check);
+        Assert.Equal(new CheckAction("card"), Assert.Single(catalog.Items, item => item.Id == vca.Id).Check);
+        Assert.Equal(new CheckAction("unpushed", "B"), Assert.Single(catalog.Items, item => item.Id == quality.Id).Check);
+        var json = JsonSerializer.Serialize(catalog, AppJsonSerializerContext.Default.LaunchCatalog);
+        Assert.Contains("\"check\":{\"scope\":\"card\"", json);
+    }
+
+    [Fact]
     public async Task LiteralUserMessageSurvivesResolutionAndSpawnValidation()
     {
         var preset = (await Preset("Review {{user_message}}")).Preset;

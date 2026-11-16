@@ -1,5 +1,8 @@
+using Moq;
 using VibeRails.DTOs;
 using VibeRails.Services.Board;
+using VibeRails.Services.GitPreflight;
+using VibeRails.Services.VCA.Hooks;
 using Xunit;
 
 namespace Tests.Services.Board;
@@ -132,6 +135,36 @@ public sealed partial class BoardChecksTests
         Assert.Equal("class SelectedFirst {}", renamed.AddedContent);
         Assert.Equal(new[] { 1 }, renamed.AddedLineNumbers);
         Assert.Contains(check.Evidence.Files, file => file.Path == "last.cs" && file.AddedContent!.Contains("SelectedLast"));
+    }
+
+    [Fact]
+    public async Task VcaCardScopeValidatesOnlyLinkedCommitsAndNeedsCodeAttached()
+    {
+        // VIBE-271: the lane picker now offers card scope to VCA (its default), not only working-tree.
+        var empty = await Run(JobActionKind.Vca, "card");
+        Assert.Equal("Needs review", empty.Status);
+        Assert.Contains("no code attached to this card", empty.Summary);
+
+        await Write("linked.cs", "class Linked {}\n");
+        var linked = await Commit();
+        await Write("other.cs", "class OtherCard {}\n");
+        await Commit();
+        await Link(linked);
+        await Write("dirty.cs", "class OtherSession {}\n");
+        GitStagedSnapshot? seen = null;
+        VcaHookInvocation? invocation = null;
+        var validation = new Mock<IVcaHookValidationService>();
+        validation.Setup(v => v.ValidateAsync(It.IsAny<VcaHookInvocation>(), It.IsAny<GitStagedSnapshot>(), It.IsAny<CancellationToken>()))
+            .Callback<VcaHookInvocation, GitStagedSnapshot, CancellationToken>((call, snapshot, _) => { invocation = call; seen = snapshot; })
+            .ReturnsAsync(new VcaHookValidationResult("PASS: VCA rules passed.", new(false, false, false, [])));
+
+        var check = await Engine(validation.Object).ExecuteAsync(repo, repo, card.Key, "vca-card", "vca", JobActionKind.Vca, ["card"], Ct);
+
+        Assert.Equal("card", check.Scope);
+        Assert.Equal("linked.cs", Assert.Single(seen!.Files).RelativePath);
+        Assert.False(invocation!.WorkingTreeScope);
+        Assert.Equal(new[] { linked }, check.Evidence!.CommitShas);
+        Assert.DoesNotContain(check.ScopeFiles!, path => path.Contains("other.cs") || path.Contains("dirty.cs"));
     }
 
     [Theory]

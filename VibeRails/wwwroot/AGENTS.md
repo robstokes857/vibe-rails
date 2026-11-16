@@ -100,7 +100,10 @@ VCA and code-quality checks can be created from this picker; creating
 a definition does not save the lane order or run it. The lane save remains revision-checked.
 The **Create an agent in AI Agents** link below the picker opens the AI Agents page
 through guarded app navigation, preserving the unsaved-lane confirmation and cleanup.
-New VCA checks use working-tree scope; new code-quality checks use card-linked commits.
+A new VCA or code-quality check asks for its scope below the picker (VIBE-271): linked commits
+(default for both), unpushed, working tree or repository. An existing check with the same kind
+and scope is reused rather than copied, and existing checks are labelled with their scope from the
+catalog's `check` field.
 `board-lane-agent-body.js` polls current per-card lane progress, with explicit verdicts,
 retry, skip and session links. Card runs keep names, status and actions visible, with
 regular-weight muted report text inside a native Report disclosure, collapsed initially.
@@ -682,8 +685,8 @@ entries to that lane count, including newly created cards. The badge counts assi
 including disabled or unavailable ones. The first lane has its own accessible agent button too.
 The anchored list panel is 440px maximum. Add replaces its body with a dedicated form and
 widens to 720px, constrained to the viewport; Back/Cancel restores the list. The type picker
-is separate from the existing-Automation picker. VCA and Code quality additions always use
-working-tree scope. Each row has **Move up** / **Move down** buttons; each move immediately saves
+is separate from the existing-Automation picker. VCA and Code quality additions choose their
+scope in `launch-lane-editor.js` (above). Each row has **Move up** / **Move down** buttons; each move immediately saves
 the full ordered selection with its revision. Reordering preserves paused/unavailable selections,
 never rewrites Jobs, and cancels pending entries like any lane-settings save. A failed move keeps
 the displayed order and offers Reload for conflicts. Restore focus to the moved row's controls.

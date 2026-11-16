@@ -305,7 +305,7 @@ get self-exit guidance without requiring Board tools or a card; native Quick Lau
 See the [terminal contract](../Terminal/AGENTS.md#agent-self-completion-and-terminal-menu-vibe-49).
 
 The lane add form has a separate body and type/Automation selectors. Lane VCA/Code quality additions
-use working-tree scope for VCA and linked-card-commit scope for Code quality.
+ask for their scope, defaulting to the card's linked commits for both (VIBE-271; see CHECKS.md).
 `GET /api/v1/jobs/scripts` discovers bounded repository script candidates
 through the existing file index and validates them using `AutomationScriptService`. Saved content
 hashes identify approved scripts; discovery never approves a file. The normal save route still

@@ -3,6 +3,47 @@ import { LaunchApi } from './launch-api.js';
 import { launchPresentation } from './launch-presentation.js';
 import { boardBrandLogo } from './board-brand.js';
 
+/**
+ * Scopes a new lane check can use (VIBE-271). Each one makes sense on every card entry; a pinned
+ * commit or range does not, so those stay in the AI Agents editor. Linked commits is the default:
+ * card work is committed before it reaches a later lane, so a working-tree check sees none of it.
+ */
+export const LANE_CHECK_SCOPES = Object.freeze([
+    ['card', 'Linked commits on the card', 'Checks the code in the card’s linked commits. With no linked code the result is Needs review; research spikes are skipped.'],
+    ['unpushed', 'Unpushed commits (merge base → HEAD)', 'Checks every commit on the branch that its upstream lacks, including other cards’ commits. A branch with no upstream fails visibly.'],
+    ['working-tree', 'Working-tree changes (excludes commits)', 'Checks uncommitted and untracked files in the checkout, including other sessions’ edits. Committed card work is not included.'],
+    ['repository', 'Repository at HEAD (all committed files)', 'Checks every committed file at HEAD. Uncommitted files are excluded.']
+]);
+export const DEFAULT_LANE_CHECK_SCOPE = 'card';
+const SCOPE_NAMES = { card: 'Linked commits', commit: 'One commit', unpushed: 'Unpushed commits', 'working-tree': 'Working tree', range: 'Commit range', repository: 'Repository' };
+const KIND_LABELS = { agent: 'Agent', script: 'Script', vca: 'VCA check', 'code-quality': 'Code quality check' };
+let mounted = 0;
+
+/** What a saved check analyzes, in words; '' when the catalog did not say. */
+export function laneCheckScopeName(check) {
+    if (!check?.scope) return '';
+    const scope = SCOPE_NAMES[check.scope] || check.scope;
+    return check.failGrade ? `${scope}, minimum ${check.failGrade}` : scope;
+}
+
+/** The name a lane-created check is saved under, so the lane list says what it checks. */
+export const laneCheckName = (kind, scope) => `${KIND_LABELS[kind]} · ${SCOPE_NAMES[scope]}`;
+
+/** Picker text: the name, then the kind and a check's scope unless the name already says them. */
+export function laneChoiceLabel(item) {
+    const kind = KIND_LABELS[item.kind] || item.kind;
+    const parts = [item.name];
+    if (item.name !== kind && !item.name.startsWith(`${kind} · `)) parts.push(kind);
+    const scope = laneCheckScopeName(item.check);
+    if (scope && !item.name.endsWith(scope)) parts.push(scope);
+    return parts.join(' · ');
+}
+
+/** An existing automatic check with exactly this kind and scope, and no grade or pinned commits. */
+export const findLaneCheck = (items, kind, scope) => items.find(item => item.definitionType === 'action'
+    && item.kind === kind && item.canRunAutomatically && item.check?.scope === scope
+    && !item.check.failGrade && !item.check.baseCommit && !item.check.headCommit);
+
 /** Ordered definitions, shared by lane settings and the lane popup. */
 export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
     const api = new LaunchApi(app),
@@ -14,11 +55,13 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
     let dirty = false,
         confirming = false;
     let picker = null;
+    // Always offered, whatever checks exist: the scope is chosen below the picker (VIBE-271).
     const builtInChecks = [
         { id: 'new:vca', name: 'VCA check', kind: 'vca' },
         { id: 'new:code-quality', name: 'Code quality check', kind: 'code-quality' }
     ];
-    const labelForKind = { agent: 'Agent', script: 'Script', vca: 'VCA check', 'code-quality': 'Code quality check' };
+    const scopeHelpId = `launch-lane-check-help-${++mounted}`;
+    const scopeHelp = scope => `${LANE_CHECK_SCOPES.find(([value]) => value === scope)?.[2] || ''} A pinned commit or range can be set on the check in AI Agents.`;
     const current = () => !abort.signal.aborted && host.isConnected;
     const beforeClose = (retry) => {
         if (busy) {
@@ -52,8 +95,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
         picker = null;
         host.classList.add('launch-lane-editor');
         const choices = items.filter(item => item.canRunAutomatically && !selections.some(selection => selection.definitionId === item.id));
-        const checks = builtInChecks.filter(check => !items.some(item => item.kind === check.kind && item.canRunAutomatically));
-        const choiceItems = new Map([...choices, ...checks].map(item => [item.id, item]));
+        const choiceItems = new Map([...choices, ...builtInChecks].map(item => [item.id, item]));
         const renderChoice = (data, escape) => {
             const item = choiceItems.get(data.value);
             if (!item) return `<div>${escape(data.text)}</div>`;
@@ -72,14 +114,16 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
             })
             .join(
                 ''
-            ) || '<p class="launch-lane-empty">No runs yet. Add an agent, script or check below.</p>'}</div><div class="launch-lane-add"><label>Add to this lane<select class="form-select" data-lane-add-choice><option value="">Choose an agent, script or check…</option>${[...choices, ...checks]
+            ) || '<p class="launch-lane-empty">No runs yet. Add an agent, script or check below.</p>'}</div><div class="launch-lane-add"><label>Add to this lane<select class="form-select" data-lane-add-choice><option value="">Choose an agent, script or check…</option>${[...choices, ...builtInChecks]
             .map(
                 (item) =>
-                    `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.name === labelForKind[item.kind] ? '' : ` · ${escapeHtml(labelForKind[item.kind] || item.kind)}`}</option>`
+                    `<option value="${escapeHtml(item.id)}">${escapeHtml(laneChoiceLabel(item))}</option>`
             )
             .join(
                 ''
-            )}</select></label><button class="btn btn-secondary" data-lane-add disabled>Add</button></div><div><a href="?view=ai-agents" class="btn btn-link btn-sm px-0" data-lane-manage-agents>Create an agent in AI Agents</a></div><div class="launch-lane-footer"><button class="btn btn-primary" data-lane-save>Save lane settings</button></div><p data-lane-error role="alert"></p>`;
+            )}</select></label><button class="btn btn-secondary" data-lane-add disabled>Add</button></div><div class="launch-lane-check" data-lane-check-options hidden><label>Check scope<select class="form-select" data-lane-check-scope aria-describedby="${scopeHelpId}">${LANE_CHECK_SCOPES
+            .map(([value, label]) => `<option value="${value}"${value === DEFAULT_LANE_CHECK_SCOPE ? ' selected' : ''}>${label}</option>`)
+            .join('')}</select></label><p class="form-text" id="${scopeHelpId}" data-lane-check-help>${escapeHtml(scopeHelp(DEFAULT_LANE_CHECK_SCOPE))}</p></div><div><a href="?view=ai-agents" class="btn btn-link btn-sm px-0" data-lane-manage-agents>Create an agent in AI Agents</a></div><div class="launch-lane-footer"><button class="btn btn-primary" data-lane-save>Save lane settings</button></div><p data-lane-error role="alert"></p>`;
         picker = enhanceSelectWithTomSelect(host.querySelector('[data-lane-add-choice]'), {
             placeholder: 'Choose an agent, script or check…',
             searchPlaceholder: 'Search agents, scripts and checks…',
@@ -130,8 +174,11 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
         (event) => {
             if (event.target.hasAttribute('data-lane-add-choice')) {
                 host.querySelector('[data-lane-add]').disabled = busy || !event.target.value;
+                host.querySelector('[data-lane-check-options]').hidden = !builtInChecks.some(check => check.id === event.target.value);
                 return;
             }
+            if (event.target.hasAttribute('data-lane-check-scope'))
+                host.querySelector('[data-lane-check-help]').textContent = scopeHelp(event.target.value);
         },
         { signal: abort.signal }
     );
@@ -153,12 +200,19 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                 const value = host.querySelector('[data-lane-add-choice]').value;
                 let item = items.find(item => item.id === value);
                 const check = builtInChecks.find(check => check.id === value);
-                if (check) {
+                const scope = check && host.querySelector('[data-lane-check-scope]').value;
+                // Reuse an identical check instead of adding another copy to the catalog.
+                if (check) item = findLaneCheck(items, check.kind, scope);
+                if (check && item && selections.some(selection => selection.definitionId === item.id)) {
+                    host.querySelector('[data-lane-error]').textContent = `This lane already runs “${item.name}”.`;
+                    return;
+                }
+                if (check && !item) {
                     const unlock = lock();
                     try {
                         const saved = await api.save('action', null, {
-                            name: check.name, kind: check.kind, enabled: true, expectedRevision: 0,
-                            check: { scope: check.kind === 'vca' ? 'working-tree' : 'card' }, script: null
+                            name: laneCheckName(check.kind, scope), kind: check.kind, enabled: true, expectedRevision: 0,
+                            check: { scope }, script: null
                         });
                         if (!current()) return;
                         item = { ...saved, definitionType: 'action', canRunAutomatically: true };

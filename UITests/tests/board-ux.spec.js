@@ -4612,6 +4612,16 @@ for (const width of [320, 1024]) test(`lane Tom Select shows icons with search, 
     await expect(picker.locator('img')).toHaveAttribute('alt', '');
     await expect(panel).toBeVisible();
     await expect(panel.locator('[data-lane-add]')).toBeEnabled();
+    // VIBE-271: a new check shows its scope field, inside the panel at every width.
+    const scope = panel.getByRole('combobox', { name: 'Check scope', exact: true });
+    await expect(scope).toBeVisible();
+    await expect(scope).toHaveValue('card');
+    const fits = await scope.evaluate(select => {
+        const box = select.getBoundingClientRect(), outer = select.closest('.board-lane-agents-panel').getBoundingClientRect();
+        return box.left >= outer.left - 1 && box.right <= outer.right + 1;
+    });
+    expect(fits).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('lane-check-scope.png') });
     await panel.getByRole('button', { name: 'Close lane panel', exact: true }).click();
     await expect(panel).toHaveCount(0);
     await expect(page.locator('.launch-lane-dropdown')).toHaveCount(0);

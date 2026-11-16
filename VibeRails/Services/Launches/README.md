@@ -103,7 +103,7 @@ the existing local-user project resolver.
 
 | Route | Contract |
 | --- | --- |
-| `GET /launch-catalog` | `{items}` with stable ID, definition type, derived kind, revision, capabilities and project eligibility/reason; `includeAll=true` for management |
+| `GET /launch-catalog` | `{items}` with stable ID, definition type, derived kind, revision, capabilities, project eligibility/reason and a check Action's saved `check` scope; `includeAll=true` for management |
 | `GET /launch-projects` | Known local project IDs, saved display names and paths, including the current project |
 | `GET /presets`, `GET /presets/{id}` | Global preset records |
 | `POST /presets`, `PUT /presets/{id}` | `SavePresetRequest`; returns `{preset,affectedBindings}` |

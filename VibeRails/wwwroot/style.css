@@ -19982,6 +19982,9 @@ body.performance-mode .brand-text-sm {
 .launch-lane-empty { margin: 0; padding: var(--space-4); border: 1px dashed var(--control-border); border-radius: var(--radius-control); color: var(--color-text-muted); text-align: center; }
 .launch-lane-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--space-2); }
 .launch-lane-add .ts-wrapper { width: 100%; min-width: 0; font-weight: 400; }
+.launch-lane-check { display: grid; gap: var(--space-2); min-width: 0; }
+.launch-lane-check[hidden] { display: none; }
+.launch-lane-check .form-text { margin: 0; }
 .launch-lane-add .ts-control { min-height: var(--control-height); border-color: var(--control-border); border-radius: var(--radius-control); background: var(--color-bg-base); font-size: 16px; }
 .launch-lane-add .ts-wrapper.focus .ts-control { outline: 2px solid var(--focus-ring); outline-offset: 2px; box-shadow: none; border-color: var(--control-border); }
 .launch-lane-dropdown { background: var(--color-bg-surface-hover); border-color: var(--control-border); border-radius: var(--radius-surface); box-shadow: var(--shadow-menu); }

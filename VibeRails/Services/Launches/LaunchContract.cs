@@ -16,9 +16,11 @@ public sealed record LaunchRequest(string DefinitionId, string DefinitionType = 
 public sealed record ResolveUncertainLaunchRequest(bool ConfirmedStopped);
 public sealed record RetireLaunchRequest(long ExpectedRevision);
 public sealed record LaunchError(string Error, string Code, long? CurrentRevision = null);
+/// <summary>A catalog row. <paramref name="Check"/> is a check Action's saved scope, so pickers can label
+/// and reuse checks by what they analyze (VIBE-271); null for presets and scripts.</summary>
 public sealed record LaunchCatalogItem(string Id, string DefinitionType, string Kind, string Name, string Description,
     long Revision, bool Enabled, bool Retired, string? Cli, bool CanLaunch, bool CanRunAutomatically,
-    string? IneligibleReason, bool SupportsAttachments, bool InProject = true);
+    string? IneligibleReason, bool SupportsAttachments, bool InProject = true, CheckAction? Check = null);
 public sealed record LaunchProject(string Id, string Name, string Path, bool IsCurrent);
 public sealed record LaunchCatalog(IReadOnlyList<LaunchCatalogItem> Items);
 public sealed record LaunchLaneEntry(VibeRails.Services.Board.BoardLaunchEvent Entry, string CardLabel,
