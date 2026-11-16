@@ -75,7 +75,7 @@ export function laneAgentAddMarkup(draft, settings, jobs, environments, scripts)
         ${draft.kind === 'check:2' ? `<p class="board-lane-check-summary">Checks the code in the card’s linked commits.</p>
             <label for="board-lane-check-minimum">Findings</label>
             <select id="board-lane-check-minimum" class="form-select" data-lane-draft="minimum" aria-describedby="board-lane-check-minimum-help">${checkMinimumOptions(laneCheckMinimum(draft))}</select>
-            <small id="board-lane-check-minimum-help">${CHECK_MINIMUM_HELP} With no linked code, a minimum grade fails the step.</small>` : ''}
+            <small id="board-lane-check-minimum-help">${CHECK_MINIMUM_HELP} With no linked code, the step fails either way.</small>` : ''}
         ${draft.kind === 'script' ? `<label for="board-lane-script-search">Find script</label>
             <input id="board-lane-script-search" type="search" class="form-control" data-lane-draft="scriptQuery" maxlength="256" value="${escapeHtml(draft.scriptQuery || '')}" placeholder="Search by file name or path">
             <button type="button" class="btn btn-sm btn-link" data-agent-action="reload-scripts">Search scripts</button>

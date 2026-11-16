@@ -46,7 +46,7 @@ export function checkFields(action, actionId = '') {
         .map(([value, label]) => `<option value="${value}"${args[0] === value ? ' selected' : ''}>${label}</option>`).join('')}
             </select>
         </label>
-        ${args[0] === 'card' ? '<p class="form-text">Checks code from the card’s linked commits. With no linked code, the result is Needs review; research spikes are skipped.</p>' : ''}
+        ${args[0] === 'card' ? '<p class="form-text">Checks code from the card’s linked commits. With no linked code, the result is Needs review and a Code quality check fails the step; research spikes are skipped.</p>' : ''}
         ${args[0] === 'commit' ? `<label class="form-label">Commit SHA<input class="form-control" data-action-field="checkCommit" value="${esc(args[1] || '')}" minlength="7" maxlength="40"></label>
             <p class="form-text">Enter a 7–40 character commit SHA. Only that commit’s changes are checked, including an initial commit.</p>` : ''}
         ${args[0] === 'range' ? `<label class="form-label">Base commit SHA<input class="form-control" data-action-field="checkBase" value="${esc(args[1] || '')}" maxlength="40"></label>
@@ -55,7 +55,7 @@ export function checkFields(action, actionId = '') {
         ${quality ? `<label class="form-label">Findings
             <select class="form-select" data-action-field="checkMinimum" aria-describedby="${helpId}">${checkMinimumOptions(minimum)}</select>
         </label>
-        <p class="form-text" id="${helpId}">${CHECK_MINIMUM_HELP} With no linked code, a minimum grade fails the step.</p>` : ''}
+        <p class="form-text" id="${helpId}">${CHECK_MINIMUM_HELP} With no linked code, the step fails either way.</p>` : ''}
         <p class="form-text">Run inexpensive checks before the review Worker. Results never move a card. ${quality ? 'Findings stay feedback for the reviewer unless you set a minimum grade.' : 'VCA results are feedback for the reviewer.'} Empty or unsupported analysis is marked skipped.</p>
     </div>`;
 }

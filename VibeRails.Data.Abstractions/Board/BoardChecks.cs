@@ -20,10 +20,20 @@ public sealed record BoardCheckRecord(
     /// <summary><see cref="MinimumGradeResult"/>: no grade could be established (no linked code, unreadable source).</summary>
     public const string GradeNotChecked = "Not checked";
 
-    /// <summary>Whether the action fails: the check could not run, or a Code quality minimum grade was not
-    /// met or could not be checked (VIBE-278). Without a minimum, findings stay advisory.</summary>
+    /// <summary>Whether the action fails: the check could not run, a Code quality minimum grade was not
+    /// met or could not be checked (VIBE-278), or a Code quality card check found no linked code.
+    /// Otherwise findings stay advisory.</summary>
     [JsonIgnore]
-    public bool FailsAction => Status is "Failed to run" or "Cancelled" || MinimumGradeResult is GradeNotMet or GradeNotChecked;
+    public bool FailsAction => Status is "Failed to run" or "Cancelled" || MinimumGradeResult is GradeNotMet or GradeNotChecked
+        || NoCodeFailsCodeQuality;
+
+    /// <summary>
+    /// Owner decision 2026-11-16: a card-scoped Code quality check with no linked code fails its step,
+    /// minimum grade or not, so an agent that forgets <c>link_board_commit</c> cannot pass the lane.
+    /// "Needs review" is only ever the no-code outcome of a card check; VCA keeps it advisory.
+    /// </summary>
+    [JsonIgnore]
+    public bool NoCodeFailsCodeQuality => Status == "Needs review" && Tool == "Code quality";
 }
 
 /// <summary>The captured text used by a check, kept separately from its summary. Impact sources

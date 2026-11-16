@@ -24,6 +24,18 @@ public sealed partial class BoardChecksTests
         Assert.Equal(0, check.AnalyzedCount);
         Assert.Null(check.Evidence);
         Assert.Equal(check.Status, (await store.GetCheckAsync(repo, card.Id, check.Id, Ct))!.Status);
+        // Owner decision 2026-11-16: no linked code fails a Code quality step even without a minimum grade.
+        Assert.Null(check.MinimumGrade);
+        Assert.Equal(!research, check.FailsAction);
+        var review = Assert.Single(await store.GetReviewsAsync(repo, card.Id, 0, Ct));
+        Assert.Equal(research ? "Succeeded" : "Failed", review.ProcessStatus);
+        if (!research)
+        {
+            Assert.Contains("link_board_commit", check.Summary);
+            Assert.Equal("Incomplete", review.Result);
+            Assert.Contains("No code is attached to this card, so this step failed.", review.Findings);
+            Assert.DoesNotContain("do not fail the step", review.Findings);
+        }
     }
 
     [Fact]
@@ -144,6 +156,7 @@ public sealed partial class BoardChecksTests
         var empty = await Run(JobActionKind.Vca, "card");
         Assert.Equal("Needs review", empty.Status);
         Assert.Contains("no code attached to this card", empty.Summary);
+        Assert.False(empty.FailsAction); // Only Code quality fails without linked code.
 
         await Write("linked.cs", "class Linked {}\n");
         var linked = await Commit();

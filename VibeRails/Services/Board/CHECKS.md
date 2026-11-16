@@ -32,7 +32,10 @@ The picker reuses an existing check with the same kind and scope (no minimum gra
 commits) instead of saving a copy; the catalog's `check` field carries each Action's scope for
 that and for labelling. A card with no linked commits gets
 **Needs review**, with “no code attached to this card”; a Research spike is **Skipped/not applicable**.
-Other non-code work can explicitly skip the lane check. A standalone run without a card must use
+A Code quality check **fails its step** on Needs review, with or without a minimum grade (owner
+decision 2026-11-16, `BoardCheckRecord.NoCodeFailsCodeQuality`), so an agent that forgets
+`link_board_commit` cannot pass the lane; its summary says to link the commits and retry. VCA's
+Needs review stays advisory. Other non-code work can explicitly skip the lane check. A standalone run without a card must use
 another scope, such as **One commit**. Results never move a card or set its attention flag.
 
 Card capture requires one first-parent history. Divergent or side-branch selections fail visibly
@@ -92,7 +95,7 @@ the current branch and are validated normally.
 
 The action records its attempt before capturing. Findings finish the action successfully and
 remain advisory unless a Code quality action sets a minimum grade (below). An analysis failure,
-or a missed minimum grade, marks that action/Automation failed but allows subsequent
+a missed minimum grade, or a Code quality card check with no linked code marks that action/Automation failed but allows subsequent
 checks and the review Worker to run. Script/Worker failures remain fail-fast. The ordinary run
 cancel/deadline/reaper owns termination. The last Worker's idle-shutdown fallback preserves earlier
 failed checks and their error details; pending user cancellation takes precedence. An unfinished
@@ -107,8 +110,8 @@ Saved check outcomes distinguish **Passed** (applicable analysis completed witho
 unavailable), **Skipped/not applicable** (nothing applicable was analyzed), **Findings**,
 **Failed to run**, and **Cancelled**. Coverage counts and limitations remain part of the evidence;
 findings take precedence over coverage limitations. **Needs review** identifies a card check with
-no code attached; it remains advisory so the review Worker can attach the intended commits,
-unless the action sets a minimum grade.
+no code attached. It fails a Code quality step (2026-11-16); for VCA it remains advisory unless
+the run fails for another reason.
 
 For check-only Automations, the lane and card Automation rail display the exact run's saved check
 outcome and summary through `BoardLaneAutomationStatus.DisplayStatus`, also used by MCP. Multiple
@@ -116,7 +119,7 @@ check actions show findings before limitations, and a mix of passed and skipped 
 completed with limitations. Missing or incomplete evidence is unknown. Retries use their own
 evidence; historical attempts are not rewritten. Execution state and `StepStatus` still determine
 workflow eligibility: findings and limited/empty coverage remain advisory; a missed minimum grade
-fails the run, so the step shows Failed with the grade as its reason. Automations containing
+or a Code quality card check with no linked code fails the run, so the step shows Failed with the grade or the missing code as its reason. Automations containing
 Workers retain the explicit worker verdict; mixed script/check Automations retain the run outcome.
 
 ### Minimum grade (VIBE-278)

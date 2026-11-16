@@ -105,6 +105,9 @@ public sealed class BoardCheckService(
             if (minimum is char grade && !ex.ResearchSpike)
                 record = record with { MinimumGradeResult = BoardCheckRecord.GradeNotChecked, Summary = $"{record.Summary}. Minimum grade {grade} not checked; this step fails.",
                     GradeSummary = $"No code is attached to this card, so the minimum grade {grade} could not be checked. Link the card's commits and run the step again." };
+            // Owner decision 2026-11-16: without a minimum too (BoardCheckRecord.NoCodeFailsCodeQuality).
+            else if (kind == JobActionKind.CodeQuality && !ex.ResearchSpike)
+                record = record with { Summary = $"{record.Summary}. This step fails: link the card's commits with link_board_commit, then retry it." };
         }
         catch (Exception ex)
         {
@@ -139,7 +142,9 @@ public sealed class BoardCheckService(
         var findings = new StringBuilder()
             .Append(record.Status).Append(": ").AppendLine(record.Summary)
             .AppendLine(record.MinimumGrade is null
-                ? "Minimum grade: none set. Findings are feedback only and do not fail the step."
+                ? record.NoCodeFailsCodeQuality
+                    ? "Minimum grade: none set. No code is attached to this card, so this step failed. Link the card's commits with link_board_commit, then retry the step."
+                    : "Minimum grade: none set. Findings are feedback only and do not fail the step."
                 : $"Minimum grade {record.MinimumGrade}: {record.MinimumGradeResult switch
                 {
                     BoardCheckRecord.GradeMet => "met",

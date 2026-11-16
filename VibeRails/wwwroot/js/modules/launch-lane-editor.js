@@ -9,7 +9,7 @@ import { boardBrandLogo } from './board-brand.js';
  * card work is committed before it reaches a later lane, so a working-tree check sees none of it.
  */
 export const LANE_CHECK_SCOPES = Object.freeze([
-    ['card', 'Linked commits on the card', 'Checks the code in the card’s linked commits. With no linked code the result is Needs review; research spikes are skipped.'],
+    ['card', 'Linked commits on the card', 'Checks the code in the card’s linked commits. With no linked code the result is Needs review and a Code quality check fails its step; research spikes are skipped.'],
     ['unpushed', 'Unpushed commits (merge base → HEAD)', 'Checks every commit on the branch that its upstream lacks, including other cards’ commits. A branch with no upstream fails visibly.'],
     ['working-tree', 'Working-tree changes (excludes commits)', 'Checks uncommitted and untracked files in the checkout, including other sessions’ edits. Committed card work is not included.'],
     ['repository', 'Repository at HEAD (all committed files)', 'Checks every committed file at HEAD. Uncommitted files are excluded.']
