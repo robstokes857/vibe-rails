@@ -117,6 +117,11 @@ click/keyboard insertion, selection replacement, undo and saved literal placehol
 Inline reference tests cover native caret alignment, source preservation, escaping, spelling,
 composition and forced colors. Image tests cover Attachments-list thumbnails for pending files,
 saving/reopening and the owner-specific attachment viewer on desktop and narrow screens.
+Lane picker tests (VIBE-337) serve `/api/v1/lane-picker/preferences` from `state.laneHidden`
+(`failLanePickerLoad`, `failLanePicker` simulate failures) and mount the lane editor directly:
+escaped option descriptions, staging and unsaved status, guarded page links, Manage list
+hide/show, remount, search and the all-hidden empty state. The Board config repeats the panel
+layout at 320/375/768/1024px.
 Library-script tests (VIBE-311) serve `/api/v1/python-scripts` from `state.scripts`: catalog
 rows beside script Actions, Sign and Remove, signed scripts under the agents in Quick actions,
 and an unreadable library (`state.failScripts`) leaving the agents listed.

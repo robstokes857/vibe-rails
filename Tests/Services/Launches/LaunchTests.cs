@@ -78,6 +78,29 @@ public sealed class LaunchTests : IDisposable
         Assert.Equal(new CheckAction("unpushed", "B"), Assert.Single(catalog.Items, item => item.Id == quality.Id).Check);
         var json = JsonSerializer.Serialize(catalog, AppJsonSerializerContext.Default.LaunchCatalog);
         Assert.Contains("\"check\":{\"scope\":\"card\"", json);
+        Assert.All(catalog.Items, item => Assert.Null(item.Script));
+    }
+
+    [Fact]
+    public async Task CatalogTellsPickersWhatEachScriptRuns()
+    {
+        // VIBE-337: the lane picker says what a script Action runs: its path and interpreter, nothing more.
+        var script = await store.SaveActionAsync(new("script", "Release", "", "script",
+            new("scripts/release.ps1", JobScriptRuntime.PowerShell, ["--secret-flag"], WorkingDirectory: "tools"),
+            null, true, 0, default, default), 0, Ct);
+        // The file is not in this checkout; the catalog still says what the Action runs.
+        var scripts = new Mock<IAutomationScriptService>();
+        scripts.Setup(s => s.NormalizeAsync(It.IsAny<string>(), It.IsAny<JobActionRequest>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .ThrowsAsync(new AutomationScriptValidationException("Script not found."));
+        var item = Assert.Single((await new LaunchService(store, scripts.Object).CatalogAsync(root, Ct)).Items, item => item.Id == script.Id);
+        Assert.Equal("Script not found.", item.IneligibleReason);
+        Assert.Equal(new LaunchCatalogScript("scripts/release.ps1", JobScriptRuntime.PowerShell), item.Script);
+        Assert.Null(item.Check);
+        var json = JsonSerializer.Serialize(new LaunchCatalog([item]), AppJsonSerializerContext.Default.LaunchCatalog);
+        Assert.Contains("\"script\":{\"path\":\"scripts/release.ps1\",\"runtime\":1}", json);
+        Assert.DoesNotContain("--secret-flag", json);
+        Assert.DoesNotContain("\"arguments\"", json);
+        Assert.DoesNotContain("\"workingDirectory\"", json);
     }
 
     [Fact]

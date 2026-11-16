@@ -136,7 +136,7 @@ public class LaunchRoutesTests
         var ct = TestContext.Current.CancellationToken;
         try
         {
-            foreach (var path in new[] { "/launch-catalog", "/quick-actions/preferences", "/launch-projects", "/presets", "/actions", "/trigger-bindings", "/runs", "/presets/missing/attachments",
+            foreach (var path in new[] { "/launch-catalog", "/quick-actions/preferences", "/lane-picker/preferences", "/launch-projects", "/presets", "/actions", "/trigger-bindings", "/runs", "/presets/missing/attachments",
                 "/runs/missing/attachments/missing/content", "/board/cards/missing/launches/runs" })
             {
                 foreach (var credentials in new[] { 0, 1, 2 })
@@ -159,6 +159,15 @@ public class LaunchRoutesTests
             using var invalidPreference = await SendAsync(HttpMethod.Put, url + "/api/v1/quick-actions/preferences",
                 new QuickActionPreferenceRequest("bad-key", true), ct);
             Assert.Equal(HttpStatusCode.BadRequest, invalidPreference.StatusCode);
+            // VIBE-337: the lane picker keeps its own list, separate from Quick actions.
+            using var laneHidden = await SendAsync(HttpMethod.Put, url + "/api/v1/lane-picker/preferences",
+                new LanePickerPreferenceRequest("check:vca", true), ct);
+            Assert.Equal(HttpStatusCode.NoContent, laneHidden.StatusCode);
+            using var lanePreferences = await SendAsync(HttpMethod.Get, url + "/api/v1/lane-picker/preferences", null, ct);
+            Assert.Equal(["check:vca"], (await lanePreferences.Content.ReadFromJsonAsync<LanePickerPreferencesResponse>(ct))!.HiddenKeys);
+            using var laneInvalid = await SendAsync(HttpMethod.Put, url + "/api/v1/lane-picker/preferences",
+                new LanePickerPreferenceRequest("script:library", true), ct);
+            Assert.Equal(HttpStatusCode.BadRequest, laneInvalid.StatusCode);
             // Hiding a shortcut must leave the definition runnable through the normal API below.
             using var conflict = await SendAsync(HttpMethod.Put, url + "/api/v1/presets/" + saved.Preset.Id, new SavePresetRequest("Edit", "", "codex", ExpectedRevision: 42), ct);
             Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);

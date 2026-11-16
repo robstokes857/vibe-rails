@@ -4500,8 +4500,16 @@ async function installLaunchFixture(page, { conflict = false } = {}) {
         { id:'action_check',definitionType:'action',kind:'vca',name:'Check',enabled:true,canLaunch:true,canRunAutomatically:true },
         { id:'preset_quick',definitionType:'preset',kind:'quick-launch',name:'Quick',cli:'codex',enabled:true,canLaunch:true,canRunAutomatically:false }
     ];
-    const state={items,conflict,writes:[],revision:3,selections:[{definitionId:'preset_review',definitionType:'preset',gate:'review'},{definitionId:'action_check',definitionType:'action',gate:'result'}],activity:[],runs:[],posts:0,skips:0,retries:0};
+    const state={items,conflict,writes:[],revision:3,selections:[{definitionId:'preset_review',definitionType:'preset',gate:'review'},{definitionId:'action_check',definitionType:'action',gate:'result'}],activity:[],runs:[],posts:0,skips:0,retries:0,laneHidden:[],laneHiddenWrites:[]};
     await page.route('**/api/v1/launch-catalog*',route=>route.fulfill({json:{items}}));
+    await page.route('**/api/v1/lane-picker/preferences',route=>{
+        if(route.request().method()==='PUT'){
+            const body=route.request().postDataJSON();state.laneHiddenWrites.push(body);
+            state.laneHidden=state.laneHidden.filter(key=>key!==body.key);if(body.hidden)state.laneHidden.push(body.key);
+            return route.fulfill({status:204});
+        }
+        return route.fulfill({json:{hiddenKeys:state.laneHidden}});
+    });
     await page.route('**/api/v1/launch-projects',route=>route.fulfill({json:[]}));
     await page.route('**/api/v1/board/columns/*/launches',async route=>{
         if(route.request().method()==='PUT'){
@@ -4582,32 +4590,40 @@ for (const width of [320, 1024]) test(`lane Tom Select shows icons with search, 
     await expect(picker).toBeVisible();
     await picker.click();
     const menu = page.locator('.launch-lane-dropdown');
-    const review = menu.getByRole('option', { name: 'Review · Agent', exact: true });
+    // VIBE-337: each option is its name, then a muted line saying what it does.
+    const option = value => menu.locator(`.option[data-value="${value}"]`);
+    const review = option('preset_review');
+    await expect(review.locator('.launch-lane-choice-label')).toHaveText('Review · Agent');
+    await expect(review.locator('.launch-lane-choice-detail')).toHaveText('Starts Codex with its saved prompt.');
     await expect(review.locator('img')).toHaveAttribute('src', 'assets/img/openai.svg');
-    await expect(menu.getByRole('option', { name: 'Check · VCA check', exact: true }).locator('img')).toHaveAttribute('src', 'assets/img/logo.png');
-    await expect(menu.getByRole('option', { name: 'Code quality check', exact: true }).locator('img')).toHaveAttribute('src', 'assets/img/logo.png');
-    await expect(menu.getByRole('option', { name: `${scriptName} · Script`, exact: true }).locator('.fa-code')).toBeVisible();
-    await expect(menu.getByRole('option', { name: 'Other provider · Agent', exact: true }).locator('.fa-robot')).toBeVisible();
+    await expect(option('action_check').locator('.launch-lane-choice-label')).toHaveText('Check · Rules check');
+    await expect(option('action_check').locator('img')).toHaveAttribute('src', 'assets/img/logo.png');
+    await expect(option('new:code-quality').locator('.launch-lane-choice-label')).toHaveText('Code quality scan');
+    await expect(option('new:code-quality').locator('img')).toHaveAttribute('src', 'assets/img/logo.png');
+    await expect(option('script').locator('.launch-lane-choice-label')).toHaveText(`${scriptName} · Script`);
+    await expect(option('script').locator('.fa-code')).toBeVisible();
+    await expect(option('unknown').locator('.launch-lane-choice-label')).toHaveText('Other provider · Agent');
+    await expect(option('unknown').locator('.fa-robot')).toBeVisible();
     await expect(menu.locator('[data-value=""] .launch-lane-choice-icon')).toHaveCount(0);
     await expect.poll(() => menu.locator('img').evaluateAll(images => images.every(img => img.complete && img.naturalWidth > 0))).toBe(true);
     expect(await menu.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath('lane-picker-icons.png') });
     const search = page.getByRole('textbox', { name: 'Search agents, scripts and checks…', exact: true });
     await search.fill('Review');
-    await expect(menu.locator('.option:visible')).toHaveText(['Review · Agent']);
+    await expect(menu.locator('.option:visible .launch-lane-choice-label')).toHaveText(['Review · Agent']);
     await search.press('Enter');
     await expect(panel.locator('[data-lane-add-choice]')).toHaveValue('preset_review');
     await expect(picker.locator('img')).toHaveAttribute('src', 'assets/img/openai.svg');
     await picker.click();
     await search.fill('quality');
-    await expect(page.locator('.launch-lane-dropdown .option:visible')).toHaveText(['Code quality check']);
+    await expect(page.locator('.launch-lane-dropdown .option:visible .launch-lane-choice-label')).toHaveText(['Code quality scan']);
     await page.screenshot({ path: testInfo.outputPath('lane-picker-search.png') });
     await search.press('Escape');
     await expect(panel).toBeVisible();
     await expect(page.locator('.ts-dropdown:visible')).toHaveCount(0);
     await picker.click();
     await search.fill('quality');
-    await page.locator('.launch-lane-dropdown').getByRole('option', { name: 'Code quality check', exact: true }).click();
+    await page.locator('.launch-lane-dropdown .option[data-value="new:code-quality"]').click();
     await expect(picker.locator('img')).toHaveAttribute('src', 'assets/img/logo.png');
     await expect(picker.locator('img')).toHaveAttribute('alt', '');
     await expect(panel).toBeVisible();
@@ -4626,6 +4642,57 @@ for (const width of [320, 1024]) test(`lane Tom Select shows icons with search, 
     await expect(panel).toHaveCount(0);
     await expect(page.locator('.launch-lane-dropdown')).toHaveCount(0);
     await expect(trigger).toBeFocused();
+});
+
+for (const width of [320, 375, 768, 1024]) test(`lane picker explains choices and Manage list fits at ${width}px (VIBE-337)`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await openBoard(page);
+    const state = await installLaunchFixture(page);
+    state.items.push({ id: 'script', definitionType: 'action', kind: 'script', name: 'Release', canRunAutomatically: true,
+        script: { path: 'scripts/a-very-long-folder-name/release-the-client-application.ps1', runtime: 1 } });
+    const trigger = page.getByRole('button', { name: 'Agents and Actions on entry to Ready', exact: true });
+    await trigger.click();
+    const panel = page.locator('.board-lane-agents-panel');
+    // Run order rows say the kind and what each runs.
+    await expect(panel.locator('.launch-lane-row-detail')).toHaveText(['Agent · Starts Codex with its saved prompt.', 'Rules check']);
+    await panel.locator('[data-lane-add-choice]').evaluate(node => node.tomselect.setValue('new:vca'));
+    const about = panel.locator('[data-lane-about]');
+    await expect(about).toContainText('What this does: Checks the card’s code against this repository’s rules');
+    await expect(about.getByRole('combobox', { name: 'Check scope', exact: true })).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Add to run order', exact: true })).toBeEnabled();
+    const toggle = panel.getByRole('button', { name: 'Manage list', exact: true });
+    await toggle.click();
+    const manage = panel.locator('[data-lane-manage-list]');
+    await expect(manage.locator('legend')).toHaveText(['Agents', 'Scripts', 'Checks']);
+    await expect(manage.getByRole('switch')).toHaveCount(5);
+    await expect(manage.locator('.launch-lane-manage-row', { hasText: 'Release · Script' }).locator('.launch-lane-choice-detail')).toHaveText('Runs scripts/a-very-long-folder-name/release-the-client-application.ps1 with PowerShell.');
+    // A switch inside the panel saves without closing the anchored lane panel.
+    await manage.getByRole('switch', { name: 'Show Check · Rules check in this list', exact: true }).click();
+    await expect.poll(() => state.laneHidden).toEqual(['action:action_check']);
+    await expect(panel).toBeVisible();
+    await expect(panel.locator('[data-lane-selection-list] strong')).toHaveText(['Review', 'Check']);
+    expect(state.writes).toHaveLength(0);
+    // Everything stays inside the panel: no sideways scrolling at any width.
+    expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    const outside = await panel.evaluate(el => {
+        const outer = el.getBoundingClientRect();
+        return [...el.querySelectorAll('[data-lane-about], .launch-lane-manage-row, .launch-lane-add-heading, .launch-lane-stage, .launch-lane-footer')]
+            .filter(node => { const box = node.getBoundingClientRect(); return box.left < outer.left - 1 || box.right > outer.right + 1; })
+            .map(node => node.className);
+    });
+    expect(outside).toEqual([]);
+    const switches = await manage.getByRole('switch').evaluateAll(nodes => nodes.map(node => {
+        const box = node.getBoundingClientRect(); return [Math.round(box.width), Math.round(box.height)];
+    }));
+    expect(switches.every(([w, h]) => w === 42 && h === 24)).toBe(true);
+    await panel.screenshot({ path: testInfo.outputPath(`lane-manage-${width}.png`) });
+    await manage.evaluate(el => el.scrollIntoView({ block: 'start' }));
+    await panel.screenshot({ path: testInfo.outputPath(`lane-manage-list-${width}.png`) });
+    await panel.locator('.launch-lane-add .ts-control').click();
+    const menu = page.locator('.launch-lane-dropdown');
+    await expect(menu.locator('.option[data-value="action_check"]')).toHaveCount(0);
+    expect(await menu.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`lane-picker-menu-${width}.png`) });
 });
 
 test('unified lane progress distinguishes process and review, retries and skips exact card entries',async({page})=>{

@@ -19975,13 +19975,41 @@ body.performance-mode .brand-text-sm {
 .launch-lane-editor h3 { margin: 0; font: 600 18px/1.4 var(--font-display); }
 .launch-lane-list { display: grid; gap: var(--space-3); }
 .launch-lane-editor .launch-lane-row { padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-surface); background: var(--color-bg-base); }
-.launch-lane-title { display: flex; align-items: center; gap: var(--space-2); }
+.launch-lane-title { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; }
+/* VIBE-337: each run order row says its kind and what it runs below the name. */
+.launch-lane-row-text { display: grid; gap: 2px; min-width: 0; line-height: 24px; }
+.launch-lane-row-text strong { overflow-wrap: anywhere; }
+.launch-lane-row-detail { color: var(--color-text-muted); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .launch-lane-number { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border-radius: var(--radius-round); background: var(--tone-active-bg); color: var(--tone-active-fg); font-size: 12px; }
 .launch-lane-editor label { display: grid; gap: var(--space-2); min-width: 0; margin: 0; font-size: 14px; font-weight: 600; }
 .launch-lane-editor .launch-run-actions { margin: 0; }
 .launch-lane-empty { margin: 0; padding: var(--space-4); border: 1px dashed var(--control-border); border-radius: var(--radius-control); color: var(--color-text-muted); text-align: center; }
-.launch-lane-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--space-2); }
+.launch-lane-add { display: grid; gap: var(--space-2); min-width: 0; }
 .launch-lane-add .ts-wrapper { width: 100%; min-width: 0; font-weight: 400; }
+/* VIBE-337: label row with Manage list, what the choice does, then Add with its staging note. */
+.launch-lane-add-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; }
+.launch-lane-editor .launch-lane-add-heading label { display: block; }
+.launch-lane-add-heading .btn-link { flex: 0 0 auto; padding-inline: 0; }
+.launch-lane-about { display: grid; gap: var(--space-3); min-width: 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-bg-base); }
+.launch-lane-about[hidden] { display: none; }
+.launch-lane-about-text { margin: 0; color: var(--color-text-muted); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.launch-lane-about-text strong { color: var(--color-text); font-weight: 600; }
+.launch-lane-about-link { color: var(--color-accent); white-space: nowrap; }
+.launch-lane-stage { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-width: 0; }
+.launch-lane-stage .form-text { flex: 1 1 14rem; min-width: 0; margin: 0; }
+.launch-lane-picker-empty { display: grid; justify-items: center; gap: var(--space-2); }
+.launch-lane-picker-empty p { margin: 0; }
+.launch-lane-manage { display: grid; gap: var(--space-3); min-width: 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-bg-base); }
+.launch-lane-manage[hidden] { display: none; }
+.launch-lane-manage fieldset { display: grid; min-width: 0; margin: 0; padding: 0; border: 0; }
+.launch-lane-manage legend { float: none; width: auto; margin: 0 0 var(--space-1); padding: 0; color: var(--color-text-muted); font-size: 13px; font-weight: 600; line-height: 1.4; }
+.launch-lane-editor .launch-lane-manage-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: var(--space-2) var(--space-3); min-height: 44px; padding: var(--space-2) 0; border-top: 1px solid var(--color-border); font-weight: 400; cursor: pointer; }
+.launch-lane-manage-row .launch-lane-choice-icon { align-self: start; margin-top: 3px; }
+.launch-lane-manage-help, .launch-lane-manage-note, .launch-lane-manage-status { margin: 0; color: var(--color-text-muted); font-size: 13px; line-height: 1.5; }
+.launch-lane-manage-note { color: var(--color-warning); }
+.launch-lane-manage-error { margin: 0; color: var(--feedback-error-fg); font-size: 13px; }
+.launch-lane-manage-status:empty, .launch-lane-manage-error:empty { display: none; }
+.launch-lane-manage-footer { display: flex; justify-content: flex-end; }
 .launch-lane-check { display: grid; gap: var(--space-2); min-width: 0; }
 .launch-lane-check[hidden] { display: none; }
 .launch-lane-check .form-text { margin: 0; }
@@ -19992,7 +20020,15 @@ body.performance-mode .brand-text-sm {
 .launch-lane-choice-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 18px; width: 18px; height: 18px; }
 .launch-lane-choice-icon > .launch-provider-logo, .launch-lane-choice-icon > .board-brand-logo { flex: 0 0 18px; width: 18px; height: 18px; font-size: 18px; }
 .launch-lane-choice-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
-.launch-lane-footer { display: flex; justify-content: flex-end; padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+/* Menu options and Manage list rows: a muted second line, two lines at most (the full text shows after a choice). */
+.launch-lane-choice-text { display: grid; gap: 2px; min-width: 0; }
+.launch-lane-choice-detail { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; color: var(--color-text-muted); font-size: 13px; font-weight: 400; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+.launch-lane-dropdown .launch-lane-choice { align-items: flex-start; }
+.launch-lane-dropdown .launch-lane-choice-icon { margin-top: 3px; }
+.launch-lane-dropdown .option.active .launch-lane-choice-detail { color: var(--color-text); }
+.launch-lane-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2) var(--space-3); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+.launch-lane-unsaved { margin: 0 auto 0 0; color: var(--color-text-muted); font-size: 13px; }
+.launch-lane-unsaved:empty { display: none; }
 .launch-lane-editor [data-lane-error] { margin: 0; color: var(--feedback-error-fg); }
 .launch-lane-editor [data-lane-error]:empty { display: none; }
 

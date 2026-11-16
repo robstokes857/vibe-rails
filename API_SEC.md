@@ -279,6 +279,8 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET | `/api/v1/launch-catalog` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
 | GET | `/api/v1/quick-actions/preferences` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only, both credentials; shortcut visibility only |
 | PUT | `/api/v1/quick-actions/preferences` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only, both credentials; shortcut visibility only |
+| GET | `/api/v1/lane-picker/preferences` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only, both credentials; Board lane picker visibility only (VIBE-337) |
+| PUT | `/api/v1/lane-picker/preferences` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only, both credentials; Board lane picker visibility only (VIBE-337) |
 | GET | `/api/v1/launch-projects` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only, both credentials required |
 | GET, POST | `/api/v1/presets` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |
 | GET, PUT | `/api/v1/presets/{id}` | [LaunchRoutes.cs](VibeRails/Routes/LaunchRoutes.cs); root only |

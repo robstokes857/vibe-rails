@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 
 async function setup(page) {
-    const state={presets:[],actions:[],bindings:[],runs:[],files:[],requests:[],hiddenKeys:[],conflict:false, projects:[
+    const state={presets:[],actions:[],bindings:[],runs:[],files:[],requests:[],hiddenKeys:[],laneHidden:[],conflict:false, projects:[
         {id:'C:\\FIXTURES\\PROJECT',name:'Same name',path:'C:\\fixtures\\project',isCurrent:true},
         {id:'C:\\FIXTURES\\OTHER',name:'Same name',path:'C:\\fixtures\\other',isCurrent:false}
     ]};
@@ -24,6 +24,17 @@ async function setup(page) {
                 return route.fulfill({status:204});
             }
             return ok({hiddenKeys:state.hiddenKeys});
+        }
+        // VIBE-337: the Board lane picker's Manage list, separate from Quick actions.
+        if(path==='/api/v1/lane-picker/preferences') {
+            if(method==='GET'&&state.failLanePickerLoad)return route.fulfill({status:503,json:{error:'Preferences unavailable.'}});
+            if(method==='PUT'&&state.failLanePicker)return route.fulfill({status:503,json:{error:'Could not save this choice. Try again.'}});
+            if(method==='PUT') {
+                state.laneHidden=state.laneHidden.filter(key=>key!==body.key);
+                if(body.hidden)state.laneHidden.push(body.key);
+                return route.fulfill({status:204});
+            }
+            return ok({hiddenKeys:state.laneHidden});
         }
         if(path==='/api/v1/launch-catalog')return ok({items:items().filter(p=>new URL(req.url()).searchParams.get('includeAll')==='true'||p.inProject)});
         if(path==='/api/v1/llm-picker/preferences')return ok({items:[...base.map(([cli,label],order)=>({key:`base:${cli}`,kind:'base',group:'Base CLIs',label,cli,enabled:true,order})),...items().filter(p=>p.definitionType==='preset').map((p,order)=>({key:`preset:${p.id}:${p.cli}`,kind:p.kind,group:'AI Agents',label:p.name,cli:p.cli,enabled:p.enabled,inProject:p.inProject,order}))]});
@@ -953,7 +964,7 @@ test('ordered lane selections retain compatibility data and lock editing during 
 });
 
 // VIBE-271: the scope is chosen in the lane, defaulting to the card's linked commits for both kinds.
-for (const [kind, name, scope, choose] of [['vca', 'VCA check · Working tree', 'working-tree', true], ['code-quality', 'Code quality check · Linked commits', 'card', false]])
+for (const [kind, name, scope, choose] of [['vca', 'Rules check · Working tree', 'working-tree', true], ['code-quality', 'Code quality scan · Linked commits', 'card', false]])
 test(`lane picker adds ${kind} in ${scope} scope without running or saving the lane early`, async ({ page }) => {
     const state = await setup(page);
     let savedLane, release;
@@ -1022,7 +1033,8 @@ test('lane picker labels existing checks by scope and reuses an identical one in
     });
     const picker = page.locator('[data-lane-add-choice]');
     await page.locator('.ts-control').click();
-    await expect(page.locator('.launch-lane-dropdown .option:not([data-value=""])')).toHaveText(['VCA check · Working tree', 'Card rules · VCA check · Linked commits', 'VCA check', 'Code quality check']);
+    // Saved names are kept; the kind reads as a Rules check (VIBE-337).
+    await expect(page.locator('.launch-lane-dropdown .option:not([data-value=""]) .launch-lane-choice-label')).toHaveText(['VCA check · Working tree', 'Card rules · Rules check · Linked commits', 'Rules check', 'Code quality scan']);
     await page.keyboard.press('Escape');
     for (let attempt = 0; attempt < 2; attempt++) {
         await picker.evaluate(node => node.tomselect.setValue('new:vca'));
@@ -1032,6 +1044,194 @@ test('lane picker labels existing checks by scope and reuses an identical one in
     await expect(page.locator('[data-lane-selection-list] strong')).toHaveText(['Card rules']);
     await expect(page.locator('[data-lane-error]')).toHaveText('This lane already runs “Card rules”.');
     expect(posts).toBe(0);
+});
+
+// VIBE-337: say what each choice does, stage with Add, and let the user hide entries from this picker.
+async function routeLane(page, selections = []) {
+    const writes = [];
+    await page.route('**/api/v1/board/columns/lane/launches', route => {
+        if (route.request().method() === 'GET') return route.fulfill({ json: { revision: 1, selections } });
+        writes.push(route.request().postDataJSON());
+        return route.fulfill({ json: { ...writes.at(-1), revision: 1 + writes.length } });
+    });
+    return { writes };
+}
+async function mountLaneEditor(page) {
+    await page.evaluate(async () => {
+        const { mountLaunchLane } = await import('/js/modules/launch-lane-editor.js');
+        const host = document.createElement('div');
+        document.querySelector('#app-content').replaceChildren(host);
+        window.disposeLane = mountLaunchLane(window.app, host, 'lane');
+    });
+    await expect(page.locator('.launch-lane-add .ts-control, [data-lane-picker-empty]')).toBeVisible();
+}
+const laneLabels = page => page.locator('.launch-lane-dropdown .option:not([data-value=""]) .launch-lane-choice-label');
+
+test('lane picker says what each choice does, escaped, and Add only stages the entry (VIBE-337)', async ({ page }, testInfo) => {
+    const state = await setup(page);
+    state.presets.push(
+        { id: 'p1', name: 'Review', description: '<b>Reviews</b> the diff & reports', cli: 'claude', initialPrompt: 'Review', enabled: true, revision: 1 },
+        { id: 'p2', name: 'Ship', description: '', cli: 'codex', initialPrompt: 'Ship', enabled: true, revision: 1 });
+    state.actions.push({ id: 's1', name: 'Release', kind: 'script', enabled: true, revision: 1, script: { path: 'scripts/release.ps1', runtime: 1 } });
+    const lane = await routeLane(page);
+    await mountLaneEditor(page);
+    await page.locator('.launch-lane-add .ts-control').click();
+    const menu = page.locator('.launch-lane-dropdown');
+    const detail = value => menu.locator(`.option[data-value="${value}"] .launch-lane-choice-detail`);
+    await expect(detail('p1')).toHaveText('<b>Reviews</b> the diff & reports');
+    await expect(menu.locator('.option b')).toHaveCount(0);
+    await expect(detail('p2')).toHaveText('Starts Codex with its saved prompt.');
+    await expect(detail('s1')).toHaveText('Runs scripts/release.ps1 with PowerShell.');
+    await expect(detail('new:vca')).toContainText('rules in vc.rules.md');
+    await expect(detail('new:code-quality')).toContainText('Grades the added code A–F');
+    await expect(menu.locator('.option[data-value=""] .launch-lane-choice-detail')).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath('lane-picker-descriptions.png') });
+    await menu.locator('.option[data-value="new:vca"]').click();
+    // The selected value stays one line; the full text, its page and the scope sit below the picker.
+    await expect(page.locator('.launch-lane-add .ts-control .launch-lane-choice-detail')).toHaveCount(0);
+    const about = page.locator('[data-lane-about]');
+    await expect(about).toContainText('What this does: Checks the card’s code against this repository’s rules in vc.rules.md');
+    await expect(about.getByRole('link', { name: 'Open Rules', exact: true })).toHaveAttribute('href', '?view=dashboard');
+    await expect(about.getByRole('combobox', { name: 'Check scope', exact: true })).toBeVisible();
+    await page.locator('[data-lane-add-choice]').evaluate(node => node.tomselect.setValue('new:code-quality'));
+    await expect(about.getByRole('link', { name: 'Open Quality', exact: true })).toHaveAttribute('href', '?view=code-quality');
+    await page.locator('[data-lane-add-choice]').evaluate(node => node.tomselect.setValue('p1'));
+    await expect(about).toContainText('What this does: <b>Reviews</b> the diff & reports');
+    await expect(about.getByRole('link')).toHaveCount(0);
+    await expect(page.getByRole('combobox', { name: 'Check scope', exact: true })).toBeHidden();
+    const add = page.getByRole('button', { name: 'Add to run order', exact: true });
+    await expect(add).toHaveAccessibleDescription(/Nothing runs until you save lane settings, and then only when a card enters this lane/);
+    const unsaved = page.locator('[data-lane-unsaved]');
+    await expect(unsaved).toBeHidden();
+    await add.click();
+    await expect(page.locator('.launch-lane-row .launch-lane-row-detail')).toHaveText(['Agent · <b>Reviews</b> the diff & reports']);
+    await expect(unsaved).toHaveText('Unsaved changes. Save lane settings to apply them.');
+    await expect(about).toBeHidden();
+    expect(lane.writes).toHaveLength(0);
+    expect(state.runs).toHaveLength(0);
+    // The page links use guarded navigation: unsaved lane changes still ask first.
+    await page.locator('[data-lane-add-choice]').evaluate(node => node.tomselect.setValue('new:vca'));
+    await about.getByRole('link', { name: 'Open Rules', exact: true }).click();
+    await expect(page.getByRole('alertdialog')).toContainText('Discard lane changes?');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(page.locator('.launch-lane-editor')).toBeVisible();
+    await page.getByRole('button', { name: 'Save lane settings', exact: true }).click();
+    await expect.poll(() => lane.writes.length).toBe(1);
+    expect(lane.writes[0].selections).toEqual([{ definitionId: 'p1', definitionType: 'preset' }]);
+    await expect(unsaved).toBeHidden();
+});
+
+test('Manage list hides picker entries for this user only, survives remount and restores them (VIBE-337)', async ({ page }, testInfo) => {
+    const state = await setup(page);
+    state.presets.push(
+        { id: 'p1', name: 'Review', cli: 'codex', initialPrompt: 'Review', enabled: true, revision: 1 },
+        { id: 'p2', name: 'Ship', cli: 'codex', initialPrompt: 'Ship', enabled: true, revision: 1 });
+    const lane = await routeLane(page, [{ definitionId: 'p2', definitionType: 'preset' }]);
+    await mountLaneEditor(page);
+    const toggle = page.getByRole('button', { name: 'Manage list', exact: true });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const manage = page.locator('[data-lane-manage-list]');
+    await expect(manage).toBeVisible();
+    await expect(manage).toContainText('Hiding an entry does not disable it, remove it from lanes that already run it, or change Quick actions and AI Agents.');
+    await expect(manage.locator('legend')).toHaveText(['Agents', 'Checks']);
+    // Ship already runs in this lane: Manage list still offers it; the picker does not.
+    await expect(manage.locator('.launch-lane-choice-label')).toHaveText(['Review · Agent', 'Ship · Agent', 'Rules check', 'Code quality scan']);
+    await expect(manage.getByRole('switch')).toHaveCount(4);
+    for (const name of ['Review · Agent', 'Ship · Agent', 'Rules check']) {
+        const entry = manage.getByRole('switch', { name: `Show ${name} in this list`, exact: true });
+        await entry.focus();
+        await entry.press('Space');
+        await expect(entry).not.toBeChecked();
+        await expect(entry).toBeEnabled();
+        await expect(entry).toBeFocused();
+    }
+    await expect.poll(() => [...state.laneHidden].sort()).toEqual(['check:vca', 'preset:p1', 'preset:p2']);
+    await expect(manage.getByRole('status')).toHaveText('Saved. Rules check is hidden from this list.');
+    await page.screenshot({ path: testInfo.outputPath('lane-manage-list.png') });
+    // Only the preference was written: not the lane, a definition, or Quick actions.
+    await expect(page.locator('[data-lane-selection-list] strong')).toHaveText(['Ship']);
+    await expect(page.locator('[data-lane-unsaved]')).toBeHidden();
+    expect(lane.writes).toHaveLength(0);
+    expect(state.requests.filter(request => request.method !== 'GET' && !request.path.startsWith('/api/v1/lifecycle/')).map(request => request.path))
+        .toEqual(Array(3).fill('/api/v1/lane-picker/preferences'));
+    // Hidden entries are not searchable.
+    await page.locator('.launch-lane-add .ts-control').click();
+    await expect(laneLabels(page)).toHaveText(['Code quality scan']);
+    const search = page.getByRole('textbox', { name: 'Search agents, scripts and checks…', exact: true });
+    for (const query of ['Review', 'Rules']) {
+        await search.fill(query);
+        await expect(page.locator('.launch-lane-dropdown .option')).toHaveCount(0);
+        await expect(page.locator('.launch-lane-dropdown')).toContainText('No matching agents, scripts or checks.');
+    }
+    await search.press('Escape');
+    await manage.getByRole('button', { name: 'Done', exact: true }).click();
+    await expect(manage).toBeHidden();
+    await expect(toggle).toBeFocused();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    // A saved preference, not panel state: it survives remounting.
+    await page.evaluate(() => window.disposeLane());
+    await mountLaneEditor(page);
+    await page.locator('.launch-lane-add .ts-control').click();
+    await expect(laneLabels(page)).toHaveText(['Code quality scan']);
+    await page.keyboard.press('Escape');
+    await toggle.click();
+    await manage.getByRole('switch', { name: 'Show Review · Agent in this list', exact: true }).check();
+    await expect.poll(() => [...state.laneHidden].sort()).toEqual(['check:vca', 'preset:p2']);
+    await expect(manage.getByRole('status')).toHaveText('Saved. Review · Agent is shown in this list.');
+    await page.locator('.launch-lane-add .ts-control').click();
+    await expect(laneLabels(page)).toHaveText(['Review · Agent', 'Code quality scan']);
+});
+
+test('a hidden choice is cleared from the picker, and hiding everything points to Manage list (VIBE-337)', async ({ page }) => {
+    const state = await setup(page);
+    state.laneHidden = ['check:vca'];
+    await routeLane(page);
+    await mountLaneEditor(page);
+    await page.locator('[data-lane-add-choice]').evaluate(node => node.tomselect.setValue('new:code-quality'));
+    await expect(page.locator('[data-lane-about]')).toBeVisible();
+    await page.getByRole('button', { name: 'Manage list', exact: true }).click();
+    const manage = page.locator('[data-lane-manage-list]');
+    await manage.getByRole('switch', { name: 'Show Code quality scan in this list', exact: true }).uncheck();
+    const empty = page.locator('[data-lane-picker-empty]');
+    await expect(empty).toContainText('Nothing to add: every remaining entry is hidden from this list.');
+    await expect(page.locator('[data-lane-add-choice]')).toHaveCount(0);
+    await expect(page.locator('[data-lane-about]')).toBeHidden();
+    await expect(page.getByRole('combobox', { name: 'Check scope', exact: true })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Add to run order', exact: true })).toBeDisabled();
+    await manage.getByRole('button', { name: 'Done', exact: true }).click();
+    await empty.getByRole('button', { name: 'Show hidden entries', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Manage list', exact: true })).toHaveAttribute('aria-expanded', 'true');
+    const rules = manage.getByRole('switch', { name: 'Show Rules check in this list', exact: true });
+    await expect(rules).toBeFocused();
+    await rules.press('Space');
+    await expect(page.locator('.launch-lane-add .ts-control')).toBeVisible();
+    await expect(empty).toHaveCount(0);
+    expect(state.laneHidden).toEqual(['check:code-quality']);
+});
+
+test('Manage list failures keep the previous choice, and a load failure shows every entry (VIBE-337)', async ({ page }) => {
+    const state = await setup(page);
+    state.laneHidden = ['check:vca'];
+    state.failLanePickerLoad = true;
+    await routeLane(page);
+    await mountLaneEditor(page);
+    await page.locator('.launch-lane-add .ts-control').click();
+    await expect(laneLabels(page)).toHaveText(['Rules check', 'Code quality scan']);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Manage list', exact: true }).click();
+    const manage = page.locator('[data-lane-manage-list]');
+    await expect(manage).toContainText('Your saved choices could not be loaded, so every entry is shown.');
+    state.failLanePicker = true;
+    const quality = manage.getByRole('switch', { name: 'Show Code quality scan in this list', exact: true });
+    await quality.click();
+    await expect(manage.getByRole('alert')).toHaveText('Could not save this choice. Try again.');
+    await expect(quality).toBeChecked();
+    await expect(quality).toBeEnabled();
+    await expect(manage.locator('[data-lane-manage-status]')).toHaveText('');
+    await page.locator('.launch-lane-add .ts-control').click();
+    await expect(laneLabels(page)).toHaveText(['Rules check', 'Code quality scan']);
 });
 
 test('terminal picker manages Agents and Quick Launches in the shared editor', async ({ page }) => {
@@ -1283,7 +1483,7 @@ test('code quality checks are offered again in the catalog, Quick actions and th
     await page.locator('[data-agent-refresh]').click();
     const checks = page.locator('.launch-catalog-section').filter({ has: page.getByRole('heading', { name: /^Board checks/ }) });
     await expect(checks.getByRole('button', { name: 'Quality gate', exact: true })).toBeVisible();
-    await expect(checks.locator('.launch-catalog-copy p')).toHaveText(['Code quality check']);
+    await expect(checks.locator('.launch-catalog-copy p')).toHaveText(['Code quality scan']);
     await page.getByRole('button', { name: 'Launch an agent or automation', exact: true }).click();
     const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
     await expect(panel.getByRole('button', { name: 'Run Quality gate', exact: true })).toBeVisible();

@@ -5,8 +5,9 @@ const kinds = {
     agent: { label: 'Agent', icon: 'robot' },
     'quick-launch': { label: 'Quick launch', icon: 'bolt' },
     script: { label: 'Script', icon: 'code' },
-    vca: { label: 'VCA check', icon: 'list-check' },
-    'code-quality': { label: 'Code quality check', icon: 'list-check' }
+    // Named for what they do, as in the Board lane picker (VIBE-337): nobody knew what "VCA" meant.
+    vca: { label: 'Rules check', icon: 'list-check' },
+    'code-quality': { label: 'Code quality scan', icon: 'list-check' }
 };
 
 const fallbackLogo = icon => `<span class="launch-provider-logo" aria-hidden="true"><i class="fa-solid fa-${icon}"></i></span>`;

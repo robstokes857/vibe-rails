@@ -29,6 +29,12 @@ do not overwrite each other across projects or backend instances. The native
 extension to refresh. Visibility never changes launch eligibility, definition state,
 Board assignment or the terminal picker's separate preferences.
 
+The Board lane **Add to this lane** picker has its own **Manage list** (VIBE-337) over
+`GET/PUT /api/v1/lane-picker/preferences`. `LanePickerPreferences` uses the same
+one-row-per-key storage under `ui.lane-picker.hidden.v1.` with keys `preset:<id>`,
+`action:<id>`, `check:vca` and `check:code-quality`. Hiding an entry only removes it from
+that picker; lanes that already run it, Quick actions and AI Agents are unaffected.
+
 ## Corporate gateways for Codex and Claude
 
 `LlmProxySettingsService` resolves each destination from the saved Enterprise Network Proxy,

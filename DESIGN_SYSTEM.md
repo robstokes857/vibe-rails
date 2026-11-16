@@ -783,7 +783,10 @@ read as one setting at any dialog width. It is a draft field; **Save lane** (or
 Lane Agents and Actions run in the displayed top-to-bottom order. Each waits for
 the previous process to finish, then continues regardless of its result. Show
 numbered rows with Up, Down and Remove controls; do not offer a continuation-result
-selector. Keep process outcomes and review results visible in run activity.
+selector. Under each row's name, a 13px muted line gives its kind and what it runs:
+an agent's saved description (else "Starts Codex with its saved prompt"), a script's
+path and interpreter, or a check's scope. Keep process outcomes and review results
+visible in run activity.
 
 In **Card runs**, keep the run name, process/result status and actions visible.
 Put the report body in a native **Report** disclosure, collapsed by default;
@@ -795,9 +798,35 @@ reports and disclosure focus during activity refreshes; long text wraps in the p
 The lane settings **Add to this lane** picker shows a decorative icon beside each
 agent, script or check, including the selected value. Reuse the provider artwork
 and filters for agents, the existing code icon for scripts, and the VibeRails
-brand mark for VCA and code-quality checks (both saved and new). Keep the empty
+brand mark for Rules and Code quality checks (both saved and new). Keep the empty
 prompt text-only. Use 18px marks with an 8px gap and allow long menu labels to wrap.
 Retain the shared searchable select's keyboard, viewport and disposal behavior.
+
+Say what each choice does (VIBE-337). Every menu option adds a second, 13px muted
+line, at most two lines in the menu: an agent's saved description (else "Starts
+Codex with its saved prompt"), a script's path and interpreter, or what a check
+does. The selected value stays one line. Name the built-in checks for what they do:
+**Rules check** (this repository's `vc.rules.md` rules; the description mentions
+the older "VCA check" name) and **Code quality scan**. After a choice, a **What this
+does** line with the full text appears below the picker; a check adds a teal link
+to the Rules or Quality page, then its **Check scope** field and help. **Add to run
+order** follows, with one help sentence: Add only stages the entry, nothing runs
+until **Save lane settings**, and then only when a card enters the lane. While the
+lane has unsaved changes, a muted status sentence beside **Save lane settings**
+says so.
+
+A compact `btn-link` **Manage list** sits on the **Add to this lane** label row. It
+toggles (`aria-expanded`, `aria-controls`) an inline panel inside lane settings,
+not a separate dialog, which would close the anchored lane panel. The panel lists
+every entry the picker can offer, built-in checks included, grouped as Agents,
+Scripts and Checks. Each row has the icon, name, muted line and a
+`card-editor-switch` labelled for showing that entry. Switches save at once as this
+user's preference on this computer, with inline saving and failure text; a failed
+save restores the switch. Hiding only removes an entry from this picker: it stays
+enabled, stays on lanes that already run it, and is unaffected in Quick actions and
+AI Agents. Hidden entries are not searchable. **Done** closes the panel and returns
+focus to **Manage list**. When every remaining entry is hidden, an empty state
+replaces the picker and offers **Show hidden entries**, which opens the panel.
 
 #### Desktop Quick actions
 

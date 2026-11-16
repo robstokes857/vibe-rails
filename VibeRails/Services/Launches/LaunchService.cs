@@ -44,7 +44,8 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
             try { if (inProject) await ValidateActionForProjectAsync(a, project, false, ct); }
             catch (Exception ex) when (ex is LaunchValidationException or AutomationScriptValidationException or ArgumentException) { reason ??= ex.Message; }
             items.Add(new(a.Id, "action", a.Kind, a.Name, a.Description, a.Revision, a.Enabled, a.RetiredUtc is not null,
-                null, reason is null, reason is null, reason, false, inProject, a.Check));
+                null, reason is null, reason is null, reason, false, inProject, a.Check,
+                a.Script is { } script ? new LaunchCatalogScript(script.Path, script.Runtime) : null));
         }
         return new(items);
     }

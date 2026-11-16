@@ -17,10 +17,15 @@ public sealed record ResolveUncertainLaunchRequest(bool ConfirmedStopped);
 public sealed record RetireLaunchRequest(long ExpectedRevision);
 public sealed record LaunchError(string Error, string Code, long? CurrentRevision = null);
 /// <summary>A catalog row. <paramref name="Check"/> is a check Action's saved scope, so pickers can label
-/// and reuse checks by what they analyze (VIBE-271); null for presets and scripts.</summary>
+/// and reuse checks by what they analyze (VIBE-271); null for presets and scripts. <paramref name="Script"/>
+/// is a script Action's path and interpreter, so pickers can say what it runs (VIBE-337); null otherwise.</summary>
 public sealed record LaunchCatalogItem(string Id, string DefinitionType, string Kind, string Name, string Description,
     long Revision, bool Enabled, bool Retired, string? Cli, bool CanLaunch, bool CanRunAutomatically,
-    string? IneligibleReason, bool SupportsAttachments, bool InProject = true, CheckAction? Check = null);
+    string? IneligibleReason, bool SupportsAttachments, bool InProject = true, CheckAction? Check = null,
+    LaunchCatalogScript? Script = null);
+/// <summary>What a script Action runs, as the lane picker describes it. Arguments and directories stay in
+/// the definition itself.</summary>
+public sealed record LaunchCatalogScript(string Path, JobScriptRuntime Runtime);
 public sealed record LaunchProject(string Id, string Name, string Path, bool IsCurrent);
 public sealed record LaunchCatalog(IReadOnlyList<LaunchCatalogItem> Items);
 public sealed record LaunchLaneEntry(VibeRails.Services.Board.BoardLaunchEvent Entry, string CardLabel,

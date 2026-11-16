@@ -40,12 +40,14 @@ test('a library script row uses the same icon as a script Action row', () => {
 });
 
 test('code quality checks are presented like every other Action: nothing filters them out', () => {
-    assert.equal(launchPresentation({ definitionType: 'action', kind: 'code-quality', name: 'Gate' }).subtitle, 'Code quality check');
+    assert.equal(launchPresentation({ definitionType: 'action', kind: 'code-quality', name: 'Gate' }).subtitle, 'Code quality scan');
+    // VIBE-337: the check kinds are named for what they do, as in the Board lane picker.
+    assert.equal(launchPresentation({ definitionType: 'action', kind: 'vca', name: 'Rules' }).subtitle, 'Rules check');
     // VIBE-309's presentation filter is gone; a reintroduced hide has to be a deliberate decision.
     for (const name of ['launch-presentation.js', 'launch-menu.js', 'ai-agents-controller.js',
         'board-card-automations.js', 'launch-lane-editor.js'])
         assert.doesNotMatch(source(name), /isLaunchVisible/, name);
-    assert.match(source('launch-lane-editor.js'), /id: 'new:code-quality', name: 'Code quality check', kind: 'code-quality'/);
+    assert.match(source('launch-lane-editor.js'), /id: 'new:code-quality', key: 'check:code-quality', name: 'Code quality scan', kind: 'code-quality'/);
 });
 
 test('Quick actions lists signed library scripts after the saved launches and runs them through the library', () => {

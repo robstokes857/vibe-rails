@@ -104,6 +104,21 @@ A new VCA or code-quality check asks for its scope below the picker (VIBE-271): 
 (default for both), unpushed, working tree or repository. An existing check with the same kind
 and scope is reused rather than copied, and existing checks are labelled with their scope from the
 catalog's `check` field.
+VIBE-337: the picker says what each choice does. Menu options render a muted second line from
+`laneChoiceDetail` (an agent's description or "Starts <CLI> with its saved prompt", a script's
+path and interpreter from the catalog's `script` field, or `LANE_CHECKS[kind].about`); the selected
+value stays one line. The check kinds read as **Rules check** (`vca`) and **Code quality scan**,
+here and in `launch-presentation.js`; checks saved under the older names keep them, and
+`laneChoiceLabel` does not repeat the kind after them. After a choice, **What this does** shows
+the full text, a guarded link to the Rules (`dashboard`) or Quality page for checks, and the scope
+field; **Add to run order** carries the staging note, and an unsaved-changes status sits beside
+**Save lane settings**. Run order rows show `laneRowDetail` (kind, then what it runs or its scope).
+**Manage list** is an inline panel, not a dialog: the Board lane panel closes on outside pointer
+events. Its switches save `PUT /api/v1/lane-picker/preferences { key, hidden }` at once; keys are
+`laneChoiceKey` (`preset:<id>`, `action:<id>`, `check:vca`, `check:code-quality`). Hidden entries
+leave the picker (so they are not searchable) and nothing else: lanes, definitions, Quick actions
+and AI Agents are untouched. A preference load failure shows every entry. A switch save only
+rebuilds the picker (`renderPicker`), so focus and the run order survive.
 `board-lane-agent-body.js` polls current per-card lane progress, with explicit verdicts,
 retry, skip and session links. Card runs keep names, status and actions visible, with
 regular-weight muted report text inside a native Report disclosure, collapsed initially.

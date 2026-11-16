@@ -38,6 +38,13 @@ public static class LaunchRoutes
             await new QuickActionPreferences(repository).SaveAsync(request, ct);
             return Results.NoContent();
         });
+        api.MapGet("/lane-picker/preferences", async (VibeRails.DB.IRepository repository, CancellationToken ct) =>
+            Results.Ok(await new LanePickerPreferences(repository).GetAsync(ct)));
+        api.MapPut("/lane-picker/preferences", async (LanePickerPreferenceRequest request, VibeRails.DB.IRepository repository, CancellationToken ct) =>
+        {
+            await new LanePickerPreferences(repository).SaveAsync(request, ct);
+            return Results.NoContent();
+        });
         api.MapGet("/launch-projects", async (VibeRails.DB.IRepository repository, IBoardProjectResolver projects, CancellationToken ct) =>
             Results.Ok(await LaunchProjects.ListAsync(repository, await projects.ResolveAsync(ct), ct)));
         api.MapGet("/presets", async (ILaunchStore store, CancellationToken ct) => Results.Ok(await store.ListPresetsAsync(ct)));
