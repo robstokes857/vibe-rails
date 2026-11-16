@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
     LANE_CHECK_SCOPES, DEFAULT_LANE_CHECK_SCOPE, LANE_BUILT_IN_CHECKS, LANE_CHECKS, LANE_PICKER_PREFERENCES,
-    findLaneCheck, laneCheckName, laneChoiceLabel, laneCheckScopeName, laneChoiceKey, laneChoiceDetail,
+    findLaneCheck, laneCheckName, laneCheckGrade, laneChoiceLabel, laneCheckScopeName, laneChoiceKey, laneChoiceDetail,
     laneRowDetail, laneChoices, laneManageGroups
 } from '../../../VibeRails/wwwroot/js/modules/launch-lane-editor.js';
 
@@ -27,6 +27,22 @@ test('a lane-created check is named after what it does and its scope (VIBE-337)'
     assert.equal(laneCheckName('code-quality', 'repository'), 'Code quality scan · Repository');
     assert.deepEqual(LANE_BUILT_IN_CHECKS.map(check => [check.name, check.kind, check.key]),
         [['Rules check', 'vca', 'check:vca'], ['Code quality scan', 'code-quality', 'check:code-quality']]);
+});
+
+test('a new Code quality scan can fail below grade A, B or C, and its name says so (VIBE-335)', () => {
+    assert.deepEqual(['A', 'B', 'C'].map(grade => laneCheckGrade('code-quality', grade)), ['A', 'B', 'C']);
+    // Only Code quality carries a grade; anything else is feedback only, as the server requires.
+    for (const [kind, grade] of [['code-quality', ''], ['code-quality', 'D'], ['code-quality', undefined], ['vca', 'B']])
+        assert.equal(laneCheckGrade(kind, grade), '', `${kind} ${grade}`);
+    assert.equal(laneCheckName('code-quality', 'card', 'B'), 'Code quality scan · Linked commits, minimum B');
+    assert.equal(laneCheckName('code-quality', 'unpushed', ''), 'Code quality scan · Unpushed commits');
+    assert.equal(laneCheckName('vca', 'card', 'B'), 'Rules check · Linked commits');
+    // The saved name already says the scope and grade, so the picker does not repeat them.
+    assert.equal(laneChoiceLabel({ kind: 'code-quality', name: laneCheckName('code-quality', 'repository', 'A'), check: { scope: 'repository', failGrade: 'A' } }),
+        'Code quality scan · Repository, minimum A');
+    assert.match(source, /checkMinimumOptions\(''\)/, 'the Findings choice starts at feedback only');
+    assert.match(source, /check: failGrade \? \{ scope, failGrade \} : \{ scope \}/, 'feedback only sends no grade');
+    assert.doesNotMatch(LANE_CHECKS['code-quality'].about, /set in AI Agents/);
 });
 
 test('picker labels say what a saved check analyzes without repeating its name, old names included', () => {
@@ -60,6 +76,14 @@ test('an identical automatic check is reused; a grade, pinned commit, other kind
     assert.equal(findLaneCheck(items, 'vca', 'working-tree')?.id, 'vca-tree');
     items.push({ id: 'quality-card', definitionType: 'action', kind: 'code-quality', canRunAutomatically: true, check: { scope: 'card' } });
     assert.equal(findLaneCheck(items, 'code-quality', 'card')?.id, 'quality-card');
+    // VIBE-335: a chosen grade reuses only a scan with that same grade.
+    assert.equal(findLaneCheck(items, 'code-quality', 'card', 'C')?.id, 'graded');
+    assert.equal(findLaneCheck(items, 'code-quality', 'card', 'B'), undefined);
+    assert.equal(findLaneCheck(items, 'code-quality', 'card', '')?.id, 'quality-card');
+    assert.equal(findLaneCheck(items, 'code-quality', 'working-tree', 'C'), undefined);
+    // A catalog that sends failGrade: null means feedback only.
+    assert.equal(findLaneCheck([{ ...items.at(-1), id: 'null-grade', check: { scope: 'unpushed', failGrade: null } }], 'code-quality', 'unpushed')?.id, 'null-grade');
+    assert.equal(findLaneCheck(items, 'vca', 'working-tree', 'C')?.id, 'vca-tree', 'a Rules check never carries a grade');
 });
 
 test('each choice says what it does: description, CLI, script path and interpreter, or the check (VIBE-337)', () => {

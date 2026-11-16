@@ -1046,6 +1046,50 @@ test('lane picker labels existing checks by scope and reuses an identical one in
     expect(posts).toBe(0);
 });
 
+// VIBE-335: a new Code quality scan chooses here whether findings fail the step below a grade.
+test('lane picker sets a new Code quality scan’s minimum grade and reuses a scan only at the same grade', async ({ page }, testInfo) => {
+    const state = await setup(page);
+    state.actions.push({ id: 'gate_c', name: 'Gate C', kind: 'code-quality', enabled: true, revision: 1, check: { scope: 'card', failGrade: 'C' } });
+    const lane = await routeLane(page);
+    await mountLaneEditor(page);
+    const picker = page.locator('[data-lane-add-choice]');
+    const findings = page.getByRole('combobox', { name: 'Findings', exact: true });
+    const rows = page.locator('[data-lane-selection-list] strong');
+    const posts = () => state.requests.filter(request => request.path === '/api/v1/actions' && request.method === 'POST').length;
+    await picker.evaluate(node => node.tomselect.setValue('new:vca'));
+    await expect(page.getByRole('combobox', { name: 'Check scope', exact: true })).toBeVisible();
+    await expect(findings).toBeHidden();
+    await picker.evaluate(node => node.tomselect.setValue('new:code-quality'));
+    await expect(findings).toHaveValue('');
+    await expect(findings).toHaveAccessibleDescription(/Code quality minimum/);
+    expect(await findings.locator('option').evaluateAll(options => options.map(option => [option.value, option.textContent]))).toEqual([
+        ['', 'Post as feedback only; never fail the step'], ['A', 'Fail the step below grade A'],
+        ['B', 'Fail the step below grade B'], ['C', 'Fail the step below grade C']]);
+    await findings.selectOption('B');
+    await page.screenshot({ path: testInfo.outputPath('lane-picker-minimum-grade.png') });
+    await page.locator('[data-lane-add]').click();
+    await expect(rows).toHaveText(['Code quality scan · Linked commits, minimum B']);
+    expect(state.actions.at(-1)).toMatchObject({ name: 'Code quality scan · Linked commits, minimum B', kind: 'code-quality', check: { scope: 'card', failGrade: 'B' } });
+    expect(posts()).toBe(1);
+    // The saved minimum C scan is reused at C rather than copied.
+    await picker.evaluate(node => node.tomselect.setValue('new:code-quality'));
+    await findings.selectOption('C');
+    await page.locator('[data-lane-add]').click();
+    await expect(rows).toHaveText(['Code quality scan · Linked commits, minimum B', 'Gate C']);
+    expect(posts()).toBe(1);
+    // Feedback only is its own scan, never one of the graded ones; the form starts at feedback only again.
+    await picker.evaluate(node => node.tomselect.setValue('new:code-quality'));
+    await expect(findings).toHaveValue('');
+    await page.locator('[data-lane-add]').click();
+    await expect(rows).toHaveText(['Code quality scan · Linked commits, minimum B', 'Gate C', 'Code quality scan · Linked commits']);
+    expect(posts()).toBe(2);
+    expect(state.actions.at(-1).check).toEqual({ scope: 'card' });
+    expect(lane.writes).toHaveLength(0);
+    await page.locator('[data-lane-save]').click();
+    await expect.poll(() => lane.writes.length).toBe(1);
+    expect(lane.writes[0].selections.map(selection => selection.definitionId)).toEqual(['preset_1', 'gate_c', 'preset_2']);
+});
+
 // VIBE-337: say what each choice does, stage with Add, and let the user hide entries from this picker.
 async function routeLane(page, selections = []) {
     const writes = [];

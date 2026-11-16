@@ -2,6 +2,7 @@ import { escapeHtml, confirmDialog, enhanceSelectWithTomSelect, getCliBrand } fr
 import { LaunchApi } from './launch-api.js';
 import { launchPresentation } from './launch-presentation.js';
 import { boardBrandLogo } from './board-brand.js';
+import { checkMinimumOptions, CHECK_MINIMUM_GRADES, CHECK_MINIMUM_HELP } from './job-checks.js';
 
 /**
  * Scopes a new lane check can use (VIBE-271). Each one makes sense on every card entry; a pinned
@@ -35,7 +36,7 @@ export const LANE_CHECKS = Object.freeze({
         link: 'Open Rules'
     }),
     'code-quality': Object.freeze({
-        about: 'Grades the added code A–F and saves a report on the card. A minimum grade, set in AI Agents, can fail the step.',
+        about: 'Grades the added code A–F and saves a report on the card. Findings are feedback unless the scan has a minimum grade; below it, the step fails.',
         view: 'code-quality',
         link: 'Open Quality'
     })
@@ -54,8 +55,12 @@ export function laneCheckScopeName(check) {
     return check.failGrade ? `${scope}, minimum ${check.failGrade}` : scope;
 }
 
-/** The name a lane-created check is saved under, so the lane list says what it checks. */
-export const laneCheckName = (kind, scope) => `${KIND_LABELS[kind]} · ${SCOPE_NAMES[scope]}`;
+/** A new check's failing grade: A, B or C on a Code quality scan, otherwise '' for feedback only (VIBE-335). */
+export const laneCheckGrade = (kind, grade) => kind === 'code-quality' && CHECK_MINIMUM_GRADES.includes(grade) ? grade : '';
+
+/** The name a lane-created check is saved under, so the lane list says what it checks and any minimum grade. */
+export const laneCheckName = (kind, scope, failGrade = '') =>
+    `${KIND_LABELS[kind]} · ${laneCheckScopeName({ scope, failGrade: laneCheckGrade(kind, failGrade) })}`;
 
 /** Picker text: the name, then the kind and a check's scope unless the name already says them. */
 export function laneChoiceLabel(item) {
@@ -68,10 +73,10 @@ export function laneChoiceLabel(item) {
     return parts.join(' · ');
 }
 
-/** An existing automatic check with exactly this kind and scope, and no grade or pinned commits. */
-export const findLaneCheck = (items, kind, scope) => items.find(item => item.definitionType === 'action'
+/** An existing automatic check with exactly this kind, scope and minimum grade ('' for none), and no pinned commits. */
+export const findLaneCheck = (items, kind, scope, failGrade = '') => items.find(item => item.definitionType === 'action'
     && item.kind === kind && item.canRunAutomatically && item.check?.scope === scope
-    && !item.check.failGrade && !item.check.baseCommit && !item.check.headCommit);
+    && (item.check.failGrade || '') === laneCheckGrade(kind, failGrade) && !item.check.baseCommit && !item.check.headCommit);
 
 /** The stable Manage list key: a saved definition's type and id, or check:<kind> for a built-in new check. */
 export const laneChoiceKey = item => item.key || `${item.definitionType}:${item.id}`;
@@ -142,6 +147,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
         manageOpen = false;
     const id = ++mounted;
     const scopeHelpId = `launch-lane-check-help-${id}`,
+        minimumHelpId = `launch-lane-check-minimum-help-${id}`,
         pickerId = `launch-lane-choice-${id}`,
         manageId = `launch-lane-manage-${id}`,
         stagingId = `launch-lane-staging-${id}`;
@@ -199,7 +205,8 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                     <p class="launch-lane-about-text"><strong>What this does:</strong> <span data-lane-about-text></span> <a class="launch-lane-about-link" href="?view=dashboard" data-lane-about-link hidden></a></p>
                     <div class="launch-lane-check" data-lane-check-options hidden><label>Check scope<select class="form-select" data-lane-check-scope aria-describedby="${scopeHelpId}">${LANE_CHECK_SCOPES
         .map(([value, label]) => `<option value="${value}"${value === DEFAULT_LANE_CHECK_SCOPE ? ' selected' : ''}>${label}</option>`)
-        .join('')}</select></label><p class="form-text" id="${scopeHelpId}" data-lane-check-help>${escapeHtml(scopeHelp(DEFAULT_LANE_CHECK_SCOPE))}</p></div>
+        .join('')}</select></label><p class="form-text" id="${scopeHelpId}" data-lane-check-help>${escapeHtml(scopeHelp(DEFAULT_LANE_CHECK_SCOPE))}</p>
+                        <div class="launch-lane-check" data-lane-check-minimum-options hidden><label>Findings<select class="form-select" data-lane-check-minimum aria-describedby="${minimumHelpId}">${checkMinimumOptions('')}</select></label><p class="form-text" id="${minimumHelpId}">${escapeHtml(CHECK_MINIMUM_HELP)}</p></div></div>
                 </div>
                 <div class="launch-lane-stage"><button type="button" class="btn btn-secondary" data-lane-add disabled aria-describedby="${stagingId}">Add to run order</button><p class="form-text" id="${stagingId}">Add puts it in the run order above. Nothing runs until you save lane settings, and then only when a card enters this lane.</p></div>
             </div><div><a href="?view=ai-agents" class="btn btn-link btn-sm px-0" data-lane-manage-agents>Create an agent in AI Agents</a></div><div class="launch-lane-footer"><p class="launch-lane-unsaved" data-lane-unsaved role="status"></p><button class="btn btn-primary" data-lane-save>Save lane settings</button></div><p data-lane-error role="alert"></p>`;
@@ -240,7 +247,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
         picker?.dropdown.classList.add('launch-lane-dropdown');
         choose(select.value);
     };
-    /** Shows what the chosen entry does, its page for a check, and the scope field for a new check. */
+    /** Shows what the chosen entry does, its page for a check, the scope field for a new check and Findings for a new scan. */
     const choose = (value) => {
         const item = choiceItems.get(value);
         host.querySelector('[data-lane-add]').disabled = busy || !item;
@@ -255,7 +262,10 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
             link.href = `?view=${check.view}`;
             link.dataset.laneOpenView = check.view;
         }
-        host.querySelector('[data-lane-check-options]').hidden = !LANE_BUILT_IN_CHECKS.some(check => check.id === value);
+        const builtIn = LANE_BUILT_IN_CHECKS.find(check => check.id === value);
+        host.querySelector('[data-lane-check-options]').hidden = !builtIn;
+        // Only Code quality can fail its step below a grade; a Rules check is always feedback (VIBE-335).
+        host.querySelector('[data-lane-check-minimum-options]').hidden = builtIn?.kind !== 'code-quality';
     };
     const syncDirty = () => {
         const note = host.querySelector('[data-lane-unsaved]');
@@ -407,8 +417,9 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                 let item = items.find(item => item.id === value);
                 const check = LANE_BUILT_IN_CHECKS.find(check => check.id === value);
                 const scope = check && host.querySelector('[data-lane-check-scope]').value;
-                // Reuse an identical check instead of adding another copy to the catalog.
-                if (check) item = findLaneCheck(items, check.kind, scope);
+                const failGrade = check ? laneCheckGrade(check.kind, host.querySelector('[data-lane-check-minimum]').value) : '';
+                // Reuse an identical check, minimum grade included, instead of adding another copy to the catalog.
+                if (check) item = findLaneCheck(items, check.kind, scope, failGrade);
                 if (check && item && selections.some(selection => selection.definitionId === item.id)) {
                     host.querySelector('[data-lane-error]').textContent = `This lane already runs “${item.name}”.`;
                     return;
@@ -417,8 +428,8 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                     const unlock = lock();
                     try {
                         const saved = await api.save('action', null, {
-                            name: laneCheckName(check.kind, scope), kind: check.kind, enabled: true, expectedRevision: 0,
-                            check: { scope }, script: null
+                            name: laneCheckName(check.kind, scope, failGrade), kind: check.kind, enabled: true, expectedRevision: 0,
+                            check: failGrade ? { scope, failGrade } : { scope }, script: null
                         });
                         if (!current()) return;
                         item = { ...saved, definitionType: 'action', canRunAutomatically: true };

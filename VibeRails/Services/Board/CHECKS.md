@@ -27,10 +27,13 @@ Existing explicitly configured scopes are retained; edit an existing Automation 
 **Linked commits on the card**. The lane picker (`launch-lane-editor.js`) asks for the scope of a
 new VCA or Code quality check: linked commits (the default for both, VIBE-271), unpushed, working
 tree or repository. Card work is committed before it reaches a later lane, so a working-tree check
-there sees only other sessions' edits. A pinned commit or range is set in the AI Agents editor.
-The picker reuses an existing check with the same kind and scope (no minimum grade or pinned
-commits) instead of saving a copy; the catalog's `check` field carries each Action's scope for
-that and for labelling. A card with no linked commits gets
+there sees only other sessions' edits. A new Code quality scan also asks for **Findings**: feedback
+only (the default) or fail the step below grade A, B or C, sent as `check.failGrade` and named in
+the check, e.g. `Code quality scan · Linked commits, minimum B` (VIBE-335; see
+[minimum grade](#minimum-grade-vibe-278)). A pinned commit or range is set in the AI Agents editor.
+The picker reuses an existing check with the same kind, scope and minimum grade (and no pinned
+commits) instead of saving a copy; the catalog's `check` field carries each Action's scope and
+grade for that and for labelling. A card with no linked commits gets
 **Needs review**, with “no code attached to this card”; a Research spike is **Skipped/not applicable**.
 A Code quality check **fails its step** on Needs review, with or without a minimum grade (owner
 decision 2026-11-16, `BoardCheckRecord.NoCodeFailsCodeQuality`), so an agent that forgets
@@ -146,8 +149,9 @@ Workers retain the explicit worker verdict; mixed script/check Automations retai
 
 ### Minimum grade (VIBE-278)
 
-A Code quality action chooses, when it is added to a lane or edited on the Automations page,
-whether findings only post feedback (the default) or **fail the step below grade A, B or C**.
+A Code quality action chooses, when it is added to a lane (the lane picker's **Findings**) or
+edited in AI Agents (**Minimum grade**), whether findings only post feedback (the default) or
+**fail the step below grade A, B or C**.
 The choice ends the action's argument vector: `["card", "minimum", "C"]`. `JobCheckScope.Parse`
 strips it; only Code quality may carry it, and `JobService` rejects it on VCA. No schema changes.
 An older binary rejects the longer vector, so the check shows **Failed to run** there: it fails

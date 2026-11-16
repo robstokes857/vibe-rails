@@ -101,9 +101,11 @@ a definition does not save the lane order or run it. The lane save remains revis
 The **Create an agent in AI Agents** link below the picker opens the AI Agents page
 through guarded app navigation, preserving the unsaved-lane confirmation and cleanup.
 A new VCA or code-quality check asks for its scope below the picker (VIBE-271): linked commits
-(default for both), unpushed, working tree or repository. An existing check with the same kind
-and scope is reused rather than copied, and existing checks are labelled with their scope from the
-catalog's `check` field.
+(default for both), unpushed, working tree or repository. A new Code quality scan also asks for
+**Findings** (VIBE-335): `checkMinimumOptions` / `CHECK_MINIMUM_HELP` from `job-checks.js`, sent as
+`check.failGrade` only when a grade is chosen, and named with it (`laneCheckName`). An existing
+check with the same kind, scope and grade is reused rather than copied (`findLaneCheck`), and
+existing checks are labelled with their scope and grade from the catalog's `check` field.
 VIBE-337: the picker says what each choice does. Menu options render a muted second line from
 `laneChoiceDetail` (an agent's description or "Starts <CLI> with its saved prompt", a script's
 path and interpreter from the catalog's `script` field, or `LANE_CHECKS[kind].about`); the selected
