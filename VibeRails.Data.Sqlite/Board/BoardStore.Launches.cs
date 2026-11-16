@@ -109,7 +109,9 @@ public sealed partial class BoardStore
         await using var cmd = db.CreateCommand();
         cmd.CommandText = $"""
             SELECT Id,ProjectPath,CardId,ColumnId,BoardId,DefinitionId,DefinitionType,Gate,Position,DueUnixMs,Current,
-                RunId,ProcessStatus,Verdict,SkipRequested,Summary FROM BoardLaunchEvents
+                RunId,ProcessStatus,Verdict,SkipRequested,Summary,
+                (SELECT k.AuthorLabel FROM BoardAgentSkips k WHERE k.EventId=BoardLaunchEvents.Id ORDER BY k.CreatedUTC DESC LIMIT 1)
+            FROM BoardLaunchEvents
             WHERE ($project IS NULL OR ProjectPath=$project{ProjectPathCollation}) AND ($card IS NULL OR CardId=$card)
                 AND ($card IS NOT NULL OR Current=1 OR RunId IS NOT NULL AND ProcessStatus IN ('queued','claimed','running','uncertain'))
             ORDER BY DueUnixMs,EntryId,Position;
@@ -122,7 +124,7 @@ public sealed partial class BoardStore
             r.IsDBNull(4) ? null : r.GetString(4), r.GetString(5), r.GetString(6), r.GetString(7), r.GetInt32(8),
             DateTimeOffset.FromUnixTimeMilliseconds(r.GetInt64(9)).UtcDateTime, r.GetBoolean(10),
             r.IsDBNull(11) ? null : r.GetString(11), r.GetString(12), r.IsDBNull(13) ? null : r.GetString(13),
-            r.GetBoolean(14), r.IsDBNull(15) ? null : r.GetString(15)));
+            r.GetBoolean(14), r.IsDBNull(15) ? null : r.GetString(15), r.IsDBNull(16) ? null : r.GetString(16)));
         return events;
     }
 

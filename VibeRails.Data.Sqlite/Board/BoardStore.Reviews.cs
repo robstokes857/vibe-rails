@@ -74,7 +74,7 @@ public sealed partial class BoardStore
         return true;
     }
 
-    public async Task<bool> SaveCheckReviewAsync(string projectPath, BoardReviewRecord review, CancellationToken cancellationToken = default)
+    public async Task<bool> SaveCheckReviewAsync(string projectPath, BoardReviewRecord review, CancellationToken cancellationToken = default, string? receipt = null)
     {
         if (review.ReportedUtc is null || review.SessionId is not null || review.RunId is not null)
             throw new ArgumentException("A check report is finished, and has no reviewer session or review run.", nameof(review));
@@ -108,7 +108,9 @@ public sealed partial class BoardStore
         comment.Parameters.AddWithValue("$card", review.CardId);
         comment.Parameters.AddWithValue("$kind", author.Kind);
         comment.Parameters.AddWithValue("$label", author.Label);
-        comment.Parameters.AddWithValue("$body", $"{review.Reviewer} saved: {review.Result}. See Code reviews, report {review.Id} (get_board_reviews reviewId={review.Id}). Scope: {review.ScopeDescription}");
+        comment.Parameters.AddWithValue("$body", string.IsNullOrWhiteSpace(receipt)
+            ? $"{review.Reviewer} saved: {review.Result}. See Code reviews, report {review.Id} (get_board_reviews reviewId={review.Id}). Scope: {review.ScopeDescription}"
+            : receipt);
         comment.Parameters.AddWithValue("$now", ToDb(review.ReportedUtc.Value));
         comment.Parameters.AddWithValue("$changes", BoardJiraCommentPolicy.Changes(author, syncToJira: false)!);
         await comment.ExecuteNonQueryAsync(cancellationToken);

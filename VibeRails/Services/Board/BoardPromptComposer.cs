@@ -78,7 +78,7 @@ public static class BoardPromptComposer
         + "When reviewing, first call report_automation_step reviewing (include the original eventKey for a fresh run fixing a failed step). For your lane Automation, call report_automation_step with passed or failed and a summary before completing your session; a successful exit alone does not release later steps. "
         + "For a code review pass, first save_board_review and supply its reviewId; only pass when agreed blocking findings are resolved and the reviewed inputs are current. "
         + "When a linked coding agent starts fixing a failed step, report fixing with that step's eventKey. Request a fresh review after code changes; a new run of the same Automation can report against that eventKey. "
-        + "Only the user can skip a step. An Automation agent reports its result and finishes its own session so later steps can run; leave the card in this lane while later steps remain. ";
+        + "If a step does not apply to this card, skip_lane_step skips it with your reason, which the owner reviews. An Automation agent reports its result and finishes its own session so later steps can run; leave the card in this lane while later steps remain. ";
     internal const string WorkflowGuidance = WorkflowStepGuidance
         + "The original coding agent waits for required workflow steps before its final card move, because leaving the lane cancels pending steps. ";
     internal const string ManagedWorkflowGuidance = WorkflowStepGuidance

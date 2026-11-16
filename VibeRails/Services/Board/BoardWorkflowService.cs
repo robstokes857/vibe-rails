@@ -10,7 +10,7 @@ public sealed class BoardWorkflowService(VibeRails.Services.Launches.BoardLaunch
         string status, string summary, string? eventKey, string? reviewId, CancellationToken ct)
     {
         if (author.SessionId is null) throw new BoardValidationException("This tool requires a current VibeRails agent session.");
-        if (status == "skipped") throw new BoardValidationException("Only the user can skip a lane entry.");
+        if (status == "skipped") throw new BoardValidationException("To skip a step, call skip_lane_step with its eventKey and your reason.");
         if (launches is not null && await launches.TryReportAsync(project, cardId, workspace, author, status, summary, eventKey, reviewId, ct)) return;
         throw new BoardValidationException("No current Agent/Action lane entry matches this session. Legacy Automation entries are retired.");
     }

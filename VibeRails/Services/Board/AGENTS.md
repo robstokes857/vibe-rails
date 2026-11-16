@@ -251,6 +251,18 @@ selected Automation as enabled and project-local. Reorders cancel pending entrie
 existing settings-save path without changing Jobs or committed run snapshots.
 See [the ordered workflow contract](ARCHITECTURE.md#ordered-lane-workflows).
 
+### Agent skips and session commits (VIBE-338)
+
+An agent can skip one lane step that does not apply to its card with `skip_lane_step` and a
+stated reason. The lane carries on at once; the card's tile shows **Skipped by agent** and its
+Automations rail shows the step, reason and agent until a person presses **Dismiss** (owner
+decision 2026-11-16). The `BoardAgentSkips` class holds the rules; the board.db table of the same
+name holds the marker (`board-agent-skips/1`), and every write touches the card so the Board poll
+sees it. A commit made
+from a card terminal is recorded and linked by the post-commit hook (`BoardSessionCommitLinker`),
+and a card-scoped Code quality check fails naming any recorded commit that is still not linked:
+see [CHECKS.md](CHECKS.md#commits-a-cards-sessions-made-vibe-338).
+
 ### Waiting lane Automations (VIBE-21)
 
 VIBE-42 adds a waiting tile badge and an exact-entry skip action in the card's Automations rail.

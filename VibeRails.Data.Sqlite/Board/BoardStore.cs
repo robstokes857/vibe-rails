@@ -1382,7 +1382,11 @@ public sealed partial class BoardStore : IBoardStore
             removed = await delete.ExecuteNonQueryAsync(cancellationToken) > 0;
         }
         if (removed)
+        {
+            // A person unlinked it on purpose: a check must not name it as forgotten (VIBE-338).
+            await DismissSessionCommitAsync(connection, transaction, card.Id, sha, cancellationToken);
             await TouchCardAsync(connection, transaction, card.Id, cancellationToken);
+        }
         await transaction.CommitAsync(cancellationToken);
         return removed;
     }
@@ -2155,6 +2159,12 @@ public sealed partial class BoardStore : IBoardStore
                 SqliteSchema.Execute(db, transaction,
                     "ALTER TABLE Boards ADD COLUMN DefaultColumnId TEXT NULL REFERENCES BoardColumns(Id) ON DELETE SET NULL;");
         });
+        // board-session-commits/1 and board-agent-skips/1 (VIBE-338, BoardStore.SessionCommits.cs):
+        // which session made each card's commits, and agents' lane-step skips. Additive, no backfill.
+        SqliteMigrationRunner.Apply(connection, "board-session-commits", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, SessionCommitsSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "board-agent-skips", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, AgentSkipsSchemaSql));
         ReconcileDerivedRows(connection);
     }
 

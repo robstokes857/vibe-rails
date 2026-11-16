@@ -838,8 +838,11 @@ file existence and file version metadata, and start no processes. Results live i
 - Card Automation requests resolve card/job in the server's project and recheck enabled state,
   project and overlap in the run transaction. Lane skip matches the current card/job/event pair;
   stale requests conflict. Waiting skips and their receipts commit atomically; running skips
-  request cancellation and successors wait for terminal run state. Skips are user-only status
-  decisions. `report_automation_step` uses the inherited linked session and current Automation
+  request cancellation and successors wait for terminal run state. Stopping a running step stays a
+  user-only decision. `skip_lane_step` (VIBE-338, owner decision 2026-11-16) lets a Board-granted
+  agent skip one current step that has not started, with a required 20–2,000 character reason; the
+  skip, report row, agent comment and card marker commit together, and the marker stays until a
+  person dismisses it through the card route, which tool credentials cannot reach. `report_automation_step` uses the inherited linked session and current Automation
   run; fixing may come from a linked coding session. Code-review pass requires that session’s
   complete saved review with matching captured inputs. Progress cannot reverse a passed/skipped
   receipt. The tool is in the exact Board launch grant list on both transports.

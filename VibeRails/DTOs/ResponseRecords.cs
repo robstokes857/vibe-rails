@@ -381,6 +381,8 @@ namespace VibeRails.DTOs
         public string? GhostReason { get; init; }
         /// <summary>Keep the card's slot during automatic activity promotion.</summary>
         public bool Pinned { get; init; }
+        /// <summary>The newest lane-step skip an agent made that a person has not dismissed (VIBE-338).</summary>
+        public BoardAgentSkipDto? AgentSkip { get; init; }
     }
     public record BoardCardListResponse(List<BoardCardSummaryResponse> Cards)
     {
@@ -464,8 +466,12 @@ namespace VibeRails.DTOs
         public string? GhostReason { get; init; }
         /// <summary>Keep the card's slot during automatic activity promotion.</summary>
         public bool Pinned { get; init; }
+        /// <summary>The newest lane-step skip an agent made that a person has not dismissed (VIBE-338).</summary>
+        public BoardAgentSkipDto? AgentSkip { get; init; }
     }
     public record BoardJiraDeliveryDto(string SourceId, string Kind, string Status, string? Message);
+    /// <summary>An agent's open lane-step skip: the step, its reason, who and when, and how many are open.</summary>
+    public record BoardAgentSkipDto(string StepName, string Reason, string AuthorLabel, DateTime CreatedAt, int OpenCount);
     public record CreateBoardCardRequest(
         string? Title = null,
         string? ColumnId = null,

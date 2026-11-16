@@ -53,5 +53,15 @@ public static class BoardLaunchRoutes
             return row is not null && await store.ReportLaunchEventAsync(project, row.Id, entry, "skipped", "User skipped this lane entry.", null, null, true, ct)
                 ? Results.NoContent() : Results.NotFound();
         });
+        // A person has read an agent's "Skipped by agent" reason (VIBE-338). Agents cannot reach this
+        // route: their tool credentials only reach the routes AgentCredentialService.Allows lists.
+        api.MapPost("/cards/{card}/agent-skips/dismiss", async (string card, IBoardStore store, IBoardProjectResolver projects, CancellationToken ct) =>
+        {
+            var project = await projects.ResolveAsync(ct);
+            var row = await store.FindCardAsync(project, card, ct);
+            if (row is null) return Results.NotFound();
+            await store.DismissAgentSkipsAsync(project, row.Id, ct);
+            return Results.NoContent();
+        });
     }
 }

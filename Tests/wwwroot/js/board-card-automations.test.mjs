@@ -31,7 +31,7 @@ function automationEditor() {
         '[data-board-run-automation]': control(),
         '[data-board-automation-message]': control(),
         '[data-board-reload-automations]': control(),
-        '[data-board-automation-runs]': Object.assign(control(), { innerHTML: '' })
+        '[data-board-automation-runs]': Object.assign(control(), { innerHTML: '', querySelectorAll: () => [] })
     };
     const host = { ...control(), isConnected: true, querySelector: selector => nodes[selector] ?? null };
     const editor = {
@@ -112,9 +112,10 @@ test('card Automation rail displays the saved check outcome and summary', async 
     const { editor, runs } = automationEditor();
     const controls = bindCardAutomations(editor, { id: 'card_a' }, { app });
     await settle();
-    assert.match(runs.innerHTML, /Process: succeeded · Result: passed/);
+    // VIBE-338: one status pill per step instead of "Process: … · Result: …" block text.
+    assert.match(runs.innerHTML, /board-step-pill is-success[^>]*><i[^>]*><\/i>Passed</);
     assert.match(runs.innerHTML, /5 files analyzed; 7 skipped/);
-    assert.doesNotMatch(runs.innerHTML, />Passed</);
+    assert.doesNotMatch(runs.innerHTML, /Process: succeeded/);
     controls.dispose();
 });
 
@@ -131,6 +132,7 @@ test('card runs come from the card-scoped route and are shown as returned', asyn
     await settle();
     assert.ok(app.urls.includes('/api/v1/board/cards/card%20a%2Fb/launches/runs'), 'the card id is encoded into the scoped route');
     assert.ok(!app.urls.some(url => url.startsWith('/api/v1/runs')), 'no project-wide run page is fetched');
-    assert.match(runs.innerHTML, /Reviewer · running[\s\S]*data-launch-replay="session-1"[\s\S]*Lint · succeeded/);
+    // VIBE-338: each run is a row with its name and a status pill.
+    assert.match(runs.innerHTML, /Reviewer<\/span><span class="board-step-pill is-active">[\s\S]*Running[\s\S]*data-launch-replay="session-1"[\s\S]*Lint<\/span>[\s\S]*Finished/);
     controls.dispose();
 });

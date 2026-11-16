@@ -29,9 +29,11 @@ public sealed record BoardPendingLaneAutomationInfo(BoardLaneAutomationInfo Auto
 
 /// <summary>
 /// A move with the caller's choices. <see cref="SkipLaneAutomations"/> is per call and never
-/// sticky; the skip is recorded as a comment by <see cref="Author"/> when one is supplied.
+/// sticky; the skip is recorded as a comment by <see cref="Author"/> when one is supplied, with
+/// <see cref="SkipReason"/> (an agent must give one, VIBE-338).
 /// </summary>
-public sealed record BoardCardMoveRequest(string ColumnIdOrName, int? Position = null, bool SkipLaneAutomations = false, BoardAuthor? Author = null);
+public sealed record BoardCardMoveRequest(string ColumnIdOrName, int? Position = null, bool SkipLaneAutomations = false, BoardAuthor? Author = null,
+    string? SkipReason = null);
 
 /// <summary>
 /// What a lane entry does (or did) beyond moving the card. <see cref="EnteredLane"/> is false for
@@ -97,7 +99,7 @@ public sealed partial class BoardService
         {
             // The skip leaves no pending row behind, so the card itself must say why no run
             // followed this entry. Best effort after the move commits, like other rail writes.
-            await store.AddCommentAsync(projectPath, existing.Id, move.Author, SkipComment(column.Name, automations), cancellationToken);
+            await store.AddCommentAsync(projectPath, existing.Id, move.Author, SkipComment(column.Name, automations, move.SkipReason), cancellationToken);
         }
         var card = await GetCardAsync(projectPath, moved.Id, cancellationToken);
         return card is null
@@ -217,8 +219,9 @@ public sealed partial class BoardService
         return new BoardLaneAutomationInfo(definition.JobId, name, summary, output, unavailable, definition.ActiveRunId, definition.ActiveRunIsRunning, definition.Description);
     }
 
-    internal static string SkipComment(string laneName, IReadOnlyList<BoardLaneAutomationInfo> automations) =>
-        $"Moved to {laneName}; lane Automations skipped at the caller's request: {QuotedNames(automations)}.";
+    internal static string SkipComment(string laneName, IReadOnlyList<BoardLaneAutomationInfo> automations, string? reason = null) =>
+        $"Moved to {laneName}; lane Automations skipped at the caller's request: {QuotedNames(automations)}."
+        + (string.IsNullOrWhiteSpace(reason) ? "" : $" Reason: {reason.Trim()}");
 
     internal static string QuotedNames(IEnumerable<BoardLaneAutomationInfo> automations) =>
         string.Join(", ", automations.Select(a => $"\"{a.Name}\""));

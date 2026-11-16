@@ -41,7 +41,9 @@ public sealed partial class BoardStore
         "BoardManagerFeature", "BoardManagerSessions", "BoardManagers", "BoardPendingAdditionalAutomations",
         "BoardPendingAutomations", "BoardRecallEmbeddings", "BoardReviewSettings", "BoardSearchEmbeddings",
         "BoardStarterWorkflows", "BoardSyncEntryOrder", "BoardSyncLinks", "BoardSyncRebuilds",
-        "BoardSyncRejectedFields", "BoardSyncSkippedEntries",
+        "BoardSyncRejectedFields", "BoardSyncSkippedEntries", "BoardSessionCommits",
+        // Shown on the tile, but every write also touches the card (BoardStore.SessionCommits.cs).
+        "BoardAgentSkips",
     ];
 
     /// <summary>

@@ -97,6 +97,10 @@ public sealed partial class BoardTool
                     text.Append("- Lane entry ").Append(entry.Id).Append(" · ").Append(entry.DefinitionId)
                         .Append(" · current: ").Append(entry.Current).Append(" · process: ").Append(entry.ProcessStatus)
                         .Append(" · verdict: ").Append(entry.Verdict ?? "awaiting explicit result").Append(" · run: ").AppendLine(entry.RunId ?? "not queued");
+                    // VIBE-338: an agent's skip carries its reason, so the reviewer and the owner see why.
+                    if (entry.SkippedByAgent is not null)
+                        text.Append("  ").Append(BoardPromptComposer.SanitizeLine(entry.Summary ?? "", 600))
+                            .Append(" (").Append(BoardPromptComposer.SanitizeLine(entry.SkippedByAgent, 60)).AppendLine(")");
                     if (entry.RunId is not null && launches is not null && await launches.GetRunAsync(entry.RunId, cancellationToken) is { } run)
                         text.Append("  Actual process: ").Append(run.Status).Append(" · session: ").Append(run.SessionId)
                             .Append(" · evidence: ").Append(run.EvidenceId).Append(" · ").AppendLine(run.Error);

@@ -43,7 +43,7 @@ public sealed partial class BoardToolTests
         Assert.Contains("current VibeRails agent session", await _tool.ReportAutomationStep("failed", "Blocked", card: card.Key, cancellationToken: Ct));
         _resolver.CurrentSessionId = Guid.NewGuid().ToString();
         await _store.LinkSessionAsync(_project, card.Id, _resolver.CurrentSessionId, null, "base:codex", "codex", "Worker", "work", Ct);
-        Assert.Contains("Only the user can skip", await _tool.ReportAutomationStep("skipped", "Bypass", card: card.Key, cancellationToken: Ct));
+        Assert.Contains("call skip_lane_step", await _tool.ReportAutomationStep("skipped", "Bypass", card: card.Key, cancellationToken: Ct));
         Assert.Empty((await _store.GetCardDetailAsync(_project, card.Id, Ct))!.Comments);
     }
 

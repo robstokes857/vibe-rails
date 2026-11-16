@@ -798,6 +798,8 @@ public sealed partial class BoardToolTests : IDisposable
             .Returns<string?, string?, CancellationToken>((project, card, ct) => _store.GetLaunchEventsAsync(project, card, ct));
         racing.Setup(s => s.GetDesktopActiveCardIdsAsync(_project, It.IsAny<IReadOnlyList<string>>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns<string, IReadOnlyList<string>, DateTime, CancellationToken>((project, ids, now, ct) => _store.GetDesktopActiveCardIdsAsync(project, ids, now, ct));
+        racing.Setup(s => s.GetOpenAgentSkipsAsync(_project, It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .Returns<string, IReadOnlyList<string>, CancellationToken>((project, ids, ct) => _store.GetOpenAgentSkipsAsync(project, ids, ct));
         var service = new BoardService(racing.Object, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
 
         var updated = await service.UpdateCardAsync(_project, "PROJ-1", new UpdateBoardCardRequest(DescriptionAppend: "agent note"), Ct);
@@ -972,7 +974,8 @@ public sealed partial class BoardToolTests : IDisposable
         var preview = await _tool.MoveBoardCard("PROJ-1", "review", preview: true, cancellationToken: Ct);
         Assert.Contains("preset_saved", preview);
         Assert.Equal(lanes[0].Id, (await _store.FindCardAsync(_project, "PROJ-1", Ct))!.ColumnId);
-        await _tool.MoveBoardCard("PROJ-1", "review", skipAutomations: true, cancellationToken: Ct);
+        await _tool.MoveBoardCard("PROJ-1", "review", skipAutomations: true, cancellationToken: Ct,
+            skipReason: "The review lane's agent does not apply to this fixture card.");
         var card = (await _store.FindCardAsync(_project, "PROJ-1", Ct))!;
         Assert.True(Assert.Single(await _store.GetLaunchEventsAsync(_project, card.Id, Ct)).SkipRequested);
     }

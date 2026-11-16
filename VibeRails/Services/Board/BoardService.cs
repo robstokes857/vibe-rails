@@ -309,15 +309,26 @@ public sealed partial class BoardService(
         }
 
         var issueUrls = await GetRemoteIssueUrlsAsync(projectPath, cards, cancellationToken);
+        var skips = await GetAgentSkipsAsync(projectPath, cards.Select(c => c.Id).ToList(), cancellationToken);
         return new BoardCardListResponse(cards.Select(card =>
         {
             activeByCard.TryGetValue(card.Id, out var active);
             return ToSummary(card, active.SessionId, active.TabId) with {
                 HasActiveAutomation = automationCards.Contains(card.Id), HasWaitingAutomation = waiting.Contains(card.Id),
                 HasActiveDesktopAgent = desktopCards?.Contains(card.Id) == true,
-                RemoteIssueUrl = issueUrls.GetValueOrDefault(card.Id) };
+                RemoteIssueUrl = issueUrls.GetValueOrDefault(card.Id), AgentSkip = skips.GetValueOrDefault(card.Id) };
         }).ToList());
     }
+
+    /// <summary>The newest open agent skip per card, with how many are open (VIBE-338).</summary>
+    private async Task<Dictionary<string, BoardAgentSkipDto>> GetAgentSkipsAsync(string projectPath, IReadOnlyList<string> cardIds, CancellationToken cancellationToken) =>
+        (await store.GetOpenAgentSkipsAsync(projectPath, cardIds, cancellationToken))
+            .GroupBy(skip => skip.CardId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group =>
+            {
+                var newest = group.First();
+                return new BoardAgentSkipDto(newest.StepName, newest.Reason, newest.Author.Label, newest.CreatedUtc, group.Count());
+            }, StringComparer.Ordinal);
 
     /// <summary>
     /// Lane tile links for one list or page, keyed by card id. Each tracker's connections are read
@@ -751,6 +762,7 @@ public sealed partial class BoardService(
             CodeLinks = detail.CodeLinks,
             GhostReason = detail.Card.GhostReason,
             Pinned = detail.Card.Pinned,
+            AgentSkip = (await GetAgentSkipsAsync(detail.Card.ProjectPath, [detail.Card.Id], cancellationToken)).GetValueOrDefault(detail.Card.Id),
             LinkedCards = detail.LinkedCards.Select(card => ToDto(card, detail.Card.ProjectPath)).ToList(),
             PreviousWork = BoardHandoffService.WithFileStatus(detail.PreviousWork, detail.Card.ProjectPath),
             FileCandidates = detail.PreviousWork is null && detail.Commits.Count > 0

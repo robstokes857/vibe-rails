@@ -486,7 +486,7 @@ export class BoardController {
                     hasActiveDesktopAgent: detail.hasActiveDesktopAgent,
                     comments: detail.comments, notes: detail.notes, attachments: detail.attachments, commits: detail.commits, codeLinks: detail.codeLinks,
                     jiraDeliveries: detail.jiraDeliveries, jiraIssueUrl: detail.jiraIssueUrl,
-                    remoteDeliveries: detail.remoteDeliveries, remoteIssueUrl: detail.remoteIssueUrl });
+                    remoteDeliveries: detail.remoteDeliveries, remoteIssueUrl: detail.remoteIssueUrl, agentSkip: detail.agentSkip });
                 if (changed) this.renderSessionsPanel(editor, card);
                 if (attachmentsChanged) this.renderAttachmentsPanel(editor, card);
                 if (commitsChanged) this.renderCommitsPanel(editor, card);
@@ -518,6 +518,15 @@ export class BoardController {
 
     desktopAgentIndicator() {
         return '<span class="board-desktop-active" title="Desktop app is working on this card" role="img" aria-label="Desktop app is working on this card"><i class="fa-solid fa-desktop" aria-hidden="true"></i></span>';
+    }
+
+    // An agent skipped a lane step with a reason (VIBE-338). It stays until a person dismisses it in
+    // the card's Automations rail, the way a flag stays until it is cleared.
+    agentSkipIndicator(skip) {
+        if (!skip) return '';
+        const more = skip.openCount > 1 ? ` (+${skip.openCount - 1} more)` : '';
+        const title = `Skipped by agent: ${skip.stepName}${more}. ${skip.reason}`;
+        return `<span class="board-agent-skip-badge" title="${escapeHtml(title)}"><i class="fa-solid fa-forward-step" aria-hidden="true"></i> Skipped by agent<span class="visually-hidden">: ${escapeHtml(skip.stepName)}. ${escapeHtml(skip.reason)}</span></span>`;
     }
 
     waitingAutomationIndicator() {
@@ -697,11 +706,18 @@ export class BoardController {
         return { key, cli, label, logo: brand?.logo || '', logoFilter: brand?.logoFilter || '', color: brand?.accentColor || '#64748b' };
     }
 
-    // Comment authors are either the user ("You") or an agent session.
+    // Comment authors are the user ("You"), an agent session, or VibeRails itself (a saved check's
+    // receipt, VIBE-338), which wears the VibeRails mark instead of a generic "AI" disc.
     authorInfo(author) {
         if (!author) return null;
         if (author.kind === 'user') {
             return { key: 'user', cli: '', label: author.label || 'You', logo: '', logoFilter: '', color: '#3b82f6', initials: 'ME' };
+        }
+        if (author.kind === 'system') {
+            // The VS Code webview serves assets from its own base, as getCliBrand's logos do.
+            const base = typeof window !== 'undefined' ? window.__viberails_ASSETS_BASE__ : '';
+            return { key: 'system', cli: '', label: author.label || 'VibeRails', logo: `${base ? `${base}/` : ''}assets/img/logo.png`, logoFilter: '',
+                color: 'var(--color-accent, #06b6d4)', initials: 'VR' };
         }
         const brand = getCliBrand(author.cli || '');
         return {
@@ -1077,6 +1093,7 @@ export class BoardController {
                     ${cardTracker(card) ? `<div class="board-card-origin">${this.remoteBadge(card)}</div>` : ''}
                     <h3 class="board-card-title">${escapeHtml(card.title)}</h3>
                     ${card.hasWaitingAutomation ? this.waitingAutomationIndicator() : ''}
+                    ${this.agentSkipIndicator(card.agentSkip)}
                     ${excerpt ? `<p class="board-card-excerpt">${escapeHtml(excerpt)}</p>` : ''}
                     <div class="board-card-meta">
                         <span class="board-card-badges">

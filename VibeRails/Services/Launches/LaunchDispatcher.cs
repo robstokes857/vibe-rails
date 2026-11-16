@@ -217,6 +217,8 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
                 verdict = check.FailsAction ? "failed" : "passed";
                 exitCode = check.FailsAction ? 1 : 0;
                 status = cancel.IsCancellationRequested ? "cancelled" : check.FailsAction ? "failed" : "succeeded";
+                // The lane step's report: what failed and what to do, not just "Action completed: failed".
+                if (check.FailsAction) error = check.FailureReason;
                 await store.SaveCheckEvidenceAsync(run.Id, check, CancellationToken.None);
                 writer.EnqueueLine(Encoding.UTF8.GetBytes(check.Summary + "\r\n"), check.FailsAction, DateTime.UtcNow);
                 if (nativeTerminal) Console.WriteLine(check.Summary);

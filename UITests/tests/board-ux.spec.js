@@ -1964,7 +1964,7 @@ const SUMMARY_FIELDS = ['id', 'key', 'columnId', 'position', 'title', 'descripti
     'tags', 'blocked', 'commentCount', 'activeSessionId', 'activeTabId', 'createdAt', 'updatedAt', 'baseLlmOptions',
     'type', 'boardId', 'flagged', 'hasActiveAutomation', 'displayId', 'agentMade', 'hasWaitingAutomation', 'agentMadeBy',
     'agentMadeSessionId', 'jiraIssueKey', 'workflowMode', 'managerSelection', 'managerBaseLlmOptions',
-    'hasActiveDesktopAgent', 'remoteProvider', 'remoteIssueKey', 'remoteIssueUrl', 'pinned', 'ghostReason', 'remoteCreated'];
+    'hasActiveDesktopAgent', 'remoteProvider', 'remoteIssueKey', 'remoteIssueUrl', 'pinned', 'ghostReason', 'remoteCreated', 'agentSkip'];
 const cardSummary = card => Object.fromEntries(SUMMARY_FIELDS.filter(field => field in card).map(field => [field, card[field]]));
 
 async function openBoard(page, { active = false, assignee = null, relatedCards = false, empty = false, inlineImages = true,
@@ -2749,6 +2749,50 @@ test('Settings reuses the App-only context disclosure and single save action', a
     await expect.poll(() => saved.message).toBe('All projects');
 });
 
+// VIBE-338: an agent's skip shows on the tile and the rail until a person dismisses it; the rail's
+// steps read as rows with status pills; a check's receipt comment wears the VibeRails mark.
+for (const width of [375, 1280]) test(`agent skip, step rows and check receipt read cleanly at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const skip = { stepName: 'Code quality check · Linked commits', reason: 'This card only edits documentation, so there is no code to grade.',
+        authorLabel: 'Claude Opus 5.5', createdAt: '2026-11-16T08:07:00Z', openCount: 1 };
+    let saved;
+    await openBoard(page, { onCard: card => {
+        saved = card;
+        card.agentSkip = skip;
+        card.comments.push({ id: 'comment_check', author: { kind: 'system', label: 'Code quality check' }, createdAt: '2026-11-16T08:07:00Z',
+            body: '**Needs review** · this step failed\n\nNo commits are linked to this card. Link them with link_board_commit, then retry the step.\n\n- Scope: the card\'s linked commits\n\nFull report under **Code reviews** · `review_check_abc`' });
+    } });
+    const state = await installLaunchFixture(page);
+    state.activity = [
+        { entry: { id: 'entry_check', cardId: 'card_test', definitionId: 'action_check', current: true, processStatus: 'succeeded',
+            verdict: 'skipped', skipRequested: true, skippedByAgent: 'Claude Opus 5.5', summary: 'Skipped by agent: ' + skip.reason } },
+        { entry: { id: 'entry_review', cardId: 'card_test', definitionId: 'preset_review', current: true, processStatus: 'succeeded', verdict: 'passed',
+            summary: 'Reviewed 5948ae35..086f59be. No blocking findings. F1 is a medium-low Manage list delayed-response UI race; exact reproduction saved on the card. 56 C#, 12 Node, and 14 existing browser cases passed; four viewport screenshots inspected.' } }
+    ];
+    state.runs = [{ id: 'run_review', status: 'succeeded', sessionId: 'session_review', endedUtc: '2026-11-16T08:09:00Z', snapshot: { preset: { name: 'Review' } } }];
+    let dismissed = 0;
+    await page.route('**/api/v1/board/cards/card_test/agent-skips/dismiss', route => {
+        dismissed++; saved.agentSkip = null; return route.fulfill({ status: 204 });
+    });
+    await expect(page.locator('.board-agent-skip-badge')).toHaveText(/Skipped by agent/);
+    await page.getByText('Description images', { exact: true }).click();
+    const editor = page.locator('[data-board-card-editor]');
+    const rail = editor.locator('[data-board-automation-runs]');
+    await expect(rail.locator('.board-agent-skip-notice')).toContainText(skip.reason);
+    await expect(rail.locator('.board-step-pill')).toHaveText(['Skipped by agent', 'Passed', 'Finished']);
+    await expect(rail).not.toContainText('Process:');
+    await expect(rail.locator('.board-step-run-more')).toHaveText('Show more');
+    const receipt = editor.locator('.board-comment', { hasText: 'Code quality check' }).first();
+    await expect(receipt.locator('img.board-avatar-logo')).toHaveAttribute('src', /assets\/img\/logo\.png$/);
+    await rail.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`agent-skip-rail-${width}.png`), fullPage: false });
+    await receipt.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`check-receipt-${width}.png`), fullPage: false });
+    await rail.getByRole('button', { name: 'Dismiss', exact: true }).click();
+    await expect.poll(() => dismissed).toBe(1);
+    await expect(rail.locator('.board-agent-skip-notice')).toHaveCount(0);
+});
+
 test('waiting badge follows server activity and skip preserves editor drafts', async ({ page }, testInfo) => {
     let waiting = true;
     await openBoard(page, { onCard: card => { card.hasWaitingAutomation = true; } });
@@ -2770,7 +2814,7 @@ test('waiting badge follows server activity and skip preserves editor drafts', a
     await page.locator('.board-automation-waiting').click();
     await page.locator('#board-card-title').fill('Keep my draft');
     await page.getByRole('button', { name: 'Stop and skip', exact: true }).click();
-    await expect(page.locator('[data-board-automation-runs]')).toContainText('Skip requested');
+    await expect(page.locator('[data-board-automation-runs] .board-step-pill')).toContainText('Skipped');
     await expect(page.locator('#board-card-title')).toHaveValue('Keep my draft');
     expect(state.skips).toBe(1);
     await expect(page.locator('.board-automation-waiting')).toHaveCount(0);
@@ -4780,7 +4824,7 @@ test('unified manual card launch preserves title and comment drafts and prevents
     expect(state.lastRun).toMatchObject({definitionId:'preset_review',definitionType:'preset'});
     await expect(editor.locator('#board-card-title')).toHaveValue('Draft title');
     await expect(editor.locator('[data-board-composer="comment"] textarea')).toHaveValue('Draft comment');
-    await expect(editor.locator('[data-board-automation-runs]')).toContainText('queued');
+    await expect(editor.locator('[data-board-automation-runs]')).toContainText('Queued');
 });
 
 for (const width of [320,375,768,1024]) test(`shared Board status switches remain draft fields at ${width}px`, async ({ page }, testInfo) => {

@@ -4,7 +4,12 @@ public sealed record BoardLaunchSelection(string DefinitionId, string Definition
 public sealed record BoardLaunchLane(IReadOnlyList<BoardLaunchSelection> Selections, long Revision);
 public sealed record BoardLaunchEvent(string Id, string ProjectPath, string CardId, string ColumnId, string? BoardId,
     string DefinitionId, string DefinitionType, string Gate, int Position, DateTime DueUtc, bool Current,
-    string? RunId, string ProcessStatus, string? Verdict, bool SkipRequested, string? Summary);
+    string? RunId, string ProcessStatus, string? Verdict, bool SkipRequested, string? Summary,
+    string? SkippedByAgent = null)
+{
+    /// <summary>Summary prefix of an agent's skip; the reason follows (VIBE-338).</summary>
+    public const string AgentSkipPrefix = "Skipped by agent: ";
+}
 
 public partial interface IBoardStore
 {

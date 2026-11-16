@@ -11,8 +11,12 @@ public sealed record BoardCheckRecord(
     IReadOnlyList<string> Limitations, string? ResultJson = null,
     string? WorkspacePath = null, IReadOnlyList<string>? ScopeFiles = null,
     BoardCheckEvidence? Evidence = null, string? MinimumGrade = null, string? MinimumGradeResult = null,
-    string? GradeSummary = null)
+    string? GradeSummary = null, IReadOnlyList<string>? UnlinkedCommits = null,
+    IReadOnlyList<BoardCheckSkippedFile>? NotReviewed = null, int NotReviewedOmitted = 0)
 {
+    /// <summary>At most this many <see cref="NotReviewed"/> files are named; the rest are counted.</summary>
+    public const int NotReviewedLimit = 200;
+
     /// <summary><see cref="MinimumGradeResult"/>: the grade met the minimum.</summary>
     public const string GradeMet = "Met";
     /// <summary><see cref="MinimumGradeResult"/>: the grade was below the minimum.</summary>
@@ -25,7 +29,33 @@ public sealed record BoardCheckRecord(
     /// Otherwise findings stay advisory.</summary>
     [JsonIgnore]
     public bool FailsAction => Status is "Failed to run" or "Cancelled" || MinimumGradeResult is GradeNotMet or GradeNotChecked
-        || NoCodeFailsCodeQuality;
+        || NoCodeFailsCodeQuality || UnlinkedCommitsFailCodeQuality;
+
+    /// <summary>
+    /// Owner decision 2026-11-16 (VIBE-338): a card-scoped Code quality check also fails when a
+    /// commit one of the card's own sessions made is not linked to the card, and names it.
+    /// </summary>
+    [JsonIgnore]
+    public bool UnlinkedCommitsFailCodeQuality => Tool == "Code quality" && UnlinkedCommits is { Count: > 0 };
+
+    /// <summary>Why the step failed, in the words the step error and the agent read.</summary>
+    [JsonIgnore]
+    public string? FailureReason => !FailsAction ? null
+        : UnlinkedCommitsFailCodeQuality ? UnlinkedCommitsSentence(UnlinkedCommits!)
+        : NoCodeFailsCodeQuality && MinimumGradeResult is null ? NoLinkedCommitsSentence
+        : MinimumGradeResult is GradeNotMet or GradeNotChecked ? GradeSummary ?? Summary
+        : Summary;
+
+    /// <summary>The step error when a card has no linked commits.</summary>
+    public const string NoLinkedCommitsSentence =
+        "No commits are linked to this card. Link them with link_board_commit, then retry the step.";
+
+    /// <summary>The step error naming commits the card's sessions made that are not linked.</summary>
+    public static string UnlinkedCommitsSentence(IReadOnlyList<string> commits) =>
+        $"{(commits.Count == 1 ? "A commit" : $"{commits.Count} commits")} made from this card's sessions "
+        + $"{(commits.Count == 1 ? "is" : "are")} not linked to it: {string.Join("; ", commits.Take(10))}"
+        + (commits.Count > 10 ? $"; and {commits.Count - 10} more" : "")
+        + ". Link them with link_board_commit, then retry the step.";
 
     /// <summary>
     /// Owner decision 2026-11-16: a card-scoped Code quality check with no linked code fails its step,
@@ -50,6 +80,9 @@ public sealed record BoardCheckEvidence(
 public sealed record BoardCheckFile(string Path, string? PreviousPath, string ChangeKind,
     bool IsBinary, string? Content, string? PreviousContent, string? AddedContent,
     IReadOnlyList<int>? AddedLineNumbers);
+
+/// <summary>A scope file the check did not analyse, and why (VIBE-338).</summary>
+public sealed record BoardCheckSkippedFile(string Path, string Reason);
 
 /// <summary>A captured rule or impact-ranking source.</summary>
 public sealed record BoardCheckTextFile(string Path, string Content);

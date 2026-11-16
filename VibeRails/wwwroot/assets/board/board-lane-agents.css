@@ -279,3 +279,124 @@
     .board-workflow-state > .fa-spinner { animation: none; }
 }
 .board-workflow-arrow { display: flex; justify-content: center; color: #8896a7; margin: -.3rem 0; }
+
+/* Card rail: one readable row per lane step and run, with a status pill (VIBE-338). The rail used
+   to print "Process: … · Result: …" and "Action completed: …" as block text. Tones are
+   DESIGN_SYSTEM.md's status tones. */
+.board-step-runs-heading {
+    margin: 12px 0 6px;
+    color: var(--color-text-muted);
+    font: 600 11px/1.6 var(--font-sans);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+.board-step-run {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background: var(--color-bg-surface);
+}
+.board-step-run + .board-step-run { margin-top: 8px; }
+.board-step-run.is-history { background: transparent; }
+.board-step-run-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+}
+.board-step-run-name {
+    min-width: 0;
+    color: var(--color-text);
+    font: 600 13px/1.45 var(--font-sans);
+    overflow-wrap: anywhere;
+}
+.board-step-pill {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: var(--radius-pill, 999px);
+    color: var(--tone-neutral-fg);
+    background: var(--tone-neutral-bg);
+    font: 400 11px/1.6 var(--font-sans);
+    white-space: nowrap;
+}
+.board-step-pill > i { font-size: 11px; }
+.board-step-pill.is-success { color: var(--tone-success-fg); background: var(--tone-success-bg); }
+.board-step-pill.is-danger { color: var(--tone-danger-fg); background: var(--tone-danger-bg); }
+.board-step-pill.is-warning { color: var(--tone-warning-fg); background: var(--tone-warning-bg); }
+.board-step-pill.is-active { color: var(--tone-active-fg); background: var(--tone-active-bg); }
+.board-step-run-summary {
+    margin: 0;
+    color: var(--color-text-muted);
+    font: 400 13px/1.55 var(--font-sans);
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+}
+.board-step-run-summary.is-clamped:not(.is-expanded) {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    overflow: hidden;
+}
+.board-step-run-more { align-self: flex-start; padding: 0; font-size: 12px; }
+.board-step-run-meta { color: var(--color-text-muted); font-size: 12px; }
+.board-step-run-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.board-step-run-actions .btn-link { padding: 0; }
+
+/* An agent skipped a step with a reason: shown until a person dismisses it (VIBE-338). */
+.board-agent-skip-notice {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--tone-warning-fg) 45%, transparent);
+    border-radius: 10px;
+    background: var(--tone-warning-bg);
+}
+.board-agent-skip-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    color: var(--tone-warning-fg);
+    font-size: 13px;
+}
+.board-agent-skip-title > span { color: var(--color-text); font-weight: 600; }
+.board-agent-skip-reason {
+    margin: 0;
+    color: var(--color-text);
+    font-size: 13px;
+    line-height: 1.55;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+}
+.board-agent-skip-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    color: var(--color-text-muted);
+    font-size: 12px;
+}
+.board-agent-skip-foot > .btn { margin-left: auto; }
+.board-agent-skip-badge {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: 5px;
+    margin: 4px 0;
+    padding: 3px 9px;
+    border-radius: var(--radius-pill, 999px);
+    color: var(--tone-warning-fg);
+    background: var(--tone-warning-bg);
+    font: 400 11px/1.6 var(--font-sans);
+}
+.board-lane-run-status.is-agent-skip { color: var(--tone-warning-fg); }
+.board-lane-run-by { color: var(--color-text-muted); }

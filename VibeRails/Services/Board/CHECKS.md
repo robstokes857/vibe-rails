@@ -38,6 +38,28 @@ decision 2026-11-16, `BoardCheckRecord.NoCodeFailsCodeQuality`), so an agent tha
 Needs review stays advisory. Other non-code work can explicitly skip the lane check. A standalone run without a card must use
 another scope, such as **One commit**. Results never move a card or set its attention flag.
 
+### Commits a card's sessions made (VIBE-338)
+
+Owner decision 2026-11-16: link automatically, and keep the check as a backstop. Git, the
+post-commit hook and `vb --job-trigger post-commit` inherit the committing terminal's
+`VIBERAILS_TOOL_CURRENT_SESSION_ID`. `BoardSessionCommitLinker` resolves that session's card the
+way card exemptions do (the repository is the card's project or the session's recorded checkout),
+records the commit in `BoardSessionCommits` (`board-session-commits/1`, one row per card the session
+is attached to), then captures and links it with `link_board_commit`'s snapshot and fan-out. It is
+bounded to 15 seconds and logs every failure; the commit is already made, so nothing reaches Git.
+Ordinary terminals, Git GUIs and CI have no session: nothing is recorded or blamed. The ghost
+recheck that follows a manual link does not run from the hook.
+
+A card-scoped check then reads the card's recorded commits that are not linked
+(`GetUnlinkedSessionCommitsAsync`) and names them (`BoardCheckRecord.UnlinkedCommits`, as
+`abc12345 "subject"`). Code quality **fails** the step: an outcome that would read as passed
+becomes Needs review, the linked commits are still graded, and the step error says which commits
+to link with `link_board_commit` before retrying. VCA adds a limitation and stays advisory. A
+commit a person unlinks in the card's Commits rail is dismissed from the record, so it is not
+named as forgotten. A commit too large to capture (over 60 files) can be recorded but not linked;
+skip the step with `skip_lane_step` and say why. Research spikes are not checked for unlinked
+commits.
+
 Card capture requires one first-parent history. Divergent or side-branch selections fail visibly
 and can be checked individually with commit scope. Each selected commit supplies its changed paths;
 the oldest selected commit's first parent and newest selected tree bound capture. Paths follow all
@@ -110,8 +132,8 @@ Saved check outcomes distinguish **Passed** (applicable analysis completed witho
 unavailable), **Skipped/not applicable** (nothing applicable was analyzed), **Findings**,
 **Failed to run**, and **Cancelled**. Coverage counts and limitations remain part of the evidence;
 findings take precedence over coverage limitations. **Needs review** identifies a card check with
-no code attached. It fails a Code quality step (2026-11-16); for VCA it remains advisory unless
-the run fails for another reason.
+no code attached, or one whose sessions made commits that are not linked (VIBE-338). It fails a
+Code quality step (2026-11-16); for VCA it remains advisory unless the run fails for another reason.
 
 For check-only Automations, the lane and card Automation rail display the exact run's saved check
 outcome and summary through `BoardLaneAutomationStatus.DisplayStatus`, also used by MCP. Multiple
@@ -166,10 +188,20 @@ it with `get_board_reviews` and in `get_board_card`'s Code reviews. Its id is
 Findings, No findings reported, or Incomplete (failed to run, cancelled, no code attached, or a
 minimum grade that could not be checked). Its
 process status is Failed when the action failed. The findings name the outcome, the minimum grade and the
-worst files, and point to `read_board_check`. It has no reviewer session or review run, so it
+worst files, the commits that are not linked (**Unlinked commits**) and every scope file the
+engine did not analyse with the reason (**Not reviewed**: deleted, binary or over the text limit,
+unreadable, not a supported language, exempted with the exemption's author and reason, hidden by
+a local ignore, no added lines), and point to `read_board_check`. The record keeps the first 200
+of those files (`NotReviewed`) and counts the rest (`NotReviewedOmitted`); `read_board_check
+file="*"` lists the whole scope. Both live in the check's existing summary JSON, so no schema
+change. The discussion receipt is written for people (VIBE-338): the outcome and whether the
+step failed, what to do, the counts and the scope, with the report id last. VibeRails comments
+show the VibeRails logo. It has no reviewer session or review run, so it
 can never satisfy a reviewer's own pass, and its freshness is the check's: verifying it reports
 unknown and points to the card's Checks. It is saved once, with a discussion receipt from VibeRails
 that is not sent to Jira or Azure DevOps. A failure to save it is logged and never fails the check.
+A failed check's lane step carries `BoardCheckRecord.FailureReason` as its error, so the card
+rail and `get_board_agent_status` say what failed and what to do instead of "Action completed: failed".
 
 ## Evidence and access
 

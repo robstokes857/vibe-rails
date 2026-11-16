@@ -94,8 +94,15 @@ session and retains the first report. Unknown scope produces an Incomplete repor
 `report_automation_step` records reviewing/fixing/passed/failed for the current lane entry.
 Only the owning current Automation run can decide; a linked coding agent may report fixing.
 A code review pass must reference the caller’s complete saved review with current captured inputs.
-User skips stay on the authenticated card route. Keep the exact Board grant and both transports
-in sync, and retain independent MCP tests. See [the workflow contract](../Board/ARCHITECTURE.md#ordered-lane-workflows).
+User skips stay on the authenticated card route. `skip_lane_step(eventKey, reason)` (VIBE-338)
+lets an agent skip one current step that does not apply to its card: a 20–2,000 character reason
+is required, a step whose run has started is refused (only the user's Stop and skip stops a live
+run), and the skip, its report row, the agent's comment and the card's "Skipped by agent" marker
+commit together (`IBoardStore.SkipLaunchEventForAgentAsync`). The lane carries on at once (owner
+decision 2026-11-16); the marker stays on the tile and rail until a person dismisses it
+(`POST /api/v1/board/cards/{card}/agent-skips/dismiss`, not reachable with tool credentials).
+`move_board_card(skipAutomations=true)` needs `skipReason`, recorded in its skip comment. Keep the
+exact Board grant and both transports in sync, and retain independent MCP tests. See [the workflow contract](../Board/ARCHITECTURE.md#ordered-lane-workflows).
 
 ## Attention flags (VIBE-40)
 
@@ -231,7 +238,8 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `read_board_attachment` | `BoardTool.ReadBoardAttachment` | Current PNG/JPEG/GIF/WebP attachments up to 5 MiB as native MCP image content; larger images remain in the Board viewer. UTF-8 Markdown/TXT is bounded text (40,000 default; 250,000 limit). Accepts attachment id and optional card; offset/maximum length apply to text. Reads remain card/project scoped with no caller-supplied path or direct SQL access. |
 | `create_board_card` | `BoardTool.CreateBoardCard` | New card (title, description, lane, type, priority, tags); optional `board` as above. An agent author marks the card agent-made once; a person driving the tool does not, and nothing later changes the mark. Optional `agentName` and `sessionId` record who made it beside the mark (VIBE-96); the launching session wins and an unknown supplied session is dropped with a note in the reply. |
 | `update_board_card` | `BoardTool.UpdateBoardCard` | Partial update, including `flagged=true` only for important unresolved owner decisions/intervention under the [attention policy](../../../AGENTS.md#board-attention-flags), or `false` once resolved (independent of `blocked`). Explain the issue and requested action in a comment; routine review and compatible additive schema changes do not warrant a flag. Description replacement accepts the last write; `descriptionAppend` appends to current text atomically with the other fields and cannot be combined with `description`. |
-| `move_board_card` | `BoardTool.MoveBoardCard` | Move a card to a lane (by name or id), optionally at a position. The unchanged first line is followed by the lane-entry report: `Queued:` / `Skipped:` per Automation (with the reason and any active run id), `Cancelled pending:` for replaced entries, or `No lane automations.` / `Same lane; …`. `skipAutomations=true` moves without recording the entries and comments the skip on the card; `preview=true` reports without moving (VB-34). |
+| `move_board_card` | `BoardTool.MoveBoardCard` | Move a card to a lane (by name or id), optionally at a position. The unchanged first line is followed by the lane-entry report: `Queued:` / `Skipped:` per Automation (with the reason and any active run id), `Cancelled pending:` for replaced entries, or `No lane automations.` / `Same lane; …`. `skipAutomations=true` moves without recording the entries and comments the skip on the card with the required `skipReason` (VIBE-338); `preview=true` reports without moving (VB-34). |
+| `skip_lane_step` | `BoardTool.SkipLaneStep` | Skip one current lane step with a 20–2,000 character reason (VIBE-338). Refuses a step whose run has started. Writes the skip, the agent's comment and the card's "Skipped by agent" marker together; later steps carry on. See **Ordered lane progress**. |
 | `add_board_comment` | `BoardTool.AddBoardComment` | Append a comment, attributed to the launching session, else to the MCP client's handshake name (see **Attribution**). Returns the comment id. A linked Jira issue or Azure DevOps work item receives it unless `syncToRemote=false` (`syncToJira` is the older alias; `syncToRemote ?? syncToJira ?? true`). |
 | `append_board_note` | `BoardTool.AppendBoardNote` | Append an entry to the card's **agent notes** — the scratchpad for checkpointing findings and working state as the agent goes. Same limits and attribution as a comment; never part of the comment stream or count. Returns the note id. |
 | `get_board_notes` | `BoardTool.GetBoardNotes` | All notes on a card, oldest first, with no budget (`get_board_card` previews older notes once a card outgrows its activity budget); optional `since`. |

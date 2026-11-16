@@ -1,5 +1,17 @@
 # Board persistence
 
+`board-session-commits/1` and `board-agent-skips/1` (VIBE-338, additive, no backfill;
+`BoardStore.SessionCommits.cs`). `BoardSessionCommits` keys on card and sha: the post-commit hook
+records the committing session for every card it is attached to (`ReadCommitTargetCardsAsync`, the
+`link_board_commit` membership), in one writer transaction, first row wins. Unlinking a commit
+(`RemoveCommitAsync`) sets `DismissedUTC` in the same transaction, so a check never names a commit
+a person removed. `BoardAgentSkips` holds an agent's lane-step skips: `SkipLaunchEventForAgentAsync`
+marks the launch event skipped, appends its `BoardLaunchReports` row with the session, inserts the
+marker and the agent's comment (local-only, not sent to a tracker) and touches the card, all in one
+transaction; `DismissAgentSkipsAsync` (people only) sets `DismissedUTC` and touches the card.
+`GetLaunchEventsAsync` reads the newest skip's author as `SkippedByAgent`. Both tables cascade with
+the card and are listed in `UnstampedTables`, because their writes touch the card instead.
+
 `board-default-column/1` adds nullable `Boards.DefaultColumnId`, referencing `BoardColumns`
 with `ON DELETE SET NULL`. No backfill or generation change. Lane creation/updates write it
 in the same scoped, writable-board transaction as the lane; a single board value makes

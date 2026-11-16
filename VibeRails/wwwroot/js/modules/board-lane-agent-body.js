@@ -44,8 +44,11 @@ export function mountLaneAgentBody({
                         ({ entry, run, cardLabel, definitionName }) => `
                 <article class="board-automation-run board-lane-run">
                     <strong class="board-lane-run-title">${escapeHtml(cardLabel)} · ${escapeHtml(definitionName)}</strong>
-                    <span class="board-lane-run-status">Process: ${escapeHtml(run?.status || entry.processStatus)} · Result: ${escapeHtml(entry.verdict || run?.verdict || 'Not reported')}</span>
-                    ${entry.summary || run?.error ? `<details class="board-lane-run-report" data-lane-report="${escapeHtml(entry.id)}">
+                    ${entry.skippedByAgent
+                        // VIBE-338: an agent's skip reads as its own state, with the agent's reason.
+                        ? `<span class="board-lane-run-status is-agent-skip"><i class="fa-solid fa-forward-step" aria-hidden="true"></i> ${escapeHtml(entry.summary || 'Skipped by agent')} <span class="board-lane-run-by">· ${escapeHtml(entry.skippedByAgent)}</span></span>`
+                        : `<span class="board-lane-run-status">Process: ${escapeHtml(run?.status || entry.processStatus)} · Result: ${escapeHtml(entry.verdict || run?.verdict || 'Not reported')}</span>`}
+                    ${!entry.skippedByAgent && (entry.summary || run?.error) ? `<details class="board-lane-run-report" data-lane-report="${escapeHtml(entry.id)}">
                         <summary>Report<span class="visually-hidden"> for ${escapeHtml(cardLabel)} · ${escapeHtml(definitionName)}</span></summary>
                         <p>${escapeHtml(entry.summary || run.error)}</p>
                     </details>` : ''}

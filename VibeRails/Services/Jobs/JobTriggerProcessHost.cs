@@ -63,6 +63,10 @@ public static class JobTriggerProcessHost
             if (string.IsNullOrWhiteSpace(commit))
                 return 0;
 
+            // VIBE-338: a commit from a VibeRails card terminal is linked to that session's cards.
+            // Best effort and bounded; it logs its own failures and never changes the commit.
+            await VibeRails.Services.Board.BoardSessionCommitLinker.RecordAsync(repositoryPath, commit, cancellationToken);
+
             var count = await VibeRails.Services.Launches.LaunchEventService.Create().EnqueueAsync(
                 repositoryPath, JobTriggerKind.Commit, commit.ToLowerInvariant(), cancellationToken);
             if (count > 0) Log.Information("[Launches] Queued {Count} after-commit runs", count);

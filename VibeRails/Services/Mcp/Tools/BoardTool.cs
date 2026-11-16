@@ -328,7 +328,8 @@ public sealed partial class BoardTool(
             [], stats);
         text += $"\nProject: {project}\nCard ID: {detail.Id}";
         text += "\n\nLane runs: " + (entries.Count == 0 ? "None." : string.Join("\n", entries.Select(e =>
-            $"{e.Id}: {e.DefinitionId} · {e.ProcessStatus} · verdict {e.Verdict ?? "not reported"} · run {e.RunId ?? "pending"}")));
+            $"{e.Id}: {e.DefinitionId} · {e.ProcessStatus} · verdict {e.Verdict ?? "not reported"} · run {e.RunId ?? "pending"}"
+            + (e.SkippedByAgent is null ? "" : $" · {BoardPromptComposer.SanitizeLine(e.Summary ?? "", 600)} ({BoardPromptComposer.SanitizeLine(e.SkippedByAgent, 60)})"))));
         var checks = await store.GetLatestChecksAsync(project, detail.Id, cancellationToken);
         text += "\n\n" + CheckSummary(checks);
         var reviewRows = await store.GetReviewsAsync(project, detail.Id, 0, cancellationToken);
@@ -566,7 +567,7 @@ public sealed partial class BoardTool(
         }
     }
 
-    [McpServerTool, Description("Move a kanban card to another lane (by lane name or id), optionally at a position within it. Use this when the card changes state, e.g. to Review when the work is ready for eyes. Entering a lane may run that lane's Automations (see the lane annotations in get_board_card / list_board_columns): link commits and post your summary comment BEFORE moving into such a lane, and move once. The result lists what the entry queued or skipped, and why. skipAutomations=true moves without running them (recorded on the card); preview=true reports what a move would trigger without moving.")]
+    [McpServerTool, Description("Move a kanban card to another lane (by lane name or id), optionally at a position within it. Use this when the card changes state, e.g. to Review when the work is ready for eyes. Entering a lane may run that lane's Automations (see the lane annotations in get_board_card / list_board_columns): link commits and post your summary comment BEFORE moving into such a lane, and move once. The result lists what the entry queued or skipped, and why. skipAutomations=true moves without running them and needs a skipReason (both recorded in a card comment); to skip only one step, use skip_lane_step. preview=true reports what a move would trigger without moving.")]
     public async Task<string> MoveBoardCard(
         [Description(CardArgumentHelp)] string card,
         [Description("Target lane name or id, e.g. Review.")] string column,
@@ -574,13 +575,16 @@ public sealed partial class BoardTool(
         [Description("true: move the card but do not run the destination lane's Automations for this entry. Per call only; the skip and what it bypassed are recorded as a comment on the card. Use it for moves that need no run (a research spike, a card moved back and forth).")] bool skipAutomations = false,
         [Description("true: do not move; return what moving to this lane would queue, skip or cancel.")] bool preview = false,
         CancellationToken cancellationToken = default,
-        McpServer? server = null)
+        McpServer? server = null,
+        [Description("Required with skipAutomations=true: why this lane's Automations do not apply to this entry, 20–2,000 characters. Saved in the skip comment the owner reads.")] string? skipReason = null)
     {
         try
         {
             var target = await ResolveCardAsync(card, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
+            // VIBE-338: an agent says why it bypasses a lane's Automations, in the same comment.
+            var reason = skipAutomations && !preview ? BoardAgentSkips.ValidateReason(skipReason) : null;
             if (preview)
             {
                 var current = await service.FindCardAsync(target.Project, target.CardId!, cancellationToken);
@@ -594,7 +598,7 @@ public sealed partial class BoardTool(
             if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
                 return UnnamedClientHint;
             var result = await service.MoveCardAsync(target.Project, target.CardId!,
-                new BoardCardMoveRequest(column, position, skipAutomations, author), cancellationToken);
+                new BoardCardMoveRequest(column, position, skipAutomations, author, reason), cancellationToken);
             if (result is null)
                 return $"FAIL: card not found: {card}";
             var moved = result.Card;

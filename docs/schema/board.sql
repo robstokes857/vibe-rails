@@ -14,6 +14,12 @@ CREATE INDEX IX_BoardAdoDeliveries_Pending ON BoardAdoDeliveries(Status, Created
 -- index IX_BoardAdoLinks_Card
 CREATE INDEX IX_BoardAdoLinks_Card ON BoardAdoLinks(CardId);
 
+-- index IX_BoardAgentSkips_Event
+CREATE INDEX IX_BoardAgentSkips_Event ON BoardAgentSkips(EventId);
+
+-- index IX_BoardAgentSkips_Open
+CREATE INDEX IX_BoardAgentSkips_Open ON BoardAgentSkips(CardId, CreatedUTC) WHERE DismissedUTC IS NULL;
+
 -- index IX_BoardAttachments_Card
 CREATE INDEX IX_BoardAttachments_Card ON BoardAttachments(CardId);
 
@@ -151,6 +157,9 @@ CREATE TABLE BoardAdoLinks ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON D
 
 -- table BoardAgentCompletions
 CREATE TABLE BoardAgentCompletions ( ProjectPath TEXT NOT NULL, SessionId TEXT NOT NULL, Outcome TEXT NOT NULL, Summary TEXT NOT NULL, CompletedUTC TEXT NOT NULL, PRIMARY KEY (SessionId) );
+
+-- table BoardAgentSkips
+CREATE TABLE BoardAgentSkips ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, EventId TEXT NOT NULL, StepName TEXT NOT NULL, Reason TEXT NOT NULL, AuthorLabel TEXT NOT NULL, AuthorCli TEXT NULL, SessionId TEXT NULL, CreatedUTC TEXT NOT NULL, DismissedUTC TEXT NULL );
 
 -- table BoardAppContextSettings
 CREATE TABLE BoardAppContextSettings ( Id INTEGER PRIMARY KEY CHECK (Id = 1), Message TEXT NOT NULL, Revision INTEGER NOT NULL );
@@ -304,6 +313,9 @@ CREATE TABLE BoardReviews ( Id TEXT PRIMARY KEY, CardId TEXT NOT NULL REFERENCES
 
 -- table BoardSearchEmbeddings
 CREATE TABLE BoardSearchEmbeddings ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, PassageId TEXT NOT NULL, Version TEXT NOT NULL, Embedding TEXT NOT NULL, PRIMARY KEY(CardId, PassageId));
+
+-- table BoardSessionCommits
+CREATE TABLE BoardSessionCommits ( CardId TEXT NOT NULL REFERENCES BoardCards(Id) ON DELETE CASCADE, Sha TEXT NOT NULL, SessionId TEXT NOT NULL, RepositoryPath TEXT NOT NULL, Message TEXT NULL, RecordedUTC TEXT NOT NULL, DismissedUTC TEXT NULL, PRIMARY KEY (CardId, Sha) );
 
 -- table BoardSharedOrigins
 CREATE TABLE BoardSharedOrigins ( BoardId TEXT PRIMARY KEY REFERENCES Boards(Id) ON DELETE CASCADE, RemoteBoardId TEXT NOT NULL UNIQUE, DestinationKey TEXT NOT NULL, KeyPrefix TEXT NOT NULL );

@@ -32,6 +32,7 @@ public sealed class BoardCheckService(
         if (board is not null && !await board.SaveCheckAsync(project, record, ct))
             throw new InvalidOperationException("Could not save the check attempt.");
         var evidenceSaved = false;
+        IReadOnlyList<string>? unlinked = null;
         try
         {
             IReadOnlyList<string>? commits = null;
@@ -40,6 +41,7 @@ public sealed class BoardCheckService(
                 if (board is null || card is null)
                     throw new InvalidOperationException("Card scope requires a Board card. Select commit scope for a standalone check.");
                 commits = (await board.GetCommitsAsync(project, card.Id, ct)).Select(commit => commit.Sha).ToArray();
+                unlinked = card.Type == BoardCardTypes.ResearchSpike ? null : await UnlinkedCommitsAsync(board, project, card.Id, ct);
                 if (commits.Count == 0) throw new NoAttachedCodeException(card.Type == BoardCardTypes.ResearchSpike);
             }
             var snapshot = await CaptureAsync(workspace, scope, ct, captureImpact: kind == JobActionKind.CodeQuality, commits: commits);
@@ -82,9 +84,12 @@ public sealed class BoardCheckService(
             record = Complete(record, snapshot, result, kind);
             if (ignoresUnavailable)
                 record = record with { Limitations = [.. record.Limitations, "The Code quality ignore list could not be read; no files were ignored."] };
+            if (kind == JobActionKind.CodeQuality && record.Status is not ("Failed to run" or "Cancelled"))
+                record = WithNotReviewed(record, NotReviewed(snapshot, ignoreRules ?? []));
             if (minimum is char grade && !record.FailsAction)
                 record = ApplyMinimumGrade(record, grade, CodeQualityRule.EvaluateSnapshot(grade, snapshot, ct),
                     HiddenByIgnores(snapshot, ignoreRules ?? []));
+            record = WithUnlinkedCommits(record, unlinked);
         }
         catch (OperationCanceledException)
         {
@@ -108,6 +113,7 @@ public sealed class BoardCheckService(
             // Owner decision 2026-11-16: without a minimum too (BoardCheckRecord.NoCodeFailsCodeQuality).
             else if (kind == JobActionKind.CodeQuality && !ex.ResearchSpike)
                 record = record with { Summary = $"{record.Summary}. This step fails: link the card's commits with link_board_commit, then retry it." };
+            record = WithUnlinkedCommits(record, unlinked);
         }
         catch (Exception ex)
         {
@@ -120,13 +126,86 @@ public sealed class BoardCheckService(
         {
             try
             {
-                if (!await board.SaveCheckReviewAsync(project, CheckReport(record), CancellationToken.None))
+                if (!await board.SaveCheckReviewAsync(project, CheckReport(record), CancellationToken.None, CheckReceipt(record)))
                     Log.Warning("[BoardChecks] Check {CheckId} finished, but its card was unavailable for the review report.", record.Id);
             }
             catch (Exception ex) { Log.Warning(ex, "[BoardChecks] Check {CheckId} finished, but its review report could not be saved.", record.Id); }
         }
         return record;
     }
+
+    /// <summary>
+    /// Commits this card's own sessions made (recorded by the post-commit hook) that are not linked
+    /// to it, as "abc1234 subject". A failed read is logged and checks nothing: this is a backstop to
+    /// the hook's automatic link, never a reason for the check itself to fail to run.
+    /// </summary>
+    private static async Task<IReadOnlyList<string>?> UnlinkedCommitsAsync(IBoardStore board, string project, string cardId, CancellationToken ct)
+    {
+        try
+        {
+            var rows = await board.GetUnlinkedSessionCommitsAsync(project, cardId, ct);
+            return rows.Count == 0 ? null : rows.Select(row => string.IsNullOrWhiteSpace(row.Message)
+                ? row.Sha[..Math.Min(8, row.Sha.Length)]
+                : $"{row.Sha[..Math.Min(8, row.Sha.Length)]} \"{BoardPromptComposer.SanitizeLine(row.Message, 80)}\"").ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.Warning(ex, "[BoardChecks] Could not read the card's recorded session commits; unlinked commits were not checked.");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Names the card's unlinked commits. A Code quality step fails (owner decision 2026-11-16); an
+    /// outcome that would otherwise read as passed becomes Needs review, so the card never shows a
+    /// green check for code it did not see. VCA records them as a limitation and stays advisory.
+    /// </summary>
+    internal static BoardCheckRecord WithUnlinkedCommits(BoardCheckRecord record, IReadOnlyList<string>? unlinked)
+    {
+        if (unlinked is not { Count: > 0 } || record.Status is "Failed to run" or "Cancelled") return record;
+        var sentence = BoardCheckRecord.UnlinkedCommitsSentence(unlinked);
+        var limitation = $"{unlinked.Count} {(unlinked.Count == 1 ? "commit" : "commits")} made from this card's sessions "
+            + $"{(unlinked.Count == 1 ? "is" : "are")} not linked to the card, so {(unlinked.Count == 1 ? "its" : "their")} code was not reviewed.";
+        record = record with { UnlinkedCommits = unlinked, Limitations = [.. record.Limitations, limitation] };
+        if (record.Tool != "Code quality") return record;
+        return record with
+        {
+            Status = record.Status is "Passed" or "Completed with limitations" or "Skipped/not applicable" ? "Needs review" : record.Status,
+            Summary = $"{record.Summary.TrimEnd()} {sentence}"
+        };
+    }
+
+    /// <summary>Every scope file the Code quality engine did not analyse, and why, in path order.</summary>
+    internal static IReadOnlyList<BoardCheckSkippedFile> NotReviewed(GitStagedSnapshot snapshot, IReadOnlyList<CodeAnalyzerIgnoredFile> ignoreRules)
+    {
+        var exemptions = snapshot.QualityExemptions ?? [];
+        var result = new List<BoardCheckSkippedFile>();
+        foreach (var file in snapshot.Files.OrderBy(file => file.RelativePath, StringComparer.Ordinal))
+        {
+            string? reason;
+            if (file.ChangeKind == GitStagedChangeKind.Deleted || !file.ExistsInIndex) reason = "Deleted; no added code to review.";
+            else if (file.IsBinary) reason = "Binary, over the 5 MiB text limit, or past the capture budget.";
+            else if (file.Content is null) reason = "Could not be read from Git.";
+            else if (!MintLintAnalyzer.SupportsFile(file.RelativePath)) reason = "Not a supported source language.";
+            else if (exemptions.FirstOrDefault(rule => CodeAnalyzerIgnoreRules.IsIgnored(file.RelativePath, [rule])) is { } exemption)
+                reason = $"Exempted{(string.IsNullOrWhiteSpace(exemption.Author) ? "" : $" by {BoardPromptComposer.SanitizeLine(exemption.Author, 60)}")}: "
+                    + BoardPromptComposer.SanitizeLine(exemption.ReasonText ?? "no reason recorded", 300);
+            else if (ignoreRules.FirstOrDefault(rule => CodeAnalyzerIgnoreRules.IsIgnored(file.RelativePath, [rule])) is { } ignore)
+                reason = "Hidden by local Code quality ignore settings"
+                    + (string.IsNullOrWhiteSpace(ignore.ReasonText) ? "." : ": " + BoardPromptComposer.SanitizeLine(ignore.ReasonText, 300));
+            else if (string.IsNullOrWhiteSpace(file.AddedContent ?? file.Content)) reason = "No added lines (only removals or whitespace).";
+            else continue;
+            result.Add(new(file.RelativePath, reason));
+        }
+        return result;
+    }
+
+    private static BoardCheckRecord WithNotReviewed(BoardCheckRecord record, IReadOnlyList<BoardCheckSkippedFile> files) =>
+        files.Count == 0 ? record : record with
+        {
+            NotReviewed = files.Take(BoardCheckRecord.NotReviewedLimit).ToList(),
+            NotReviewedOmitted = Math.Max(0, files.Count - BoardCheckRecord.NotReviewedLimit)
+        };
 
     /// <summary>The prefix of review reports that come from a saved check rather than a reviewer.</summary>
     public const string CheckReviewPrefix = "review_check_";
@@ -142,7 +221,9 @@ public sealed class BoardCheckService(
         var findings = new StringBuilder()
             .Append(record.Status).Append(": ").AppendLine(record.Summary)
             .AppendLine(record.MinimumGrade is null
-                ? record.NoCodeFailsCodeQuality
+                ? record.UnlinkedCommitsFailCodeQuality
+                    ? "Minimum grade: none set. Commits made from this card's sessions are not linked to it, so this step failed. Link them with link_board_commit, then retry the step."
+                : record.NoCodeFailsCodeQuality
                     ? "Minimum grade: none set. No code is attached to this card, so this step failed. Link the card's commits with link_board_commit, then retry the step."
                     : "Minimum grade: none set. Findings are feedback only and do not fail the step."
                 : $"Minimum grade {record.MinimumGrade}: {record.MinimumGradeResult switch
@@ -154,6 +235,20 @@ public sealed class BoardCheckService(
                 }}. {record.GradeSummary}".TrimEnd());
         var worst = WorstFiles(record.ResultJson);
         if (worst.Length > 0) findings.AppendLine("Worst files (concern score/100, rating, top categories):").AppendLine(worst);
+        if (record.UnlinkedCommits is { Count: > 0 } unlinked)
+        {
+            findings.AppendLine($"Unlinked commits ({unlinked.Count}): made from this card's sessions but not linked to it, so not reviewed.");
+            foreach (var commit in unlinked.Take(50)) findings.Append("- ").AppendLine(commit);
+            if (unlinked.Count > 50) findings.AppendLine($"- and {unlinked.Count - 50} more");
+        }
+        if (record.NotReviewed is { Count: > 0 } skipped)
+        {
+            var total = skipped.Count + record.NotReviewedOmitted;
+            findings.AppendLine($"Not reviewed ({total} {(total == 1 ? "file" : "files")} in scope):");
+            foreach (var file in skipped) findings.Append("- ").Append(file.Path).Append(": ").AppendLine(file.Reason);
+            if (record.NotReviewedOmitted > 0)
+                findings.AppendLine($"- and {record.NotReviewedOmitted} more; read_board_check checkId={record.Id} file=\"*\" lists the whole scope.");
+        }
         findings.Append($"Per-file metrics and captured inputs: read_board_check checkId={record.Id}.");
         var scope = record.Scope switch
         {
@@ -164,7 +259,7 @@ public sealed class BoardCheckService(
         };
         var reported = record.EndedUtc ?? DateTime.UtcNow;
         return new(CheckReviewPrefix + record.Id, record.CardId, "VibeRails", "Code quality check", record.StartedUtc,
-            ProcessStatus: record.FailsAction ? "Failed" : "Succeeded", Error: record.FailsAction ? record.GradeSummary ?? record.Summary : null,
+            ProcessStatus: record.FailsAction ? "Failed" : "Succeeded", Error: record.FailureReason,
             Workspace: record.WorkspacePath, Scope: record.Scope,
             ScopeDescription: $"Code quality check of {scope}{(record.MinimumGrade is null ? "" : $", minimum grade {record.MinimumGrade}")}; evidence read_board_check checkId={record.Id}",
             BaseCommit: record.BaseCommit, HeadCommit: record.HeadCommit, CapturedUtc: record.StartedUtc, Result: result,
@@ -173,6 +268,42 @@ public sealed class BoardCheckService(
             Limitations: Bound(record.Limitations.Count == 0 ? "None recorded." : string.Join("\n", record.Limitations), 6_000),
             ReportedUtc: reported, ScopeFiles: record.ScopeFiles?.Take(1000).ToList());
     }
+
+    /// <summary>
+    /// The discussion receipt people read on the card (VIBE-338): the outcome and what to do first,
+    /// then the counts, with the report id kept on the last line for agents.
+    /// </summary>
+    internal static string CheckReceipt(BoardCheckRecord record)
+    {
+        var text = new StringBuilder("**").Append(record.Status).Append("**")
+            .Append(record.FailsAction ? " · this step failed" : record.MinimumGrade is null ? " · feedback only" : " · step passed")
+            .Append("\n\n");
+        if (record.FailureReason is { } reason) text.Append(reason).Append("\n\n");
+        else if (record.MinimumGradeResult == BoardCheckRecord.GradeMet) text.Append("Minimum grade ").Append(record.MinimumGrade).Append(" met.\n\n");
+        var notReviewed = (record.NotReviewed?.Count ?? 0) + record.NotReviewedOmitted;
+        if (record.Status is not ("Failed to run" or "Cancelled") && record.FileCount > 0)
+        {
+            text.Append("- ").Append(Plural(record.AnalyzedCount, "file")).Append(" analyzed, ")
+                .Append(record.FindingCount).Append(" with findings\n");
+            if (notReviewed > 0) text.Append("- ").Append(Plural(notReviewed, "file")).Append(" not reviewed (listed in the report)\n");
+        }
+        if (record.UnlinkedCommits is { Count: > 0 } unlinked)
+            text.Append("- ").Append(Plural(unlinked.Count, "unlinked commit")).Append('\n');
+        text.Append("- Scope: ").Append(record.Scope switch
+        {
+            "card" => "the card's linked commits",
+            "commit" => $"commit {record.HeadCommit?[..Math.Min(8, record.HeadCommit.Length)]}",
+            "range" => "a pinned commit range",
+            "working-tree" => "working-tree changes",
+            "unpushed" => "unpushed commits",
+            "repository" => "the whole repository",
+            _ => record.Scope
+        }).Append("\n\n");
+        text.Append("Full report under **Code reviews** · `").Append(CheckReviewPrefix).Append(record.Id).Append('`');
+        return text.ToString();
+    }
+
+    private static string Plural(int count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";
 
     private static string WorstFiles(string? resultJson)
     {

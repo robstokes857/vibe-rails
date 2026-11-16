@@ -59,7 +59,8 @@ public sealed partial class BoardToolTests
 
         var result = operation switch
         {
-            "move" => await desktop.MoveBoardCard(card.Id, working.Id, skipAutomations: true, cancellationToken: Ct),
+            "move" => await desktop.MoveBoardCard(card.Id, working.Id, skipAutomations: true, cancellationToken: Ct,
+                skipReason: "A desktop session moving its own card; nothing on this lane applies."),
             "attachment" => await desktop.AddBoardAttachment("work.md", "Working", card.Id, Ct),
             "commit" => await desktop.LinkBoardCommit("abc1234", card.Id, Ct),
             "handoff" => await desktop.SaveBoardHandoff(new BoardHandoff("Working", "", "Checked", "", []), card.Id, Ct),

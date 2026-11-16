@@ -28,6 +28,7 @@ public static class BoardMcpAuthorization
         "save_board_review",
         "get_board_reviews",
         "report_automation_step",
+        "skip_lane_step",
         "get_board_notes",
         "get_board_agent_status",
         "await_board_events",

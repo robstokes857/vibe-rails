@@ -73,7 +73,7 @@ public sealed partial class BoardChecksTests
         Assert.Null(review.SessionId);
         Assert.Null(review.RunId);
         var receipt = Assert.Single(await store.GetNotesAsync(repo, card.Id, Ct), comment => comment.Body.Contains(review.Id, StringComparison.Ordinal));
-        Assert.StartsWith("Code quality check saved: Findings.", receipt.Body);
+        Assert.StartsWith("**Findings** · this step failed", receipt.Body);
         Assert.Equal(BoardAuthor.SystemKind, receipt.Author.Kind);
     }
 

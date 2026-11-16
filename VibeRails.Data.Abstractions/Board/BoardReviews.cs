@@ -36,8 +36,9 @@ public partial interface IBoardStore
     /// <summary>Save a new attempt or update an unfinished one, preserving its launch identity.</summary>
     Task<bool> SaveReviewAsync(string projectPath, BoardReviewRecord review, CancellationToken cancellationToken = default);
     /// <summary>Save a finished deterministic check as a report on its card, with its discussion receipt (VIBE-278).
-    /// It has no reviewer session or review run and is never updated; false when the card is gone or the id exists.</summary>
-    Task<bool> SaveCheckReviewAsync(string projectPath, BoardReviewRecord review, CancellationToken cancellationToken = default);
+    /// It has no reviewer session or review run and is never updated; false when the card is gone or the id exists.
+    /// <paramref name="receipt"/> is the discussion comment's text; omitted, it names the report the way a reviewer's receipt does.</summary>
+    Task<bool> SaveCheckReviewAsync(string projectPath, BoardReviewRecord review, CancellationToken cancellationToken = default, string? receipt = null);
     /// <summary>Read retained review attempts, newest first, through the card/project boundary.</summary>
     Task<IReadOnlyList<BoardReviewRecord>> GetReviewsAsync(string projectPath, string cardId, int offset = 0, CancellationToken cancellationToken = default);
     /// <summary>Latest saved report, independent of attempt history pagination.</summary>
