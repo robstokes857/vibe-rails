@@ -26,7 +26,7 @@ function messageDisclosure(name, messageId) {
 }
 
 /** One row for a saved launch (`data-launch-id`) or a signed library script (`data-script-id`). */
-function menuRow(name, presentation, target, messageId = null) {
+export function menuRow(name, presentation, target, messageId = null) {
     return `<li class="launch-menu-row">
         <span class="launch-menu-icon">${presentation.logoHtml}</span>
         <div class="launch-menu-details">
@@ -39,7 +39,7 @@ function menuRow(name, presentation, target, messageId = null) {
 }
 
 /** Opens or closes a row's message box; the link reads "Edit message" while text is waiting. */
-function toggleMessage(toggle, open) {
+export function toggleMessage(toggle, open) {
     const panel = document.getElementById(toggle.getAttribute('aria-controls'));
     const input = panel?.querySelector('[data-launch-message]');
     if (!panel || !input) return;
@@ -49,6 +49,14 @@ function toggleMessage(toggle, open) {
     toggle.querySelector('span').textContent = `${verb} message`;
     toggle.setAttribute('aria-label', toggle.getAttribute('aria-label').replace(/^(Add|Edit) message/, `${verb} message`));
     if (open) input.focus();
+}
+
+/** Enter in a message box runs its row, as it did in the one-line field; Shift+Enter keeps a newline. */
+export function runFromMessageKey(event) {
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing || !event.target.matches('[data-launch-message]')) return false;
+    event.preventDefault();
+    event.target.closest('.launch-menu-row').querySelector('[data-launch-id]').click();
+    return true;
 }
 
 export class LaunchMenu {
@@ -120,13 +128,7 @@ export class LaunchMenu {
                     ? `<ul class="launch-menu-list">${rows.join('')}</ul>`
                     : '<p class="launch-menu-empty" role="status">No quick actions shown. Manage quick actions to show hidden items, or add one in AI Agents.</p>') +
                 footer;
-            panel.addEventListener('keydown', (event) => {
-                // Enter runs, as it did in the one-line field; Shift+Enter keeps a newline.
-                if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.target.matches('[data-launch-message]')) {
-                    event.preventDefault();
-                    event.target.closest('.launch-menu-row').querySelector('[data-launch-id]').click();
-                }
-            }, { signal: abort.signal });
+            panel.addEventListener('keydown', runFromMessageKey, { signal: abort.signal });
             panel.addEventListener(
                 'click',
                 (event) => {
