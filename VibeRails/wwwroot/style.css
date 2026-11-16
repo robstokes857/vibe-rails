@@ -19754,6 +19754,16 @@ body.performance-mode .brand-text-sm {
 .card-editor-switch:checked::after { background: var(--color-bg-base, #0a0a0f); transform: translate(18px, -50%); }
 .card-editor-switch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .board-card-status .board-editor-muted { margin: var(--space-1) 0 0; }
+/* VIBE-334: lane settings open with the default-lane switch, framed so label and switch read as one row. */
+.board-lane-default {
+    margin-bottom: var(--space-4);
+    padding: var(--space-1) var(--space-4) var(--space-3);
+    background: var(--color-bg-base, #0a0a0f);
+    border: 1px solid var(--color-border, #2d2d3f);
+    border-radius: var(--radius-control);
+}
+.board-lane-default .card-editor-switch-row { gap: var(--space-4); border-bottom: 0; font-size: 14px; font-weight: 600; }
+.board-lane-default .board-editor-muted { margin: 0; }
 
 /* Global definitions use the same Board editor; these rules only lay out their slots. */
 .ai-agents-view { display: grid; gap: var(--space-5); min-width: 0; }
@@ -19866,7 +19876,7 @@ body.performance-mode .brand-text-sm {
     display: grid;
     grid-template-columns: 40px minmax(0, 1fr) auto;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-1) var(--space-3);
     padding: var(--space-3);
     background: var(--color-bg-base);
     border: 1px solid var(--color-border);
@@ -19881,7 +19891,33 @@ body.performance-mode .brand-text-sm {
 .launch-menu-details { display: grid; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
 .launch-menu-name { font: 600 14px/1.5 var(--font-sans); }
 .launch-menu-subtitle { font: 400 12px/1.5 var(--font-sans); color: var(--color-text-muted); }
-.launch-menu-details .form-control { min-width: 0; }
+/* VIBE-334: the optional message hides behind a link under the name, aligned with it. */
+.launch-menu-message { grid-column: 2 / -1; display: grid; gap: var(--space-1); min-width: 0; }
+.launch-menu .launch-menu-message-toggle {
+    --bs-btn-color: var(--action-accent-fg);
+    --bs-btn-hover-color: var(--action-accent-fg);
+    --bs-btn-active-color: var(--action-accent-fg);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    justify-self: start;
+    min-height: var(--control-height-small, 32px);
+    margin-left: calc(-1 * var(--space-2));
+    padding: var(--space-1) var(--space-2);
+    font-size: 13px;
+}
+.launch-menu-message-toggle i { flex: none; font-size: 11px; transition: transform var(--transition-speed); }
+.launch-menu-message-toggle[aria-expanded="true"] i { transform: rotate(90deg); }
+.launch-menu-message-panel:not([hidden]) { display: grid; gap: var(--space-1); min-width: 0; }
+.launch-menu-message-panel .form-label { margin: 0; font: 600 13px/1.4 var(--font-sans); }
+.launch-menu-message-panel textarea { min-width: 0; min-height: 5.5rem; max-height: 14rem; resize: vertical; }
+.launch-menu-message-help { margin: 0; color: var(--color-text-muted); font-size: 12px; line-height: 1.5; }
+@media (pointer: coarse), (max-width: 768px) {
+    .launch-menu .launch-menu-message-toggle { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .launch-menu-message-toggle i { transition: none; }
+}
 .launch-menu .launch-menu-run {
     display: inline-flex;
     align-items: center;
@@ -19930,7 +19966,7 @@ body.performance-mode .brand-text-sm {
 .quick-action-preferences [role="status"] { margin-top: var(--space-3); color: var(--color-text-muted); font-size: 14px; }
 .quick-action-preferences-footer { border-top: 1px solid var(--color-border); margin-top: var(--space-4); padding-top: var(--space-3); }
 @media (max-width: 575.98px) {
-    .launch-menu-row { gap: var(--space-2); padding: var(--space-2); }
+    .launch-menu-row { gap: var(--space-1) var(--space-2); padding: var(--space-2); }
     .quick-action-preferences { padding: var(--space-4); }
 }
 

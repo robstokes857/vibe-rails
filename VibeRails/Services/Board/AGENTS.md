@@ -216,7 +216,8 @@ auto-attach a session, and explicit session attachments remain within the curren
 
 ## Default lane for new cards
 
-Lane settings' **Newly created cards land here** checkbox saves with **Save lane** (or
+Lane settings' **Newly created cards land here** switch (`#board-lane-default`, the shared
+`card-editor-switch`, first in the dialog since VIBE-334) saves with **Save lane** (or
 **Create lane**). One lane per local board can be selected; choosing another replaces it.
 The card editor and card creation through the service/MCP use that lane when no lane is
 explicitly chosen, even when it is collapsed. Existing cards and explicit lane choices stay

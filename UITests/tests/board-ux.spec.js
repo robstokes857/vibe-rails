@@ -2179,8 +2179,12 @@ for (const width of [1440, 390]) {
         });
         await page.getByRole('button', { name: 'Settings for Needs refinement', exact: true }).click();
         const editor = page.locator('[data-board-lane-editor]');
-        const checkbox = editor.getByRole('checkbox', { name: 'Newly created cards land here' });
+        const checkbox = editor.getByRole('switch', { name: 'Newly created cards land here' });
         await expect(checkbox).not.toBeChecked();
+        // VIBE-334: the shared switch opens the dialog, above Name.
+        await expect(checkbox).toHaveClass(/card-editor-switch/);
+        const switchBox = await checkbox.boundingBox();
+        expect(switchBox.y + switchBox.height).toBeLessThan((await editor.getByLabel('Name', { exact: true }).boundingBox()).y);
         await checkbox.focus();
         await page.keyboard.press('Space');
         await expect(checkbox).toBeChecked();
@@ -2273,7 +2277,7 @@ for (const width of [1440, 390]) {
         await expect(selectedPresets).toHaveCount(1);
         await picker.fill('#cf6c48');
         await editor.getByLabel('Name', { exact: true }).fill('Custom lane');
-        await editor.getByRole('checkbox', { name: 'Newly created cards land here' }).check();
+        await editor.getByRole('switch', { name: 'Newly created cards land here' }).check();
         await page.screenshot({ path: testInfo.outputPath(`lane-colour-${width}.png`) });
         expect(await editor.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         await editor.getByRole('button', { name: 'Create lane', exact: true }).click();
@@ -2283,7 +2287,7 @@ for (const width of [1440, 390]) {
         const lane = page.locator('.board-lane[data-column-id="col_custom"]');
         await expect(lane).toHaveCSS('--lane-color', '#cf6c48');
         await page.getByRole('button', { name: 'Settings for Custom lane', exact: true }).click();
-        await expect(editor.getByRole('checkbox', { name: 'Newly created cards land here' })).toBeChecked();
+        await expect(editor.getByRole('switch', { name: 'Newly created cards land here' })).toBeChecked();
         await expect(picker).toHaveValue('#cf6c48');
         await expect(selectedPresets).toHaveCount(0);
         await picker.fill('#000000');

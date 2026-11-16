@@ -774,6 +774,12 @@ The desktop footer (`.app-footer`) is hidden on every view. Put persistent statu
 
 #### Desktop lane run picker
 
+Lane settings open with **Newly created cards land here**, above Name: the shared
+`card-editor-switch` with its label on the left, framed with its help sentence in
+one base-surface box (`--color-border`, `--radius-control`) so the label and switch
+read as one setting at any dialog width. It is a draft field; **Save lane** (or
+**Create lane**) applies it, as the help sentence says.
+
 Lane Agents and Actions run in the displayed top-to-bottom order. Each waits for
 the previous process to finish, then continues regardless of its result. Show
 numbered rows with Up, Down and Remove controls; do not offer a continuation-result
@@ -805,9 +811,15 @@ Keep a separate secondary **Run** button matching the catalog's dark fill, borde
 text color and play icon. Icons are
 decorative; shared presentation logic keeps the catalog and dropdown aligned.
 
-Agent and Quick Launch rows also include a labelled **User message (optional)**
-field beneath the name/subtitle, before Run. It starts empty for each opening;
-blank input launches normally. The VS Code Launch view asks for the same optional
+Agent and Quick Launch rows keep that compact row and add a small teal **Add message**
+`btn-link` under the name and subtitle, aligned with them, with a chevron that turns
+down while open (no rotation under reduced motion). It toggles a labelled
+**User message (optional)** textarea (three rows, vertical resize) spanning the name
+and Run columns, with one hint: "Added to the prompt. Enter runs; Shift+Enter starts
+a new line." Opening the menu focuses the first Run; opening the box focuses the
+textarea. Collapsing keeps the text and the link then reads **Edit message**; Run
+sends whatever the box holds. Each opening starts collapsed and empty, and blank
+input launches normally. The VS Code Launch view asks for the same optional
 message before launching: Enter accepts a blank value, Escape cancels. Messages
 fill `{{user_message}}` in the saved prompt, or append when it has no such token.
 Actions and library scripts keep their existing launch controls.

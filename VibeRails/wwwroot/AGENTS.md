@@ -1462,7 +1462,12 @@ and CSV quote wrappers are rejected. Backend write validation remains authoritat
 ## Quick actions visibility
 
 Agent and Quick Launch rows also offer **User message (optional)**, empty on each
-opening. `launch-menu.js` passes it through `ai-agents-controller.js` and
+opening. It is a `<textarea data-launch-message>` behind an **Add message** toggle
+(`data-launch-message-toggle`, `aria-expanded`/`aria-controls`, VIBE-334); the panel's
+click handler must handle that toggle before the branch that closes the menu. Enter
+runs the row, Shift+Enter adds a newline, and a collapsed box still sends its text
+(the toggle then reads **Edit message**). Opening focuses the first Run, not the box.
+`launch-menu.js` passes it through `ai-agents-controller.js` and
 `launch-api.js` as `userMessage`, separately from `initialPrompt`. The VS Code
 bridge accepts the same bounded string. `{{user_message}}` is a reserved built-in
 in template preview, shared help and caret suggestions; only the backend inserts

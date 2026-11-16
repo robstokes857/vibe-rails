@@ -3457,6 +3457,15 @@ export class BoardController {
 
         this.app.showModal(column ? `Lane · ${column.name}` : 'Create lane', `
             <div class="board-lane-editor" data-board-lane-editor>
+                <div class="board-lane-default">
+                    <label class="card-editor-switch-row" for="board-lane-default">
+                        <span>Newly created cards land here</span>
+                        <input type="checkbox" role="switch" class="card-editor-switch" id="board-lane-default"
+                            aria-describedby="board-lane-default-help" ${column?.isDefaultForNewCards ? 'checked' : ''}>
+                    </label>
+                    <p class="board-editor-muted" id="board-lane-default-help">Used when no lane is chosen, even while this lane is collapsed. Save to replace this board's current default.</p>
+                </div>
+
                 <label class="board-editor-label" for="board-lane-name">Name</label>
                 <input type="text" class="form-control form-control-sm mb-3" id="board-lane-name"
                     placeholder="Lane name" value="${escapeHtml(column?.name || '')}">
@@ -3475,15 +3484,6 @@ export class BoardController {
                     <input type="color" class="form-control form-control-color" id="board-lane-color"
                         value="${escapeHtml(this.state.editingColumnColor)}">
                     <output for="board-lane-color" class="small font-monospace" data-board-color-value>${escapeHtml(this.state.editingColumnColor)}</output>
-                </div>
-
-                <div class="mt-3">
-                    <label class="d-flex align-items-center justify-content-between gap-3 py-3" for="board-lane-default">
-                        <span>Newly created cards land here</span>
-                        <input type="checkbox" class="form-check-input flex-shrink-0 m-0" id="board-lane-default"
-                            aria-describedby="board-lane-default-help" ${column?.isDefaultForNewCards ? 'checked' : ''}>
-                    </label>
-                    <p class="board-editor-muted mb-0" id="board-lane-default-help">Used when no lane is chosen, even while this lane is collapsed. Save to replace this board's current default.</p>
                 </div>
 
                 <div class="board-editor-actions mt-4">

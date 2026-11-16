@@ -87,23 +87,49 @@ for (const width of [320, 375, 768, 1024]) test(`optional launch message reaches
     const trigger = page.locator('[data-action="automation-launcher"]');
     const menu = page.getByRole('dialog', { name:'Quick actions', exact:true });
     await trigger.click();
+    // VIBE-334: rows open compact; the message box sits behind an "Add message" link.
+    await expect(menu.getByRole('button', { name:'Run Review changes', exact:true })).toBeFocused();
+    const messages = menu.locator('[data-launch-message]');
+    await expect(messages).toHaveCount(2);
+    await expect(messages.first()).toBeHidden();
+    await expect(messages.last()).toBeHidden();
+    const toggle = menu.locator('[aria-controls="launch-message-0-panel"]');
+    await expect(toggle).toHaveAccessibleName('Add message for Review changes');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(await menu.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`user-message-collapsed-${width}.png`) });
+    await toggle.click();
+    await expect(menu).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
     const input = menu.getByRole('textbox', { name:'User message for Review changes (optional)', exact:true });
     await expect(input).toBeFocused();
     await expect(input).not.toHaveAttribute('required');
     const message = 'Focus on <input> and {{worktree}} literally';
     await input.fill(message);
-    await expect(menu.getByRole('textbox', { name:'User message for Quick terminal (optional)', exact:true })).toHaveValue('');
+    await input.press('Shift+Enter');
+    await input.pressSequentially('second line');
+    await expect(input).toHaveValue(`${message}\nsecond line`);
+    await expect(messages.last()).toBeHidden();
+    await expect(messages.last()).toHaveValue('');
     expect(await menu.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`user-message-${width}.png`) });
+    // Collapsing keeps the draft and says so; reopening returns to it.
+    await toggle.click();
+    await expect(input).toBeHidden();
+    await expect(toggle).toHaveAccessibleName('Edit message for Review changes');
+    await toggle.click();
+    await expect(input).toBeFocused();
     await input.press('Enter');
     await expect.poll(() => state.requests.filter(r => r.path === '/api/v1/runs' && r.method === 'POST').length).toBe(1);
     const first = state.requests.find(r => r.path === '/api/v1/runs' && r.method === 'POST').body;
-    expect(first.userMessage).toBe(message);
+    expect(first.userMessage).toBe(`${message}\nsecond line`);
     expect(first.initialPrompt).toBe('Review {{user_message}}');
     expect(first.expectedRevision).toBe(1);
     await expect(page.locator('[data-prompt-template-modal]')).toHaveCount(0);
     await trigger.click();
-    await expect(input).toHaveValue('');
+    await expect(toggle).toHaveAccessibleName('Add message for Review changes');
+    await expect(messages.first()).toBeHidden();
+    await expect(messages.first()).toHaveValue('');
     await menu.getByRole('button', { name:'Run Quick terminal', exact:true }).click();
     await expect.poll(() => state.requests.filter(r => r.path === '/api/v1/runs' && r.method === 'POST').length).toBe(2);
     expect(state.requests.filter(r => r.path === '/api/v1/runs' && r.method === 'POST')[1].body.userMessage).toBe('');
@@ -116,6 +142,7 @@ for (const suffix of ['', ' {{user_message}}']) test(`optional message survives 
     state.presets.push({ id:'review', name:'Review', cli:'codex', initialPrompt:'Review {{ticket}}' + suffix, enabled:true, revision:3 });
     const trigger = page.locator('[data-action="automation-launcher"]');
     await trigger.click();
+    await page.getByRole('button', { name:'Add message for Review', exact:true }).click();
     await page.locator('[data-launch-message]').fill('Focus on <safety>');
     await page.getByRole('button', { name:'Run Review', exact:true }).click();
     const form = page.locator('[data-prompt-template-modal]');
@@ -124,6 +151,7 @@ for (const suffix of ['', ' {{user_message}}']) test(`optional message survives 
     await form.getByRole('button', { name:'Cancel', exact:true }).click();
     expect(state.runs).toHaveLength(0);
     await trigger.click();
+    await page.getByRole('button', { name:'Add message for Review', exact:true }).click();
     await page.locator('[data-launch-message]').fill('Focus on {{worktree}}');
     await page.getByRole('button', { name:'Run Review', exact:true }).click();
     await form.getByLabel('Ticket', { exact:true }).fill('VB-123');
@@ -139,6 +167,7 @@ test('a user message can supply the entire prompt when optional template values 
     state.runUpdate = { status: 'running' };
     state.presets.push({ id:'optional', name:'Optional values', cli:'codex', initialPrompt:'{{context default=""}}', enabled:true, revision:1 });
     await page.locator('[data-action="automation-launcher"]').click();
+    await page.getByRole('button', { name:'Add message for Optional values', exact:true }).click();
     await page.locator('[data-launch-message]').fill('Review this change');
     await page.getByRole('button', { name:'Run Optional values', exact:true }).click();
     const form = page.locator('[data-prompt-template-modal]');
@@ -406,7 +435,12 @@ test('quick actions use explicit Run buttons and preserve launch and keyboard be
     await expect(panel.getByText('Build <client> & test', { exact: true })).toBeVisible();
     await expect(panel.locator('client')).toHaveCount(0);
     const runAgent = panel.getByRole('button', { name: 'Run Release Vibe Rails Client App', exact: true });
-    await expect(panel.locator('[data-launch-message]')).toBeFocused();
+    const addMessage = panel.getByRole('button', { name: 'Add message for Release Vibe Rails Client App', exact: true });
+    await expect(runAgent).toBeFocused();
+    await expect(panel.locator('[data-launch-message]')).toBeHidden();
+    await expect(addMessage).toHaveAttribute('aria-expanded', 'false');
+    // Actions and library scripts keep their existing controls: no message link.
+    await expect(panel.locator('[data-launch-message-toggle]')).toHaveCount(1);
     await page.screenshot({ path: testInfo.outputPath('quick-actions-desktop.png') });
     await panel.getByText('Release Vibe Rails Client App', { exact: true }).click();
     expect(await page.evaluate(() => window.quickActionLaunches)).toEqual([]);
@@ -415,9 +449,9 @@ test('quick actions use explicit Run buttons and preserve launch and keyboard be
     await expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(await page.evaluate(() => window.quickActionLaunches)).toEqual([['release', 'preset', { userMessage: '' }]]);
     await trigger.click();
-    await expect(panel.locator('[data-launch-message]')).toBeFocused();
+    await expect(runAgent).toBeFocused();
     await page.keyboard.press('Tab');
-    await expect(panel.getByRole('button', { name: 'Run Release Vibe Rails Client App' })).toBeFocused();
+    await expect(addMessage).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(panel.getByRole('button', { name: 'Run Build <client> & test', exact: true })).toBeFocused();
     await page.keyboard.press('Enter');
@@ -469,7 +503,9 @@ for (const width of [320, 375, 768, 1024]) {
         await page.getByRole('button', { name: 'Launch an agent or automation', exact: true }).click();
         const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
         await expect(panel.locator('.launch-menu-row')).toHaveCount(2);
-        for (const element of [panel, ...await panel.locator('.launch-menu-name, .launch-menu-run').all()]) {
+        await panel.locator('[data-launch-message-toggle]').click();
+        await expect(panel.locator('[data-launch-message]')).toBeFocused();
+        for (const element of [panel, ...await panel.locator('.launch-menu-name, .launch-menu-run, .launch-menu-message-toggle, [data-launch-message]').all()]) {
             const box = await element.boundingBox();
             expect(box.x).toBeGreaterThanOrEqual(0);
             expect(box.x + box.width).toBeLessThanOrEqual(width);
@@ -478,6 +514,8 @@ for (const width of [320, 375, 768, 1024]) {
         if (width <= 375) {
             const button = await panel.locator('.launch-menu-run').first().boundingBox();
             expect(button.height).toBeGreaterThanOrEqual(44);
+            const toggle = await panel.locator('.launch-menu-message-toggle').boundingBox();
+            expect(toggle.height).toBeGreaterThanOrEqual(44);
         }
         await page.screenshot({ path: testInfo.outputPath(`quick-actions-${width}.png`) });
     });
