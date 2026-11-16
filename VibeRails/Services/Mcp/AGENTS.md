@@ -276,7 +276,7 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   source board. Stdio uses the CLI's inherited cwd/git root; the dashboard uses its project root.
   No repository path is accepted from a tool argument. Capture resolves the full sha, reads the
   before/after blobs, then saves the link and `BoardCommitSnapshots` row in one transaction.
-  Viewing never consults Git. Capture errors leave no link. More than 60 files is rejected;
+  Viewing never consults Git. Capture errors leave no link. More than 500 files is rejected;
   individual file previews retain at most 400,000 characters plus a visible truncation marker.
 - **Board name resolution**: names are case-insensitive across local projects; duplicate names fail
   with an explicit instruction to use the board ID from `list_boards`. Exact IDs take precedence.

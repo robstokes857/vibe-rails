@@ -22,7 +22,7 @@ public interface IBoardCommitService
 
 public sealed partial class BoardCommitService : IBoardCommitService
 {
-    public const int MaxFiles = 60;
+    public const int MaxFiles = 500;
     public const int MaxFileChars = 400_000;
     private const int MaxListingChars = 1_000_000;
     // ASCII unit separator: git's %x1f, a byte that never appears in an author name or subject.

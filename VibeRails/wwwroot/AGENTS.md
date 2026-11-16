@@ -999,7 +999,7 @@ any other write into a live TUI.
 Linking a commit sends only the sha. The server captures metadata and before/after file contents
 from the current checkout and saves the link and code snapshot atomically. The diff endpoint
 reads only that snapshot in the shape the sandbox viewer uses, so deleted workspaces do not
-break saved code history. A failed capture creates no link. More than 60 changed files is
+break saved code history. A failed capture creates no link. More than 500 changed files is
 rejected; large text previews keep 400,000 characters and a truncation marker. Older links
 without snapshots must be unlinked and linked again while their checkout is available.
 Sessions are the terminal sessions linked to the card — by Start work

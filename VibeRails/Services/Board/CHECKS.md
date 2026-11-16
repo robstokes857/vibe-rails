@@ -56,7 +56,7 @@ A card-scoped check then reads the card's recorded commits that are not linked
 becomes Needs review, the linked commits are still graded, and the step error says which commits
 to link with `link_board_commit` before retrying. VCA adds a limitation and stays advisory. A
 commit a person unlinks in the card's Commits rail is dismissed from the record, so it is not
-named as forgotten. A commit too large to capture (over 60 files) can be recorded but not linked;
+named as forgotten. A commit too large to capture (over 500 files since VIBE-339) can be recorded but not linked;
 skip the step with `skip_lane_step` and say why. Research spikes are not checked for unlinked
 commits.
 

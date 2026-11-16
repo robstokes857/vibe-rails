@@ -878,7 +878,7 @@ through the same project/card-scoped endpoint. This is removal from the current 
 
 Commit linking validates a 7–40 hex SHA, captures Git metadata and changed-file before/after blobs,
 then atomically inserts the commit link and JSON snapshot. Git runs with discrete argv values,
-not a shell-built command. Limits: 60 files, 400,000 characters per side/file with a truncation
+not a shell-built command. Limits: 500 files (60 before VIBE-339), 400,000 characters per side/file with a truncation
 marker, and a bounded changed-file listing. Root commits, renames, merges and gitlinks have
 explicit handling. Viewing uses the saved snapshot and survives deletion of the checkout.
 Legacy links lacking snapshots return a recapture instruction. Linking an existing SHA returns

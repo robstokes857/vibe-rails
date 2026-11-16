@@ -210,7 +210,7 @@ public sealed class BoardCommitServiceTests : IDisposable
         var sha = await CommitAsync();
 
         var error = await Assert.ThrowsAsync<BoardValidationException>(() => _service.GetDiffAsync(_root, sha, Ct));
-        Assert.Contains("at most 60", error.Message);
+        Assert.Contains($"at most {BoardCommitService.MaxFiles} changed files", error.Message);
     }
 
     private sealed class CloneResolver(string project, string clone) : IBoardProjectResolver
