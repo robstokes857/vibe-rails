@@ -819,8 +819,10 @@ and Run columns, with one hint: "Added to the prompt. Enter runs; Shift+Enter st
 a new line." Opening the menu focuses the first Run; opening the box focuses the
 textarea. Collapsing keeps the text and the link then reads **Edit message**; Run
 sends whatever the box holds. Each opening starts collapsed and empty, and blank
-input launches normally. The VS Code Launch view asks for the same optional
-message before launching: Enter accepts a blank value, Escape cancels. Messages
+input launches normally. In the VS Code Launch view, the play icon and a row click
+run at once without asking. Agent and Quick Launch rows add an inline **Run with
+message…** (`comment` icon, left of play; also in the row's context menu) that asks
+for the same optional message: Enter accepts a blank value, Escape cancels. Messages
 fill `{{user_message}}` in the saved prompt, or append when it has no such token.
 Actions and library scripts keep their existing launch controls.
 

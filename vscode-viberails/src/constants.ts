@@ -17,6 +17,8 @@ export const COMMAND_TEST_LAUNCHER_ITEMS = 'viberails._test.getLauncherItems';
 
 /** Runs the launcher item passed as its argument (tree row click and the inline play icon). */
 export const COMMAND_LAUNCHER_RUN = 'viberails.launcher.run';
+/** Agent and Quick Launch rows only: asks for the optional user message, then runs (inline comment icon and context menu). */
+export const COMMAND_LAUNCHER_RUN_WITH_MESSAGE = 'viberails.launcher.runWithMessage';
 export const COMMAND_LAUNCHER_REFRESH = 'viberails.launcher.refresh';
 export const COMMAND_LAUNCHER_CUSTOMIZE = 'viberails.launcher.customize';
 export const COMMAND_LAUNCHER_MANAGE = 'viberails.launcher.manage';

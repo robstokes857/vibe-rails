@@ -6,7 +6,7 @@ import { BackendManager } from './backend-manager';
 import { WebviewPanelManager } from './webview-panel';
 import { resolveScriptImportTarget } from './script-import';
 import { BackendConnection, requestJson } from './backend-api';
-import { LauncherItem, LauncherNode, LauncherTreeDataProvider, runLauncherItem } from './launcher-view';
+import { LauncherItem, LauncherNode, LauncherTreeDataProvider, RunLauncherDependencies, runLauncherItem } from './launcher-view';
 import {
     ReviewInboxActionDependencies, ReviewInboxRow, ReviewInboxTreeDataProvider,
     approveReviewRequest, readReviewRequest, rejectReviewRequest
@@ -26,6 +26,7 @@ import {
     COMMAND_LAUNCHER_MANAGE,
     COMMAND_LAUNCHER_REFRESH,
     COMMAND_LAUNCHER_RUN,
+    COMMAND_LAUNCHER_RUN_WITH_MESSAGE,
     COMMAND_REVIEW_INBOX_APPROVE,
     COMMAND_REVIEW_INBOX_OPEN,
     COMMAND_REVIEW_INBOX_READ,
@@ -358,6 +359,24 @@ function registerLauncherView(context: vscode.ExtensionContext, registeredComman
         fetchScripts: () => requestJson(getBackendConnection(), 'GET', SCRIPT_LIBRARY_PATH)
     });
     launcherProvider = provider;
+    const runDependencies: RunLauncherDependencies = {
+        promptUserMessage: (label) => vscode.window.showInputBox({
+            title: `Run ${label}`,
+            prompt: 'User message (optional). Leave empty to launch, or press Escape to cancel.',
+            ignoreFocusOut: true,
+            validateInput: value => value.length > 8000 ? 'Use 8,000 characters or fewer.' : null
+        }),
+        request: (method, route, body) => requestJson(getBackendConnection(), method, route, body),
+        openDashboard: () => openDashboard(context),
+        reveal: () => webviewManager?.reveal(),
+        post: (message) => webviewManager?.postWhenReady(message) ?? Promise.resolve(false),
+        notifyQueued: (label, message) => {
+            vscode.window.setStatusBarMessage(`$(check) ${label}: ${message}`, LAUNCHER_STATUS_MESSAGE_MS);
+        },
+        notifyError: (message) => { void showError(message); },
+        refresh: () => { void provider.refresh(); },
+        running: runningLauncherKeys
+    };
 
     context.subscriptions.push(
         provider,
@@ -365,24 +384,10 @@ function registerLauncherView(context: vscode.ExtensionContext, registeredComman
         // back on screen, which also catches automations edited while it was hidden.
         ...bindSidebarTreeView<LauncherNode>(LAUNCHER_VIEW_ID, provider, registeredCommands),
         vscode.commands.registerCommand(COMMAND_LAUNCHER_REFRESH, () => provider.refresh()),
-        vscode.commands.registerCommand(COMMAND_LAUNCHER_RUN, (item?: LauncherItem) => runLauncherItem(item, {
-            promptUserMessage: (label) => vscode.window.showInputBox({
-                title: `Run ${label}`,
-                prompt: 'User message (optional). Leave empty to launch, or press Escape to cancel.',
-                ignoreFocusOut: true,
-                validateInput: value => value.length > 8000 ? 'Use 8,000 characters or fewer.' : null
-            }),
-            request: (method, route, body) => requestJson(getBackendConnection(), method, route, body),
-            openDashboard: () => openDashboard(context),
-            reveal: () => webviewManager?.reveal(),
-            post: (message) => webviewManager?.postWhenReady(message) ?? Promise.resolve(false),
-            notifyQueued: (label, message) => {
-                vscode.window.setStatusBarMessage(`$(check) ${label}: ${message}`, LAUNCHER_STATUS_MESSAGE_MS);
-            },
-            notifyError: (message) => { void showError(message); },
-            refresh: () => { void provider.refresh(); },
-            running: runningLauncherKeys
-        })),
+        // Play icon and row click: run at once. A message is opt-in through the row's comment icon.
+        vscode.commands.registerCommand(COMMAND_LAUNCHER_RUN, (item?: LauncherItem) => runLauncherItem(item, runDependencies)),
+        vscode.commands.registerCommand(COMMAND_LAUNCHER_RUN_WITH_MESSAGE, (item?: LauncherItem) =>
+            runLauncherItem(item, runDependencies, { askForMessage: true })),
         vscode.commands.registerCommand(COMMAND_LAUNCHER_CUSTOMIZE, () =>
             sendToDashboard(context, { command: 'openLauncherCustomize' }, 'Could not open the launcher customization')),
         vscode.commands.registerCommand(COMMAND_LAUNCHER_MANAGE, () =>

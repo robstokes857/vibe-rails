@@ -32,7 +32,12 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
   Launch view; hidden from the palette because it needs the row as its argument. Actions are
   queued straight from the extension host (`POST /api/v1/runs` with the definition's stable ID; a
   status-bar message confirms "Queued." and the dashboard, when open, shows its usual toast).
-  Agents and Quick Launches go to the dashboard (`launchDefinition`) for its template prompt.
+  Agents and Quick Launches go to the dashboard (`launchDefinition`) for its template prompt, with
+  an empty user message: the play icon and row click never ask for one (VIBE-334).
+- `Run with message…` (`viberails.launcher.runWithMessage`) — runnable Agent and Quick Launch rows
+  only (`contextValue` `launcherPresetItem`): an inline `$(comment)` icon left of play, and the
+  row's context menu. Asks for the optional user message, then takes the same dashboard path.
+  Hidden from the palette.
   Library scripts are handed to the dashboard too (`runScript` with the registration ID), because
   it owns the private script terminal and any run PIN prompt; the panel is revealed for that.
 - `VibeRails: Refresh Launcher` (`viberails.launcher.refresh`), `VibeRails: Manage Quick Actions…`
@@ -56,8 +61,9 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 
 ## Architecture
 
-Before launching a preset, the Launch view asks for **User message (optional)**
-with a native input box. Enter with no text launches normally; Escape cancels
+The play icon and a row click launch a preset at once with an empty message. The
+row's **Run with message…** action (VIBE-334) asks for **User message (optional)**
+with a native input box first. Enter with no text launches normally; Escape cancels
 before opening the dashboard. `launchDefinition` carries the bounded `userMessage`
 string into the shared browser flow and immutable run snapshot. Custom template
 variables still use the dashboard dialog; the message is never a preset edit.

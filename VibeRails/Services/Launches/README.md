@@ -78,8 +78,9 @@ No schema generation bump, backfill, data conversion or manual migration is requ
 ## Frontend contract (VIBE-292 / VB-4OG9T-366)
 
 Manual preset runs accept an optional `userMessage` (up to 8,000 characters).
-Quick actions provides an inline field and the VS Code Launch view asks before
-opening the dashboard (blank continues; Escape cancels). The immutable run context
+Quick actions provides an inline field. The VS Code Launch view's play icon runs
+without asking; its **Run with message…** row action asks before opening the
+dashboard (blank continues; Escape cancels). The immutable run context
 keeps the message separately from the template, including on retry; it never edits
 the preset. `PromptPlaceholderService` substitutes `{{user_message}}` once, or
 appends the message when no such token exists. Message text is never interpreted

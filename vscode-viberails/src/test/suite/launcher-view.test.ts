@@ -1,8 +1,11 @@
 import * as assert from 'assert/strict';
+import * as fs from 'fs';
+import * as path from 'path';
 import { BackendRequestError } from '../../backend-api';
+import { COMMAND_LAUNCHER_RUN, COMMAND_LAUNCHER_RUN_WITH_MESSAGE } from '../../constants';
 import { LauncherItem, LauncherTreeDataProvider, RunLauncherDependencies, normalizeLauncherItems,
     normalizeLibraryScripts, runLauncherItem, isLauncherItemRunnable, launcherEmptyMessage,
-    LAUNCHER_EMPTY_MESSAGE, LAUNCHER_LOAD_FAILED_MESSAGE } from '../../launcher-view';
+    LAUNCHER_EMPTY_MESSAGE, LAUNCHER_LOAD_FAILED_MESSAGE, LAUNCHER_ITEM_CONTEXT, LAUNCHER_PRESET_ITEM_CONTEXT } from '../../launcher-view';
 
 const item = (id = 'preset_1', extra: Partial<LauncherItem> = {}): LauncherItem => ({
     id, key: `preset:${id}`, definitionType: 'preset', kind: 'agent', name: 'Reviewer', label: 'Reviewer',
@@ -189,21 +192,78 @@ suite('Signed library scripts', () => {
         await tick();
     });
 });
-suite('Typed launch dispatch', () => {
-    test('optional message is sent verbatim and Escape cancels before opening the dashboard', async () => {
-        let opened = 0;
-        const message = 'Focus on {{worktree}} and <tags>';
-        const state = dependencies({ promptUserMessage: async () => message, openDashboard: async () => { opened++; } });
+suite('Optional message (VIBE-334)', () => {
+    const neverAsk = () => { throw new Error('The plain run must not ask for a message.'); };
+    test('the play icon and a row click run a preset at once with an empty message', async () => {
+        const state = dependencies({ promptUserMessage: neverAsk });
         await runLauncherItem(item(), state.deps);
+        assert.deepEqual(state.messages, [{ command: 'launchDefinition', definitionId: 'preset_1', definitionType: 'preset', userMessage: '' }]);
+        assert.deepEqual(state.errors, []);
+        await tick();
+    });
+    test('Run with message sends the typed text verbatim and Escape cancels before opening the dashboard', async () => {
+        let opened = 0;
+        const asked: string[] = [];
+        const message = 'Focus on {{worktree}} and <tags>';
+        const state = dependencies({ promptUserMessage: async label => { asked.push(label); return message; },
+            openDashboard: async () => { opened++; } });
+        await runLauncherItem(item(), state.deps, { askForMessage: true });
+        assert.deepEqual(asked, ['Reviewer']);
         assert.equal(opened, 1);
         assert.equal((state.messages[0] as { userMessage: string }).userMessage, message);
+        const blank = dependencies({ promptUserMessage: async () => '' });
+        await runLauncherItem(item(), blank.deps, { askForMessage: true });
+        assert.equal((blank.messages[0] as { userMessage: string }).userMessage, '');
         const cancelled = dependencies({ promptUserMessage: async () => undefined, openDashboard: async () => { opened++; } });
-        await runLauncherItem(item(), cancelled.deps);
+        await runLauncherItem(item(), cancelled.deps, { askForMessage: true });
         assert.equal(opened, 1);
         assert.deepEqual(cancelled.messages, []);
         assert.deepEqual(cancelled.calls, []);
         await tick();
     });
+    test('Run with message never asks for or runs an Action or a script', async () => {
+        const [script] = normalizeLibraryScripts([{ id: 'reg_run', name: 'run.ps1', status: 'approved' }]);
+        const state = dependencies({ promptUserMessage: neverAsk, openDashboard: async () => { throw new Error('opened'); } });
+        await runLauncherItem(item('action_1', { definitionType: 'action' }), state.deps, { askForMessage: true });
+        await runLauncherItem(script, state.deps, { askForMessage: true });
+        assert.deepEqual([state.calls, state.messages, state.errors], [[], [], []]);
+        await tick();
+    });
+    test('only runnable Agent and Quick Launch rows carry the message row action', () => {
+        const provider = new LauncherTreeDataProvider({ isBackendReady: () => true, fetchItems: async () => ({ items: [] }) });
+        const [script] = normalizeLibraryScripts([{ id: 'reg_run', name: 'run.ps1', status: 'approved' }]);
+        const contexts = [item(), item('off', { enabled: false, canLaunch: false }),
+            item('action_1', { definitionType: 'action' }), script].map(row => provider.getTreeItem(row).contextValue);
+        assert.deepEqual(contexts, [LAUNCHER_PRESET_ITEM_CONTEXT, LAUNCHER_ITEM_CONTEXT, LAUNCHER_ITEM_CONTEXT, LAUNCHER_ITEM_CONTEXT]);
+        // A row click is always the plain run, never the message prompt.
+        assert.equal(provider.getTreeItem(item()).command?.command, 'viberails.launcher.run');
+        provider.dispose();
+    });
+    test('the manifest shows the comment icon left of play on preset rows and play on every row', () => {
+        const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../package.json'), 'utf8'));
+        const command = manifest.contributes.commands.find((entry: { command: string }) => entry.command === COMMAND_LAUNCHER_RUN_WITH_MESSAGE);
+        assert.deepEqual([command?.title, command?.icon], ['Run with message…', '$(comment)']);
+        const rowMenus: { command: string; when: string; group: string }[] = manifest.contributes.menus['view/item/context'];
+        // Evaluates the two `viewItem` clause forms this manifest uses for Launch rows.
+        const shownOn = (when: string, context: string) => {
+            if (!when.includes('view == viberails.launcher')) return false;
+            const equals = /viewItem == (\w+)/.exec(when);
+            if (equals) return equals[1] === context;
+            const pattern = /viewItem =~ \/(.+)\//.exec(when);
+            return !!pattern && new RegExp(pattern[1]).test(context);
+        };
+        const menu = (context: string, inline: boolean) => rowMenus
+            .filter(entry => entry.group.startsWith('inline') === inline && shownOn(entry.when, context))
+            .sort((a, b) => a.group.localeCompare(b.group)).map(entry => entry.command);
+        assert.deepEqual(menu(LAUNCHER_PRESET_ITEM_CONTEXT, true), [COMMAND_LAUNCHER_RUN_WITH_MESSAGE, COMMAND_LAUNCHER_RUN]);
+        assert.deepEqual(menu(LAUNCHER_ITEM_CONTEXT, true), [COMMAND_LAUNCHER_RUN]);
+        assert.deepEqual(menu(LAUNCHER_PRESET_ITEM_CONTEXT, false), [COMMAND_LAUNCHER_RUN_WITH_MESSAGE]);
+        assert.deepEqual(menu(LAUNCHER_ITEM_CONTEXT, false), []);
+        const palette: { command: string; when: string }[] = manifest.contributes.menus.commandPalette;
+        assert.equal(palette.find(entry => entry.command === COMMAND_LAUNCHER_RUN_WITH_MESSAGE)?.when, 'false');
+    });
+});
+suite('Typed launch dispatch', () => {
     test('presets use the shared template and terminal launch flow in the dashboard', async () => {
         const state = dependencies();
         await runLauncherItem(item(), state.deps);

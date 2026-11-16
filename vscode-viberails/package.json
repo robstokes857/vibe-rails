@@ -73,6 +73,12 @@
         "icon": "$(play)"
       },
       {
+        "command": "viberails.launcher.runWithMessage",
+        "title": "Run with message…",
+        "category": "VibeRails",
+        "icon": "$(comment)"
+      },
+      {
         "command": "viberails.launcher.refresh",
         "title": "Refresh Launcher",
         "category": "VibeRails",
@@ -206,9 +212,19 @@
       ],
       "view/item/context": [
         {
+          "command": "viberails.launcher.runWithMessage",
+          "when": "view == viberails.launcher && viewItem == launcherPresetItem",
+          "group": "inline@1"
+        },
+        {
           "command": "viberails.launcher.run",
-          "when": "view == viberails.launcher && viewItem == launcherItem",
-          "group": "inline"
+          "when": "view == viberails.launcher && viewItem =~ /^launcher(Preset)?Item$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "viberails.launcher.runWithMessage",
+          "when": "view == viberails.launcher && viewItem == launcherPresetItem",
+          "group": "navigation@1"
         },
         {
           "command": "viberails.reviewInbox.approve",
@@ -229,6 +245,10 @@
       "commandPalette": [
         {
           "command": "viberails.launcher.run",
+          "when": "false"
+        },
+        {
+          "command": "viberails.launcher.runWithMessage",
           "when": "false"
         },
         {

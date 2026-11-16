@@ -35,6 +35,8 @@ export const LAUNCHER_LOAD_FAILED_MESSAGE = 'Could not load AI Agents.';
 export const LAUNCHER_NONE_RUNNABLE_MESSAGE = 'No eligible launches. Manage definitions in AI Agents.';
 export const LAUNCHER_EMPTY_MESSAGE = 'No quick actions shown. Use Manage quick actions to show hidden items, or create one in AI Agents.';
 export const LAUNCHER_ITEM_CONTEXT = 'launcherItem';
+/** A runnable Agent or Quick Launch row: package.json adds **Run with message…** for it. */
+export const LAUNCHER_PRESET_ITEM_CONTEXT = 'launcherPresetItem';
 export function normalizeLauncherItems(raw: unknown): LauncherItem[] {
     if (!Array.isArray(raw)) return [];
     return raw.filter(item => item && typeof item.id === 'string' && item.id
@@ -154,8 +156,9 @@ export class LauncherTreeDataProvider implements vscode.TreeDataProvider<Launche
             node.iconPath = new vscode.ThemeIcon(item.definitionType === 'action' ? 'code' : 'zap');
             node.tooltip = item.ineligibleReason || `Run ${item.label} now`;
         }
-        node.contextValue = LAUNCHER_ITEM_CONTEXT;
-        if (isLauncherItemRunnable(item)) node.command = { command: COMMAND_LAUNCHER_RUN, title: 'Run now', arguments: [item] };
+        const runnable = isLauncherItemRunnable(item);
+        node.contextValue = runnable && item.definitionType === 'preset' ? LAUNCHER_PRESET_ITEM_CONTEXT : LAUNCHER_ITEM_CONTEXT;
+        if (runnable) node.command = { command: COMMAND_LAUNCHER_RUN, title: 'Run now', arguments: [item] };
         return node;
     }
 
@@ -223,8 +226,18 @@ export interface RunLauncherDependencies {
     clickCooldownMs?: number;
 }
 export const LAUNCHER_CLICK_COOLDOWN_MS = 1000;
-export async function runLauncherItem(item: LauncherItem | undefined, dependencies: RunLauncherDependencies): Promise<void> {
+export interface RunLauncherOptions {
+    /**
+     * **Run with message…**: ask for the optional user message first (Escape cancels).
+     * The play icon and a row click leave it unset and run at once, with no message.
+     * Only Agents and Quick Launches take a message; for other rows this does nothing.
+     */
+    askForMessage?: boolean;
+}
+export async function runLauncherItem(item: LauncherItem | undefined, dependencies: RunLauncherDependencies,
+    options: RunLauncherOptions = {}): Promise<void> {
     if (!item?.id || !isLauncherItemRunnable(item) || dependencies.running.has(item.key)) return;
+    if (options.askForMessage && item.definitionType !== 'preset') return;
     dependencies.running.add(item.key);
     try {
         if (item.definitionType === 'script') {
@@ -236,7 +249,7 @@ export async function runLauncherItem(item: LauncherItem | undefined, dependenci
             return;
         }
         if (item.definitionType === 'preset') {
-            const userMessage = await dependencies.promptUserMessage(item.label);
+            const userMessage = options.askForMessage ? await dependencies.promptUserMessage(item.label) : '';
             if (userMessage === undefined) return;
             // Use the same template-value prompt, revision check and terminal
             // adoption as the browser picker before posting the typed run.
