@@ -88,8 +88,19 @@ public sealed class UnixConsoleInputTests
             throw new InvalidOperationException("Simulated cancellation/failure in the relay");
         }));
 
-        // Every byte libc returned, including fields this class never names.
-        Assert.Equal(before, Attributes(pty.Slave));
+        var restored = Attributes(pty.Slave);
+        if (OperatingSystem.IsMacOS())
+        {
+            // Darwin sets PENDIN when TCSANOW restores ICANON so queued input can be
+            // reprocessed. It is kernel state, not a setting the reader failed to restore.
+            // Assert that transition, then compare every other bit and byte unchanged.
+            const ulong pendingInput = 0x20000000;
+            Assert.Equal(0ul, layout.ReadLocalFlags(before) & pendingInput);
+            Assert.Equal(pendingInput, layout.ReadLocalFlags(restored) & pendingInput);
+            var restoredFlags = layout.ReadLocalFlags(restored) & ~pendingInput;
+            MemoryMarshal.Write(restored.AsSpan(layout.LocalFlags), in restoredFlags);
+        }
+        Assert.Equal(before, restored);
     }
 
     [Fact(SkipUnless = nameof(IsUnix), Skip = RequiresUnix)]
