@@ -83,9 +83,11 @@ public sealed partial class BoardTool
         }
         var start = Math.Min(offset, content.Length);
         var length = Math.Min(maxCharacters, content.Length - start);
-        // Never split a surrogate pair at either edge of the chunk.
+        // Never split a surrogate pair at either edge of the chunk. A one-character chunk that is the
+        // first half of a pair takes the whole pair: trimming it to nothing printed the same offset
+        // as its own continuation, which never advanced.
         if (start > 0 && start < content.Length && char.IsLowSurrogate(content[start])) { start--; length = Math.Min(maxCharacters, content.Length - start); }
-        if (length > 0 && start + length < content.Length && char.IsHighSurrogate(content[start + length - 1])) length--;
+        if (length > 0 && start + length < content.Length && char.IsHighSurrogate(content[start + length - 1])) length += length == 1 ? 1 : -1;
         var end = start + length;
         text.Append("--- ").Append(label).Append(": characters ").Append(start).Append('–').Append(end).Append(" of ").Append(content.Length);
         if (end < content.Length) text.Append(" (continue with offset=").Append(end).Append(')');

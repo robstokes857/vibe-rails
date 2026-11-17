@@ -70,14 +70,15 @@ public sealed partial class BoardToolTests
             .ReturnsAsync(new BoardCommitDiff([
                 new("src/cart/totals.ts", "typescript", "old body\n", after),
                 new("src/pricing/PricingClient.ts", "typescript", "", "export const pricing = {};\n"),
-                new("src/legacy.ts", "typescript", "gone\n", "")], 3));
+                new("src/legacy.ts", "typescript", "gone\n", ""),
+                new("src/emoji.ts", "typescript", "", char.ConvertFromUtf32(0x1F600) + "x\n")], 4));
         var service = new BoardService(_store, commits.Object, new NullBoardLiveSessionProbe());
         var tool = new BoardTool(service, _resolver, _store, new BoardWorkflowService());
         await tool.CreateBoardCard("Totals", cancellationToken: Ct);
         Assert.StartsWith("Linked", await tool.LinkBoardCommit("feedfac", "PROJ-1", Ct));
 
         var list = await tool.ReadBoardCommit("feedfac", "PROJ-1", cancellationToken: Ct);
-        Assert.Contains("3 files", list);
+        Assert.Contains("4 files", list);
         Assert.Contains("- src/cart/totals.ts · modified · before 9 chars · after " + after.Length + " chars", list);
         Assert.Contains("- src/pricing/PricingClient.ts · added · before 0 chars", list);
         Assert.Contains("- src/legacy.ts · deleted", list);
@@ -94,6 +95,17 @@ public sealed partial class BoardToolTests
         Assert.Contains($"characters 100–{after.Length} of {after.Length}\n", rest);
         Assert.EndsWith("last line", rest);
         Assert.Contains("--- Before: empty", await tool.ReadBoardCommit("feedfac", "PROJ-1", "src/pricing/PricingClient.ts", cancellationToken: Ct));
+
+        // A one-character page that lands on a surrogate pair returns the whole pair, from either
+        // half, so the continuation it prints always moves on.
+        var pair = char.ConvertFromUtf32(0x1F600);
+        foreach (var offset in new[] { 0, 1 })
+        {
+            var page = await tool.ReadBoardCommit("feedfac", "PROJ-1", "src/emoji.ts", side: "after", offset: offset, maxCharacters: 1, cancellationToken: Ct);
+            Assert.EndsWith($"--- After: characters 0–2 of 4 (continue with offset=2)\n{pair}", page);
+        }
+        Assert.EndsWith("--- After: characters 2–3 of 4 (continue with offset=3)\nx",
+            await tool.ReadBoardCommit("feedfac", "PROJ-1", "src/emoji.ts", side: "after", offset: 2, maxCharacters: 1, cancellationToken: Ct));
 
         Assert.StartsWith("FAIL: that file is not in this commit's saved snapshot", await tool.ReadBoardCommit("feedfac", "PROJ-1", "nope.ts", cancellationToken: Ct));
         Assert.StartsWith("FAIL: sha must be 7 to 40 hex", await tool.ReadBoardCommit("xyz", "PROJ-1", cancellationToken: Ct));
