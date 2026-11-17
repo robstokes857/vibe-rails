@@ -75,6 +75,16 @@ control source. Comments and Run history occupy the same activity slot below att
 Attention and blocked are draft switches below the Board discussion; plain definitions
 have no Board workflow controls.
 
+In the Board card editor (`[data-board-card-editor]`, above 860px) both columns are
+`position: sticky` and `card-editor-columns.js` sets each one's offset from a ResizeObserver,
+so the shorter column stays in view while the longer one scrolls (a column taller than the
+dialog holds its last screenful). It is still the one `.board-editor-scroll` scrollbar: do not
+give either column its own overflow, and scroll that element rather than calling
+`scrollIntoView({ block: 'start' })`, which also moves the dialog's clipped body. The column
+divider is the scroller's `::before`, not a border on a column. Priority and Points sit in a
+`.board-side-pair` row under Type and Tags under Advanced; all three are in `readCardForm`, so
+only a changed value is saved.
+
 `launch-api.js` wraps the authenticated typed API documented in
 [the launch contract](../Services/Launches/README.md).
 Definition and trigger saves retain expected revisions, including partial attachment

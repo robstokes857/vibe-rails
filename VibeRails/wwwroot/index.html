@@ -4560,6 +4560,37 @@
                     flex-direction: column;
                     gap: 0.7rem;
                 }
+                /* Two short fields share a row (Priority and Points) so the rail does not grow. */
+                .board-side-pair {
+                    display: grid;
+                    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                    gap: 0.6rem;
+                }
+                .board-card-tags-field { margin: 0.35rem 0 0.6rem; }
+
+                /* The rail is far longer than most cards. Past the end of the shorter column the
+                   dialog used to show a blank half; now that column stays in view while the other
+                   one scrolls. card-editor-columns.js sets each column's offset so a column taller
+                   than the dialog first scrolls to its own end. Still one scrollbar. */
+                @media (min-width: 861px) {
+                    [data-board-card-editor] .board-editor-scroll::before {
+                        content: '';
+                        grid-area: 1 / 1;
+                        justify-self: end;
+                        width: 1px;
+                        background: var(--color-border, #334155);
+                        pointer-events: none;
+                    }
+                    [data-board-card-editor] .board-editor-main,
+                    [data-board-card-editor] .board-editor-side {
+                        position: sticky;
+                        top: var(--board-editor-stick, 0px);
+                        align-self: start;
+                        grid-row: 1;
+                    }
+                    [data-board-card-editor] .board-editor-main { grid-column: 1; border-right: 0; }
+                    [data-board-card-editor] .board-editor-side { grid-column: 2; }
+                }
                 .board-card-identity {
                     margin-bottom: 0;
                     padding-bottom: 0.5rem;
@@ -4893,6 +4924,25 @@
                 .board-previous-work > summary { cursor: pointer; }
                 .board-previous-work > summary::before { content: '\25b8'; }
                 .board-previous-work[open] > summary::before { transform: rotate(90deg); }
+                .board-previous-work > :is(p, ul) { font-size: 0.8rem; }
+
+                /* A flex summary draws no disclosure marker, so Move or merge, Request review,
+                   Share card and Advanced looked like plain headings. Same arrow as Previous work. */
+                .board-editor-side details > summary.board-side-label { cursor: pointer; }
+                .board-editor-side details > summary.board-side-label::before { content: '\25b8'; }
+                .board-editor-side details[open] > summary.board-side-label::before { transform: rotate(90deg); }
+
+                /* GitHub links read as rail rows, like Commits and Sessions beside them. */
+                [data-board-code-link-list] .board-side-main {
+                    font-size: 0.78rem;
+                    font-weight: 600;
+                    overflow-wrap: anywhere;
+                }
+                [data-board-code-link-list] a.board-side-main {
+                    color: var(--color-accent, #06b6d4);
+                    text-decoration: none;
+                }
+                [data-board-code-link-list] a.board-side-main:is(:hover, :focus-visible) { text-decoration: underline; }
 
                 .board-activity .board-comments:not(:empty) {
                     margin-bottom: 0.9rem;
@@ -5474,8 +5524,12 @@
                     min-width: 0;
                 }
 
+                /* .board-side-remove shows on its row's hover. Unassign sits beside the picker,
+                   not in a row, so without this it was only ever visible to keyboard focus. */
                 .board-assignee-clear {
                     flex: none;
+                    align-self: stretch;
+                    opacity: 1;
                 }
 
                 .board-side-row.is-live .board-side-title {

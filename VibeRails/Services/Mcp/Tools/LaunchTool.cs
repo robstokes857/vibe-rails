@@ -11,7 +11,8 @@ namespace VibeRails.Services.Mcp.Tools;
 
 /// <summary>Local-user definitions and project-scoped admission through the same boundary as HTTP.</summary>
 [McpServerToolType]
-public sealed class LaunchTool(LaunchService service, ILaunchStore store, IBoardProjectResolver projects, VibeRails.DB.IRepository? repository = null)
+public sealed class LaunchTool(LaunchService service, ILaunchStore store, IBoardProjectResolver projects, VibeRails.DB.IRepository? repository = null,
+    BoardLaunchWorkflow? boardRuns = null)
 {
     [McpServerTool, Description("List AI Agents, Quick Launches and single Actions available in this project. includeAll=true includes definitions scoped elsewhere for management, with eligibility reasons. Definitions never grant access to another project.")]
     public async Task<LaunchCatalog> ListLaunchCatalog(CancellationToken ct = default, bool includeAll = false) => await service.CatalogAsync(await projects.ResolveAsync(ct), ct, includeAll);
@@ -44,10 +45,16 @@ public sealed class LaunchTool(LaunchService service, ILaunchStore store, IBoard
     [McpServerTool, Description("Save a schedule or Git-event binding in the current project. Runs only while a VibeRails root is open. Omit id to create; enabled=false disables a binding.")]
     public async Task<LaunchTriggerBinding> SaveLaunchBinding(SaveBindingRequest binding, string? id = null, CancellationToken ct = default) => await service.SaveBindingAsync(await projects.ResolveAsync(ct), id, binding, ct);
 
-    [McpServerTool, Description("Queue the latest revision of a saved Agent, Quick Launch or single Action in this project's context. Stable occurrenceId deduplicates repeated delivery. A root backend must be open to execute. Inspect the returned run; enqueue is not completion.")]
-    public async Task<LaunchRun> RunLaunch(string id, string type = "preset", string? occurrenceId = null, CancellationToken ct = default)
+    [McpServerTool, Description("Queue the latest revision of a saved Agent, Quick Launch or single Action in this project's context. Stable occurrenceId deduplicates repeated delivery. A root backend must be open to execute. Inspect the returned run; enqueue is not completion. Pass card (a key or id in this project) to run it against that card, exactly as the card editor's Run does: the run gets the card's context and stays linked under the card's Agent & Automation runs.")]
+    public async Task<LaunchRun> RunLaunch(string id, string type = "preset", string? occurrenceId = null, CancellationToken ct = default,
+        [Description("Optional card key or id in this project. The run is queued with that card's context and linked to it.")] string? card = null)
     {
         var project = await projects.ResolveAsync(ct);
+        // The card editor's Run posts to the same workflow call (BoardLaunchRoutes, POST cards/{card}/launches).
+        if (!string.IsNullOrWhiteSpace(card))
+            return await (boardRuns ?? throw new LaunchValidationException("Card runs are unavailable in this host."))
+                    .EnqueueCardAsync(project, card.Trim(), new LaunchRequest(id, type, occurrenceId), ct)
+                ?? throw new LaunchValidationException("That card was not found in this project. Use its key or row ID from list_board_cards.");
         return await service.EnqueueAsync(type, id, new(project, project, "manual", "manual:" + (occurrenceId ?? Guid.NewGuid().ToString("N"))), ct);
     }
 

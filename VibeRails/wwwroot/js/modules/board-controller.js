@@ -1,6 +1,7 @@
 import { attachmentSection, createEditorAttachments } from './card-editor-attachments.js';
 import { composerMarkup, bindCardComposer } from './card-editor-composer.js';
 import { cardEditorLayout, configureCardEditorDialog } from './card-editor.js';
+import { keepShorterColumnInView } from './card-editor-columns.js';
 import { codeLinksSection, renderCodeLinks } from './board-code-links.js';
 import { AGENT_PURPOSES, agentPurposeLabel, matchesCommentFilter } from './agent-purpose.js';
 import { cardChecksSection, bindCardChecks } from './board-card-checks.js';
@@ -81,6 +82,16 @@ const CARD_TYPES = [
     { value: 'research-spike', label: 'Research spike' },
     { value: 'chore', label: 'Chore / tech debt' }
 ];
+// The values update_board_card accepts, so a person and an agent set the same things.
+const CARD_PRIORITIES = [
+    { value: 'critical', label: 'Critical' },
+    { value: 'high', label: 'High' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'low', label: 'Low' }
+];
+const CARD_POINTS = [1, 2, 3, 5, 8, 13];
+const CARD_TAG_LIMIT = 20;
+const CARD_TAG_LENGTH = 40;
 const LANE_COLORS = ['#64748b', '#3b82f6', '#06b6d4', '#f59e0b', '#10b981', '#a855f7', '#ec4899'];
 const FILTERS_STORAGE_KEY = 'viberails.board.filters.v1';
 const COLLAPSED_LANES_STORAGE_KEY = 'viberails.board.collapsedLanes.v1';
@@ -96,6 +107,25 @@ const BOARD_SNAPSHOT_MAX_AGE_MS = 60000;
 
 function cardType(value) {
     return CARD_TYPES.find(item => item.value === value) || CARD_TYPES[0];
+}
+
+/** "None" plus the point values; a tracker import's other value stays selectable so opening a card never changes it. */
+function cardPointOptions(points) {
+    const current = Number.isFinite(Number(points)) && points !== null && points !== '' ? Number(points) : null;
+    const values = current !== null && !CARD_POINTS.includes(current) ? [...CARD_POINTS, current].sort((a, b) => a - b) : CARD_POINTS;
+    return `<option value=""${current === null ? ' selected' : ''}>None</option>`
+        + values.map(value => `<option value="${value}"${value === current ? ' selected' : ''}>${value}</option>`).join('');
+}
+
+/** Comma-separated tags as the list the server stores: trimmed, no blanks, no repeats (case-insensitive). */
+function parseCardTags(text) {
+    const seen = new Set();
+    return String(text || '').split(',').map(tag => tag.trim().slice(0, CARD_TAG_LENGTH)).filter(tag => {
+        const key = tag.toLowerCase();
+        if (!tag || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    }).slice(0, CARD_TAG_LIMIT);
 }
 
 function cardActivitySnapshot(card) {
@@ -1751,6 +1781,22 @@ export class BoardController {
                                 `).join('')}
                             </select>
                         </div>
+                        <div class="board-side-pair">
+                            <div>
+                                <label class="board-editor-label" for="board-card-priority">Priority</label>
+                                <select class="form-select form-select-sm" id="board-card-priority">
+                                    ${CARD_PRIORITIES.map(priority => `
+                                        <option value="${priority.value}"${priority.value === (card?.priority || 'medium') ? ' selected' : ''}>${priority.label}</option>
+                                    `).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="board-editor-label" for="board-card-points">Points</label>
+                                <select class="form-select form-select-sm" id="board-card-points" aria-label="Story points">
+                                    ${cardPointOptions(card?.points)}
+                                </select>
+                            </div>
+                        </div>
                         <div>
                             <label class="board-editor-label" for="board-card-lane">Lane</label>
                             <select class="form-select form-select-sm" id="board-card-lane">
@@ -1879,6 +1925,13 @@ export class BoardController {
 
                     ${card ? `<section class="board-side-section"><details data-board-advanced>
                         <summary class="board-side-label">Advanced</summary>
+                        <div class="board-card-tags-field">
+                            <label class="board-editor-label" for="board-card-tags">Tags</label>
+                            <input type="text" class="form-control form-control-sm" id="board-card-tags" autocomplete="off" spellcheck="false"
+                                maxlength="${CARD_TAG_LIMIT * (CARD_TAG_LENGTH + 2)}" placeholder="payments, checkout" value="${escapeHtml((card.tags || []).join(', '))}"
+                                aria-describedby="board-card-tags-help">
+                            <p class="board-editor-muted" id="board-card-tags-help">Comma-separated, up to ${CARD_TAG_LIMIT}. Search matches them. Applied when you save.</p>
+                        </div>
                         <div data-board-ghost-controls>${ghostSettingHtml(card)}</div>
                         ${cardChecksSection()}
                         ${contextSectionMarkup()}${historySection()}
@@ -2006,12 +2059,13 @@ export class BoardController {
         });
         // Link navigation replaces this editor. Track form edits separately from link search.
         const trackEdits = event => {
-            if (event.target.closest('.board-side-fields, .board-card-status, [data-board-composer="description"], #board-card-title, #board-card-display-id'))
+            if (event.target.closest('.board-side-fields, .board-card-status, .board-card-tags-field, [data-board-composer="description"], #board-card-title, #board-card-display-id'))
                 editor._boardHasEdits = true;
         };
         editor.addEventListener('input', trackEdits);
         editor.addEventListener('change', trackEdits);
         this.composerDisposers.push(bindBoardSpelling(editor.querySelector('#board-card-title')));
+        this.composerDisposers.push(keepShorterColumnInView(editor));
         editor._boardDiscussionImages = createBoardImagePreviews(() => editor._boardCard,
             () => this.applyCommentClamps(editor.querySelector('[data-board-comments]')));
         this.composerDisposers.push(() => editor._boardDiscussionImages.dispose());
@@ -2078,7 +2132,13 @@ export class BoardController {
         editor.querySelector('[data-board-recheck-ghost]')?.addEventListener('click', () => void this.recheckCardGhost(editor));
         this.cardAutomations = bindCardAutomations(editor, card, {
             app: this.app,
-            onQueued: () => void this.refreshSessionActivity()
+            onQueued: () => void this.refreshSessionActivity(),
+            // The Runs rows above already offer these recordings; the list below must not repeat them.
+            onRuns: runs => {
+                editor._boardRuns = runs;
+                // Only that list: the rest of the sessions panel (Start work, Discuss, open terminals) is untouched.
+                if (editor.isConnected !== false && editor._boardCard?.id) this.renderRecordings(editor, editor._boardCard);
+            }
         });
         if (assigneeSelect) {
             this.assigneePickerDispose = mountLlmPicker(this.app, assigneeSelect, {
@@ -2597,7 +2657,21 @@ export class BoardController {
         this.renderOpenTerminals(editor, card);
         const sessions = card?.sessions || [];
         this.renderSessionList(editor, card, sessions.filter(session => !session.isAutomation && !session.isReview && session.origin !== 'code_review'), 'sessions');
-        this.renderSessionList(editor, card, sessions.filter(session => session.isAutomation || session.isReview || session.origin === 'code_review'), 'automations');
+        this.renderRecordings(editor, card);
+    }
+
+    // The Agent & Automation recordings under the Runs rows. An ended recording that a Runs row
+    // already links ("Recorded terminal") is listed once, there. A live one stays: its row is the
+    // way to the running terminal.
+    renderRecordings(editor, card) {
+        const runs = editor._boardRuns;
+        const recordings = (card?.sessions || []).filter(session => (session.isAutomation || session.isReview || session.origin === 'code_review')
+            && (session.active || !runs?.sessionIds.has(session.id)));
+        this.renderSessionList(editor, card, recordings, 'automations');
+        if (runs?.count) {
+            this.updateSectionCount(editor, 'automations', runs.count + recordings.length);
+            if (!recordings.length) editor.querySelector('[data-board-automations]')?.replaceChildren();
+        }
     }
 
     renderOpenTerminals(editor, card) {
@@ -2836,6 +2910,11 @@ export class BoardController {
             description: value('[data-board-composer="description"] [data-board-composer-input]'),
             columnId: value('#board-card-lane'),
             type: value('#board-card-type'),
+            // Agents set these over MCP; a person sets them here. An untouched value equals its
+            // baseline, so a save of something else never sends (or rewrites) it.
+            priority: value('#board-card-priority') || editor._boardCard?.priority || 'medium',
+            points: value('#board-card-points') === '' ? null : Number(value('#board-card-points')),
+            tags: editor.querySelector('#board-card-tags') ? parseCardTags(value('#board-card-tags')) : (editor._boardCard?.tags || []),
             assignee: value('#board-card-assignee'),
             baseLlmOptions: readBoardLaunchOptions(editor.querySelector('[data-board-worker-launch-options]') || editor, value('#board-card-assignee')),
             workflowMode: value('#board-card-workflow') === 'agent' ? 'agent' : 'manual',

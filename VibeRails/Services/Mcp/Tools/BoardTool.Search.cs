@@ -12,7 +12,12 @@ public sealed partial class BoardTool
     public async Task<string> SearchBoardCards(
         [Description("Natural-language query, exact card key, display ID or row ID; at most 1000 characters.")] string query,
         [Description("Maximum matches, from 1 to 50; defaults to 20.")] int maxResults = 20,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        [Description("Only cards assigned to this LLM picker key, e.g. base:claude; a bare provider name such as claude means its base key. Optional.")] string? assignee = null,
+        [Description("Only cards of this type: task | bug | feature | research-spike | chore. Optional.")] string? type = null,
+        [Description("Only cards of this priority: critical | high | medium | low. Optional.")] string? priority = null,
+        [Description("Only cards of this origin: agent (made by an agent), human, remote (first received from viberails.ai), jira or ado. Optional.")] string? origin = null,
+        [Description("true: only ghost cards; false: exclude ghost cards; omitted: all cards.")] bool? ghost = null)
     {
         try
         {
@@ -20,8 +25,12 @@ public sealed partial class BoardTool
             if (query.Length > 1000) return "FAIL: query is limited to 1000 characters.";
             if (search is null) return "FAIL: Board search is unavailable in this host.";
             var project = await projects.ResolveAsync(cancellationToken);
-            var hits = await search.SearchAsync(project, query, Math.Clamp(maxResults, 1, 50), ct: cancellationToken, rerank: true);
-            if (hits.Count == 0) return "No cards match across the local boards.";
+            // The dashboard search's own filters, applied before ranking and the result limit.
+            var filtered = !string.IsNullOrWhiteSpace(assignee) || !string.IsNullOrWhiteSpace(type) || !string.IsNullOrWhiteSpace(priority)
+                || !string.IsNullOrWhiteSpace(origin) || ghost is not null;
+            var hits = await search.SearchAsync(project, query, Math.Clamp(maxResults, 1, 50), ct: cancellationToken, rerank: true,
+                filters: filtered ? new(ExpandAssignee(assignee), type, priority, origin, ghost) : null);
+            if (hits.Count == 0) return filtered ? "No cards match that query with those filters across the local boards." : "No cards match across the local boards.";
             var output = new StringBuilder("Local Board search (current repository preferred):\n");
             foreach (var hit in hits)
             {

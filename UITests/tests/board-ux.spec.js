@@ -2086,6 +2086,8 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
             '/api/v1/context': { isInGit: true, rootPath: 'C:/board-fixture', launchDirectory: 'C:/board-fixture' },
             '/api/v1/settings': appSettings,
             '/api/v1/environments': { environments: [{ id: 7, name: 'Card review', cli: 'claude' }] },
+            // The server answers with a list; the shared editor's Projects picker maps over it (VIBE-307).
+            '/api/v1/launch-projects': [],
             '/api/v1/llm-picker/preferences': { items: [
                 { key: 'base:codex', kind: 'base', group: 'Base CLIs', label: 'Codex', cli: 'codex', enabled: true, order: 0 },
                 { key: 'base:claude', kind: 'base', group: 'Base CLIs', label: 'Claude', cli: 'claude', enabled: true, order: 1 },
@@ -3975,7 +3977,10 @@ test('Automation recordings have their own rail and live robot without overwriti
     await expect(editor.locator('[data-board-count="sessions"]')).toHaveText('1');
     await expect(editor.locator('[data-board-count="automations"]')).toHaveText('2');
     await expect(editor.locator('[data-board-automations] [data-board-open-session="automation_session"]')).toBeEnabled();
-    await expect(editor.locator('#board-card-priority, #board-card-points, #board-card-tags')).toHaveCount(0);
+    // A person sets what an agent sets over MCP. The stored values show, and a save of something else leaves them alone.
+    await expect(editor.locator('#board-card-priority')).toHaveValue('critical');
+    await expect(editor.locator('#board-card-points')).toHaveValue('8');
+    await expect(editor.locator('#board-card-tags')).toHaveValue('keep-stored');
     await expect(editor.getByText('Uses this CLI', { exact: false })).toHaveCount(0);
     await expect(editor.locator('[data-board-launch-yolo]')).toBeVisible();
     await editor.locator('#board-card-title').fill('My unsaved title');
@@ -3998,6 +4003,84 @@ test('Automation recordings have their own rail and live robot without overwriti
     const payload = (await savedRequest).postDataJSON();
     for (const field of ['priority', 'points', 'tags']) expect(Object.hasOwn(payload, field)).toBe(false);
     expect(card.priority).toBe('critical'); expect(card.points).toBe(8); expect(card.tags).toEqual(['keep-stored']);
+});
+
+for (const width of [1440, 390]) {
+    test(`priority, points and tags are editable and only a changed one is saved at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        const requests = await openBoard(page, { onCard(card) { card.priority = 'low'; card.points = 4; card.tags = ['imported']; } });
+        await page.locator('.board-card').click();
+        const editor = page.locator('[data-board-card-editor]');
+        const priority = editor.getByLabel('Priority', { exact: true });
+        await expect(priority).toHaveValue('low');
+        // A tracker's other point value stays selectable, so opening the card never rewrites it.
+        await expect(editor.locator('#board-card-points')).toHaveValue('4');
+        await expect(editor.locator('#board-card-points option')).toHaveText(['None', '1', '2', '3', '4', '5', '8', '13']);
+        const pair = await editor.locator('.board-side-pair').evaluate(el => {
+            const [left, right] = [...el.children].map(child => child.getBoundingClientRect());
+            return { sameRow: Math.abs(left.top - right.top) < 2, fits: el.scrollWidth <= el.clientWidth + 1 };
+        });
+        expect(pair).toEqual({ sameRow: true, fits: true });
+        await priority.selectOption('critical');
+        await editor.getByText('Advanced', { exact: true }).click();
+        await editor.getByLabel('Tags', { exact: true }).fill(' payments, Checkout , payments,, ');
+        expect(await editor.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`card-priority-points-tags-${width}.png`) });
+        const saved = page.waitForRequest(request => request.method() === 'PUT' && new URL(request.url()).pathname === '/api/v1/board/cards/card_test');
+        await editor.locator('[data-board-save-card]').click();
+        expect((await saved).postDataJSON()).toEqual({ priority: 'critical', tags: ['payments', 'Checkout'] });
+        expect(requests.filter(request => request.method === 'PUT' && request.path === '/api/v1/board/cards/card_test')).toHaveLength(1);
+    });
+}
+
+test('a recording that a Runs row already links is listed once; a live one keeps its own row', async ({ page }) => {
+    await openBoard(page, { assignee: 'base:codex', onCard(card) {
+        card.sessions.push({ id: 'ended_recording', displayName: 'Review code', cli: 'codex', isAutomation: true, active: false, createdAt: '2026-09-24T18:00:00Z' });
+        card.sessions.push({ id: 'live_recording', tabId: 'automation_tab', displayName: 'Docs update', cli: 'codex', isAutomation: true, active: true, createdAt: '2026-09-25T18:00:00Z' });
+        card.sessions.push({ id: 'unlisted_recording', displayName: 'Older check', cli: 'shell', isAutomation: true, active: false, createdAt: '2026-09-20T18:00:00Z' });
+    } });
+    const state = await installLaunchFixture(page);
+    const run = (id, sessionId, name) => ({ id, status: 'succeeded', sessionId, endedUtc: '2026-09-25T19:00:00Z', snapshot: { preset: { name }, context: { cardId: 'card_test' } } });
+    state.runs.push(run('run_ended', 'ended_recording', 'Review code'), run('run_live', 'live_recording', 'Docs update'));
+    await page.locator('.board-card .board-card-title').click();
+    const editor = page.locator('[data-board-card-editor]');
+    await expect(editor.locator('[data-board-automation-runs] .board-step-run.is-history')).toHaveCount(2);
+    await expect(editor.locator('[data-board-automation-runs] [data-launch-replay="ended_recording"]')).toBeVisible();
+    // The ended recording is on its Runs row only; the live one and the one no run links stay below.
+    const recordings = editor.locator('[data-board-automations] [data-session-id]');
+    await expect(recordings).toHaveCount(2);
+    await expect(editor.locator('[data-board-automations]')).not.toContainText('Review code');
+    await expect(editor.locator('[data-board-automations]')).toContainText('Docs update');
+    await expect(editor.locator('[data-board-automations]')).toContainText('Older check');
+    await expect(editor.locator('[data-board-count="automations"]')).toHaveText('4');
+    // A background refresh keeps it that way.
+    await page.evaluate(() => window.app.boardController.refreshSessionActivity({ forceDetail: true }));
+    await expect(recordings).toHaveCount(2);
+});
+
+test('the shorter editor column stays in view while the longer one scrolls', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 800 });
+    await openBoard(page, { onCard(card) { card.description = 'Short card'; card.comments = []; card.attachments = []; } });
+    await page.locator('.board-card').click();
+    const editor = page.locator('[data-board-card-editor]');
+    const measure = () => editor.evaluate(el => {
+        const scroller = el.querySelector('.board-editor-scroll').getBoundingClientRect();
+        const main = el.querySelector('.board-editor-main').getBoundingClientRect(), side = el.querySelector('.board-editor-side').getBoundingClientRect();
+        return { scrollerTop: scroller.top, scrollerBottom: scroller.bottom, mainTop: main.top, mainBottom: main.bottom, sideTop: side.top, sideBottom: side.bottom };
+    });
+    const before = await measure();
+    // The fixture is the usual case: the rail is the longer column.
+    expect(before.sideBottom - before.sideTop).toBeGreaterThan(before.mainBottom - before.mainTop + 200);
+    await editor.locator('.board-editor-scroll').evaluate(el => el.scrollTo(0, el.scrollHeight));
+    const after = await measure();
+    // The rail reached its end, and the card column is still on screen instead of a blank half.
+    expect(Math.abs(after.sideBottom - after.scrollerBottom)).toBeLessThan(2);
+    // A column taller than the dialog holds its last screenful; a shorter one stays at the top.
+    expect(Math.min(Math.abs(after.mainBottom - after.scrollerBottom), Math.abs(after.mainTop - after.scrollerTop))).toBeLessThan(2);
+    expect(after.mainTop).toBeLessThanOrEqual(after.scrollerTop + 1);
+    await expect(editor.locator('[data-board-composer="comment"] [data-board-composer-input]')).toBeInViewport();
+    // One scrollbar still: neither column scrolls on its own.
+    expect(await editor.evaluate(el => ['.board-editor-main', '.board-editor-side'].map(selector => getComputedStyle(el.querySelector(selector)).overflowY))).toEqual(['visible', 'visible']);
 });
 
 const savedReview = (id, changes = {}) => ({

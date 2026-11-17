@@ -49,7 +49,7 @@ public sealed class BoardAgentLaunchTool
         if (selection is not null && (intent is "work" or "manager"))
             return "FAIL: selection overrides are supported only for worker or code_review launches; save the manager on the card.";
         if (selection is not null && !VibeRails.Services.Board.BoardSelection.TryParse(selection, out _))
-            return "FAIL: selection must be an enabled base agent or saved environment picker key.";
+            return "FAIL: selection must be an enabled base agent or saved Agent picker key from list_board_agent_options.";
 
         var sessionToken = readEnvironment(LocalToolApiContext.SessionTokenVariable);
         var tabToken = readEnvironment(LocalToolApiContext.TabTokenVariable);

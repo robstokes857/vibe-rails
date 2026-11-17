@@ -92,9 +92,15 @@ public sealed partial class BoardTool
             if (selected is null)
             {
                 var entries = await store.GetLaunchEventsAsync(target.Project, detail.Id, cancellationToken);
-                foreach (var entry in entries)
+                // The description promises the newest twenty. The store returns every entry the card
+                // ever recorded, oldest first, so a card that crossed many lanes filled the reply.
+                const int entryLimit = 20;
+                if (entries.Count > entryLimit)
+                    text.Append('(').Append(entries.Count - entryLimit).AppendLine(" earlier lane entries not shown.)");
+                foreach (var entry in entries.Skip(Math.Max(0, entries.Count - entryLimit)))
                 {
-                    text.Append("- Lane entry ").Append(entry.Id).Append(" · ").Append(entry.DefinitionId)
+                    // report_automation_step and skip_lane_step ask for "eventKey": it is this id, so it is labelled.
+                    text.Append("- Lane entry · eventKey ").Append(entry.Id).Append(" · ").Append(await LaneDefinitionLabelAsync(entry.DefinitionId, cancellationToken))
                         .Append(" · current: ").Append(entry.Current).Append(" · process: ").Append(entry.ProcessStatus)
                         .Append(" · verdict: ").Append(entry.Verdict ?? "awaiting explicit result").Append(" · run: ").AppendLine(entry.RunId ?? "not queued");
                     // VIBE-338: an agent's skip carries its reason, so the reviewer and the owner see why.
@@ -114,6 +120,14 @@ public sealed partial class BoardTool
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (Exception ex) when (ex is not OperationCanceledException) { return Fail("read agent status", ex); }
+    }
+
+    /// <summary>The Agent's or Action's name with its id, or the id alone when the definition no longer resolves.</summary>
+    private async Task<string> LaneDefinitionLabelAsync(string definitionId, CancellationToken cancellationToken)
+    {
+        if (launches is null || string.IsNullOrEmpty(definitionId)) return definitionId;
+        var name = (await launches.GetPresetAsync(definitionId, cancellationToken))?.Name ?? (await launches.GetActionAsync(definitionId, cancellationToken))?.Name;
+        return string.IsNullOrWhiteSpace(name) ? definitionId : $"\"{BoardPromptComposer.SanitizeLine(name, 120)}\" ({definitionId})";
     }
 
     private static string FormatLaneStatuses(IReadOnlyList<BoardLaneAutomationStatus> entries)

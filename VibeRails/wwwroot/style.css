@@ -6327,7 +6327,9 @@ h6 {
     border-top: 1px solid var(--color-border);
 }
 
+/* Six sections (General, both trackers, Manager, Context, History) share one row of the dialog. */
 .board-settings-nav .nav-link {
+    padding-inline: 1rem;
     border: 1px solid var(--color-border);
 }
 
@@ -6394,8 +6396,19 @@ h6 {
     box-shadow: 0 0 0 2px rgba(91, 42, 134, 0.25);
 }
 
+/* The theme's close mark is already white. Inverting it painted a black X on the dark dialogs,
+   where it could not be seen; only a light VS Code theme needs the dark mark. */
 .btn-close {
-    filter: invert(1) grayscale(100%) brightness(200%);
+    filter: none;
+    opacity: 0.75;
+}
+
+.btn-close:is(:hover, :focus-visible) {
+    opacity: 1;
+}
+
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body:is(.vscode-light, .vscode-high-contrast-light) .btn-close {
+    filter: invert(1);
 }
 
 .modal-title { font: 600 21px/1.4 var(--font-display); letter-spacing: normal; text-transform: none; }

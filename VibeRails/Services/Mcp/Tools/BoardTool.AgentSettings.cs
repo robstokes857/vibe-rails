@@ -9,14 +9,14 @@ public sealed partial class BoardTool
     {
         if (options is null) return;
         if (!BoardSelection.TryParse(assignee, out var selection) || selection is null || (selection.IsEnvironment || selection.IsPreset))
-            throw new BoardValidationException("baseLlmOptions requires a base CLI assignee such as base:codex. Saved environments use their own launch settings.");
+            throw new BoardValidationException("baseLlmOptions requires a base CLI assignee such as base:codex. Saved Agents use their own launch settings.");
     }
 
     private static string DescribeAgentSettings(string? assignee, BaseLlmOptions? options)
     {
         if (string.IsNullOrWhiteSpace(assignee)) return "Saved agent: unassigned.";
         if (BoardSelection.TryParse(assignee, out var selection) && (selection!.IsEnvironment || selection.IsPreset))
-            return $"Saved agent: {assignee}; uses the saved environment's launch settings.";
+            return $"Saved agent: {assignee}; uses that saved Agent's own launch settings.";
         return $"Saved agent: {assignee}; model={Setting(options?.Model)}; effort={Setting(options?.Effort)}; "
             + $"speed={Setting(options?.Speed)}; mode={Setting(options?.Mode)}; yolo={(options?.Yolo == true ? "true" : "false")}."
             + " Default values inherit the CLI configuration; these are saved launch settings, not a running session's effective settings.";

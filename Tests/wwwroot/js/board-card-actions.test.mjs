@@ -468,10 +468,20 @@ test('Go to agent refreshes an incomplete active session and opens its tab', asy
 });
 
 
-test('Card edits omit retired fields so existing priority, points and tags survive', async () => {
+test('Card edits send priority, points and tags only when the person changed them', async () => {
     const h = harness();
+    // What the editor read when it opened: the stored values it still shows.
+    h.editor._boardFormBaseline = h.controller.readCardForm(h.editor);
+    h.fields['#board-card-title'].value = 'Another title';
     await h.controller.saveCard(h.editor);
+    // An unrelated save never sends them, so values an agent or a tracker import set survive.
     for (const field of ['priority', 'points', 'tags']) assert.equal(Object.hasOwn(h.calls[0].body, field), false);
+
+    h.fields['#board-card-priority'].value = 'critical';
+    h.fields['#board-card-points'].value = '';
+    h.fields['#board-card-tags'].value = 'bug, Auth, bug, ';
+    await h.controller.saveCard(h.editor);
+    assert.deepEqual(h.calls[1].body, { priority: 'critical', points: null, tags: ['bug', 'Auth'] });
 });
 
 function boardEditorHarness(values) {

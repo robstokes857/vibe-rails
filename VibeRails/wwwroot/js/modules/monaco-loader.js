@@ -84,7 +84,10 @@ export function ensureMonaco() {
         }
 
         const assetsBase = (window.__viberails_ASSETS_BASE__ || '').replace(/\/$/, '');
-        const vsPath = assetsBase ? `${assetsBase}/assets/monaco/vs` : 'assets/monaco/vs';
+        // Absolute: Monaco starts its language workers from a blob, where a relative path has no
+        // base. 'assets/monaco/vs' made the TypeScript worker fail to load tsWorker.js on every
+        // .ts/.js file the dashboard opened.
+        const vsPath = assetsBase ? `${assetsBase}/assets/monaco/vs` : new URL('assets/monaco/vs', document.baseURI).href;
         const cspNonce = window.__viberails_NONCE__ || undefined;
         amdRequire.config({ paths: { vs: vsPath }, cspNonce });
 

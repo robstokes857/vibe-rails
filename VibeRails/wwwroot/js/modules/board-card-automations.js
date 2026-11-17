@@ -5,16 +5,17 @@ import { agentSkipNoticeMarkup, cardRunRowMarkup, laneEntryRowMarkup, toggleStep
 
 export function cardAutomationControls(saved) {
     if (!saved) return '<p class="board-side-empty">Save the card to run an Agent or Action on it.</p>';
-    return `<div data-board-automation-controls><label>Agent or Action<select class="form-select" data-board-automation-choice><option value="">Loading…</option></select></label><button class="btn btn-sm btn-outline-primary" data-board-run-automation>Run</button><p class="board-side-empty">Uses the saved card. The run stays linked here.</p><div data-board-automation-runs></div><p data-board-automation-message role="status"></p></div>`;
+    return `<div data-board-automation-controls><label class="board-editor-label">Agent or Action<select class="form-select form-select-sm mt-1" data-board-automation-choice><option value="">Loading…</option></select></label><button class="btn btn-sm btn-outline-primary" data-board-run-automation>Run</button><p class="board-side-empty">Uses the saved card. The run stays linked here.</p><div data-board-automation-runs></div><p data-board-automation-message role="status"></p></div>`;
 }
 
-export function bindCardAutomations(editor, card, { app, onQueued }) {
+export function bindCardAutomations(editor, card, { app, onQueued, onRuns }) {
     const host=editor.querySelector('[data-board-automation-controls]');
     if(!host || !card?.id)return null;
     const api=new LaunchApi(app), abort=new AbortController();
     const select=host.querySelector('[data-board-automation-choice]'), button=host.querySelector('[data-board-run-automation]'), message=host.querySelector('[data-board-automation-message]'), list=host.querySelector('[data-board-automation-runs]');
     const previews = new Set();
-    let items=[], loading=false, busy=false, rendered='', listMarkup='';
+    // No runs is what the editor already shows, so the first empty answer changes nothing.
+    let items=[], loading=false, busy=false, rendered='', listMarkup='', recordedKey='0|';
     const current=()=>!abort.signal.aborted && host.isConnected;
     async function refresh() {
         if(!current() || loading || busy)return;
@@ -27,6 +28,10 @@ export function bindCardAutomations(editor, card, { app, onQueued }) {
             const markup='<option value="">Choose…</option>'+items.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} (${escapeHtml(item.kind)})</option>`).join('');
             if(markup!==rendered){const selected=select.value;select.innerHTML=rendered=markup;if(items.some(item=>item.id===selected))select.value=selected;}
             const runs=page?.runs||[];
+            // A run row offers its own recording, so the recordings list below it leaves that session out.
+            const recorded=[...new Set(runs.map(run=>run.sessionId).filter(Boolean))].sort();
+            const nextKey=`${runs.length}|${recorded.join('|')}`;
+            if(nextKey!==recordedKey){recordedKey=nextKey;onRuns?.({sessionIds:new Set(recorded),count:runs.length});}
             // Readable rows (VIBE-338): a status pill per step, the report only when it says more
             // than the pill, and an agent's open skip with its reason until a person dismisses it.
             const laneEntries=(entries||[]).filter(entry=>entry.current);

@@ -132,6 +132,26 @@ saved launch settings and must not imply a running agent was reconfigured.
 saved assignment through the existing project-scoped root route and returns a session to poll.
 See the [MCP contract](../Mcp/AGENTS.md#board-agent-assignment-and-launch).
 
+## Card field and read parity
+
+What a person sets or reads on a card, an agent sets or reads over MCP, and the reverse. The
+card editor has **Priority** and **Points** beside Type and **Tags** under Advanced; they are
+part of `readCardForm`, so only a value the person changed is sent and an untouched one (an
+agent's, a tracker import's) is never rewritten. `update_board_card` takes `pinned` (a scoped
+write through `SetCardPinnedAsync`, never an edit or a promotion when it is the only argument)
+and `displayId`; `create_board_card` takes `points` and `blocked`; `list_board_cards` and
+`search_board_cards` take the toolbar's filters; `read_board_commit` reads a linked commit's
+saved snapshot; `run_launch(card=…)` queues an Agent or Action against a card like the editor's
+Run. Lane and board structure, deletes, merges, links between cards and History stay in the
+dashboard. When a card field or filter is added on one side, add it on the other in the same
+change, with a test in `BoardToolTests.*Parity.cs` or `board-ux.spec.js`.
+
+The editor's two columns share one scroll region. The rail is usually the longer one, so each
+column is sticky at an offset set by `card-editor-columns.js`: the shorter column stays in view
+(a column taller than the dialog holds its last screenful) instead of leaving a blank half.
+Under **Agent & Automation runs**, an ended recording that a Runs row already links is listed
+once, on that row; a live recording keeps its own row because it opens the running terminal.
+
 ## Desktop MCP activity
 
 Desktop activity is independent of terminal activity: `HasActiveDesktopAgent` is projected

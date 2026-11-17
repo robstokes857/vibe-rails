@@ -710,6 +710,20 @@ request that does not attach its own session (Codex slice E review, F1). The roo
 are relayed with their code; unparsed answers report only the status; exception text is never
 relayed. See [Request review from a card](#request-review-from-a-card-and-request_review-vb-50-slice-e).
 
+`read_board_commit` (both transports, in the Board launch grant list) reads the saved snapshot of
+a commit already linked to the resolved card: the changed-file list, or one file's saved before
+and after text in bounded chunks (250,000 characters a side at most). It takes a sha, a card and
+a file path that must match a saved entry; it never runs Git, opens the checkout or accepts a
+filesystem path, so it exposes only what the card editor's diff viewer already shows. Its output
+is untrusted task data. `update_board_card` gained `pinned` and `displayId`, `create_board_card`
+`points` and `blocked`, and `search_board_cards` the dashboard search's filters: the same shared
+service validation and card resolution as before, no new tool, grant or listener.
+
+`run_launch` accepts an optional `card`. It resolves the card in the caller's project only and
+queues through `BoardLaunchWorkflow.EnqueueCardAsync`, the call behind the card editor's Run:
+the same shared admission, project scope, script approval and immutable snapshot as a run without
+a card, plus that card's context. The launch tools stay outside the Board auto-grants.
+
 Board Start work and Board-triggered Workers use the exact per-tool grants in
 [BoardMcpAuthorization](VibeRails/Services/Terminal/Commands/BoardMcpAuthorization.cs).
 These explicit Board grants default off on other launches; card text/environment names cannot

@@ -110,7 +110,7 @@ public sealed partial class BoardTool(
             var target = await ResolveBoardAsync(project, board, cancellationToken);
             if (target.Error is not null)
                 return target.Error;
-            return await RenderLanesAsync(service, store, target.Project, target.BoardId, target.BoardName, cancellationToken);
+            return await RenderLanesAsync(service, store, target.Project, target.BoardId, target.BoardName, cancellationToken, launches);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -122,7 +122,8 @@ public sealed partial class BoardTool(
     /// Everything list_board_columns returns, assembled from the service so the Board context
     /// estimator (VB-63) can measure exactly what an agent would read.
     /// </summary>
-    internal static async Task<string> RenderLanesAsync(IBoardService service, IBoardStore store, string project, string? boardId, string? boardName, CancellationToken cancellationToken)
+    internal static async Task<string> RenderLanesAsync(IBoardService service, IBoardStore store, string project, string? boardId, string? boardName, CancellationToken cancellationToken,
+        VibeRails.Launches.ILaunchStore? launches = null)
     {
         var columns = await service.GetColumnsAsync(project, cancellationToken, boardId);
         // A count query: the list only needs how many cards each lane holds, not the cards or their live sessions.
@@ -138,15 +139,15 @@ public sealed partial class BoardTool(
             var count = counts.GetValueOrDefault(column.Id);
             builder.Append("- ").Append(column.Name)
                 .Append(" (id ").Append(column.Id).Append(", ").Append(count).Append(" card").Append(count == 1 ? "" : "s");
+            // The lane create_board_card uses when no lane is named (Lane settings, "Newly created cards land here").
+            if (column.IsDefaultForNewCards) builder.Append(", default lane for new cards");
             builder.Append(")\n");
-            var launchLane = await store.GetLaunchLaneAsync(project, column.Id, cancellationToken);
-            foreach (var selection in launchLane?.Selections ?? [])
-                builder.Append("  on entry: ").Append(selection.DefinitionType).Append(' ').Append(selection.DefinitionId)
-                    .Append("; gate: ").Append(selection.Gate).AppendLine(". Single run; inspect launch catalog for details.");
+            // One line per entry. The current selections are already in this list; they used to be
+            // printed a second time by definition id alone.
             foreach (var automation in automations[column.Id])
             {
                 anyAutomation = true;
-                builder.Append("  on entry: ").Append(AutomationDetail(automation)).Append('\n');
+                builder.Append("  on entry: ").Append(AutomationDetail(await NameLaneEntryAsync(automation, launches, cancellationToken))).Append('\n');
             }
         }
         if (anyAutomation)
@@ -154,14 +155,30 @@ public sealed partial class BoardTool(
         return builder.ToString().TrimEnd();
     }
 
-    [McpServerTool, Description("List cards on a local VibeRails board: permanent key, lane, type, priority, title, assignee, comments, ghost and open session. Select any local board with board=<id> from list_boards. Optional filters by lane, assignee, type and ghost. " + GhostGuidance)]
+    /// <summary>
+    /// A current lane selection is stored by definition id. The lane panel shows the Agent's or
+    /// Action's name, so agents read the same name, with the id kept beside it for the launch tools.
+    /// A definition that no longer resolves keeps its id as its name.
+    /// </summary>
+    private static async Task<BoardLaneAutomationInfo> NameLaneEntryAsync(BoardLaneAutomationInfo entry, VibeRails.Launches.ILaunchStore? launches, CancellationToken cancellationToken)
+    {
+        if (launches is null || entry.DefinitionId is not { Length: > 0 } id) return entry;
+        var name = (await launches.GetPresetAsync(id, cancellationToken))?.Name ?? (await launches.GetActionAsync(id, cancellationToken))?.Name;
+        return string.IsNullOrWhiteSpace(name) ? entry
+            : entry with { Name = BoardPromptComposer.SanitizeLine(name, 120), Summary = $"{entry.Summary}; id {id}" };
+    }
+
+    [McpServerTool, Description("List cards on a local VibeRails board: permanent key, lane, type, priority, title, assignee, workflow, pin, comments, ghost and open session. Select any local board with board=<id> from list_boards. Optional filters by lane, assignee, type, priority, flagged, blocked and ghost. " + GhostGuidance)]
     public async Task<string> ListBoardCards(
         [Description("Only cards in this lane (name or id). Optional.")] string? column = null,
-        [Description("Only cards assigned to this LLM picker key, e.g. base:claude or env:7:codex. Optional.")] string? assignee = null,
+        [Description("Only cards assigned to this LLM picker key from list_board_agent_options, e.g. base:claude. A bare provider name such as claude means its base key. Optional.")] string? assignee = null,
         [Description("Only cards of this type: task | bug | feature | research-spike | chore. Optional.")] string? type = null,
         [Description(BoardArgumentHelp)] string? board = null,
         CancellationToken cancellationToken = default,
-        [Description("true: only ghost cards; false: exclude ghost cards; omitted: all cards.")] bool? ghost = null)
+        [Description("true: only ghost cards; false: exclude ghost cards; omitted: all cards.")] bool? ghost = null,
+        [Description("Only cards of this priority: low | medium | high | critical. Optional.")] string? priority = null,
+        [Description("true: only cards flagged as needing the user's attention; false: exclude them; omitted: all cards.")] bool? flagged = null,
+        [Description("true: only blocked cards; false: exclude them; omitted: all cards.")] bool? blocked = null)
     {
         try
         {
@@ -183,12 +200,21 @@ public sealed partial class BoardTool(
                 cards = cards.Where(c => c.ColumnId == lane.Id);
             }
             if (!string.IsNullOrWhiteSpace(assignee))
-                cards = cards.Where(c => string.Equals(c.Assignee, assignee.Trim(), StringComparison.OrdinalIgnoreCase));
+            {
+                // The same shorthand create and update accept: "claude" is base:claude.
+                var wanted = ExpandAssignee(assignee)!.Trim();
+                cards = cards.Where(c => string.Equals(c.Assignee, wanted, StringComparison.OrdinalIgnoreCase));
+            }
             if (!string.IsNullOrWhiteSpace(type))
             {
                 var normalizedType = BoardService.NormalizeCardType(type);
                 cards = cards.Where(c => string.Equals(c.Type, normalizedType, StringComparison.Ordinal));
             }
+            // The dashboard toolbar filters on priority, and its header counts flagged and blocked cards.
+            if (!string.IsNullOrWhiteSpace(priority))
+                cards = cards.Where(c => string.Equals(c.Priority, priority.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (flagged is bool onlyFlagged) cards = cards.Where(c => c.Flagged == onlyFlagged);
+            if (blocked is bool onlyBlocked) cards = cards.Where(c => c.Blocked == onlyBlocked);
 
             var rows = cards.OrderBy(c => columns.TryGetValue(c.ColumnId, out var lane) ? lane.Position : int.MaxValue).ThenBy(c => c.Position).ToList();
             if (ghost is bool onlyGhosts) rows = rows.Where(card => (card.GhostReason is not null) == onlyGhosts).ToList();
@@ -203,6 +229,10 @@ public sealed partial class BoardTool(
                     .Append("] [").Append(BoardCardTypes.Label(card.Type)).Append("] (")
                     .Append(card.Priority).Append(") ").Append(card.Title);
                 if (!string.IsNullOrWhiteSpace(card.Assignee)) builder.Append(" — assignee ").Append(card.Assignee);
+                // What the tile shows beside the type: an Agent workflow card and who manages it, and the pin.
+                if (card.WorkflowMode == "agent")
+                    builder.Append(" — Agent workflow, ").Append(string.IsNullOrWhiteSpace(card.ManagerSelection) ? "board manager" : "manager " + card.ManagerSelection);
+                if (card.Pinned) builder.Append(" — pinned");
                 if (card.Blocked) builder.Append(" — BLOCKED");
                 if (card.Flagged) builder.Append(" — FLAGGED: needs your attention");
                 if (card.GhostReason is not null) builder.Append(" — GHOST: ").Append(card.GhostReason == BoardGhostReasons.NoCode ? "no linked code" : "linked code has not landed on the default branch");
@@ -415,12 +445,14 @@ public sealed partial class BoardTool(
             + "Do not invent one. Ignored when this MCP server already knows the launching session.")] string? sessionId = null,
         CancellationToken cancellationToken = default,
         McpServer? server = null,
-        [Description("LLM picker key from list_board_agent_options, e.g. base:codex or env:7:codex, or a bare provider name such as claude or codex. "
+        [Description("LLM picker key from list_board_agent_options, e.g. base:codex or a saved Agent's key, or a bare provider name such as claude or codex. "
             + "Omitted: a VibeRails terminal assigns the card to its own LLM; other clients leave it unassigned. Pass an empty string to create it unassigned.")] string? assignee = null,
         [Description("Base CLI launch settings, matching the Board UI: model, effort, mode, yolo, speed. Example: {model: gpt-6-astra, effort: xhigh, speed: ultrafast}. Only valid with a base assignee; saved environments use their own settings.")] BaseLlmOptions? baseLlmOptions = null,
         [Description("manual (default) | agent. Agent gives a selected manager responsibility for the card's pipeline.")] string? workflowMode = null,
         [Description("Manager picker key from list_board_agent_options; separate from worker assignee. Required for agent workflow unless the AI board manager is on and the board has a manager (Board settings > Manager): omit it there to hand the card to the board manager.")] string? managerSelection = null,
-        [Description("Saved base CLI settings for the manager. Saved environments use their own settings.")] BaseLlmOptions? managerBaseLlmOptions = null)
+        [Description("Saved base CLI settings for the manager. Saved environments use their own settings.")] BaseLlmOptions? managerBaseLlmOptions = null,
+        [Description("Story points: 1, 2, 3, 5, 8 or 13. Optional.")] int? points = null,
+        [Description("Create the card already marked blocked. Optional.")] bool? blocked = null)
     {
         try
         {
@@ -460,7 +492,8 @@ public sealed partial class BoardTool(
                 // (a hand-driven call) stays a human card.
                 AgentMade: author.Kind == BoardAuthor.AgentKind,
                 AgentMadeBy: maker.Name, AgentMadeSessionId: maker.SessionId,
-                WorkflowMode: workflowMode, ManagerSelection: managerSelection, ManagerBaseLlmOptions: managerBaseLlmOptions), cancellationToken, author);
+                WorkflowMode: workflowMode, ManagerSelection: managerSelection, ManagerBaseLlmOptions: managerBaseLlmOptions,
+                Points: points is null or 0 ? default : PointsElement(points.Value), Blocked: blocked), cancellationToken, author);
             await AutoLinkSessionAsync(project, created.Id, cancellationToken);
             await TrackDesktopActivityAsync(server, project, created.Id, author.Label, cancellationToken);
             return $"Created {created.Key}: {created.Title}"
@@ -501,9 +534,11 @@ public sealed partial class BoardTool(
         [Description("Clear the saved base CLI options. Cannot be combined with baseLlmOptions.")] bool clearBaseLlmOptions = false,
         [Description("manual | agent. Omitted preserves the card's workflow.")] string? workflowMode = null,
         [Description("Manager picker key. Empty clears it when switching to manual, or hands an Agent card to the board manager while the AI board manager is on and the board has one; omitted preserves it. Changing manager clears its old base settings.")] string? managerSelection = null,
-        [Description("Replace all saved manager base CLI settings; saved environments reject overrides.")] BaseLlmOptions? managerBaseLlmOptions = null,
+        [Description("Replace all saved manager base CLI settings; saved Agents reject overrides.")] BaseLlmOptions? managerBaseLlmOptions = null,
         [Description("Clear saved manager base CLI options. Cannot be combined with managerBaseLlmOptions.")] bool clearManagerBaseLlmOptions = false,
-        [Description("Explicitly dismiss this card's ghost marker. This does not verify code landing or delete linked evidence. To verify after a merge, use recheck_board_ghost instead.")] bool clearGhost = false)
+        [Description("Explicitly dismiss this card's ghost marker. This does not verify code landing or delete linked evidence. To verify after a merge, use recheck_board_ghost instead.")] bool clearGhost = false,
+        [Description("Pin (true) or unpin (false) the card, as the tile's pin does: a pinned card keeps its slot when other cards' activity would move it. Does not move the card or count as activity. Omitted preserves the pin.")] bool? pinned = null,
+        [Description("New display ID, the label people call the card by (at most 32 characters, unique in the project). The permanent key never changes. Change it only when the user asks.")] string? displayId = null)
     {
         try
         {
@@ -512,6 +547,17 @@ public sealed partial class BoardTool(
                 return target.Error;
             if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
                 return UnnamedClientHint;
+            // The pin is its own scoped write (it never promotes the card or logs an edit), so a
+            // call that only pins must not also run an empty update that would do both.
+            if (pinned is not null && title is null && description is null && descriptionAppend is null && priority is null && points is null && tags is null
+                && blocked is null && type is null && flagged is null && flagReason is null && assignee is null && baseLlmOptions is null && !clearBaseLlmOptions
+                && workflowMode is null && managerSelection is null && managerBaseLlmOptions is null && !clearManagerBaseLlmOptions && !clearGhost && displayId is null)
+            {
+                var pinnedCard = await service.SetCardPinnedAsync(target.Project, target.CardId!, pinned.Value, cancellationToken);
+                if (pinnedCard is null) return $"FAIL: card not found: {card}";
+                await TrackDesktopActivityAsync(server, target.Project, pinnedCard.Id, author.Label, cancellationToken);
+                return $"{(pinned.Value ? "Pinned" : "Unpinned")} {pinnedCard.Key}: {pinnedCard.Title}";
+            }
             if (clearBaseLlmOptions && baseLlmOptions is not null)
                 return "FAIL: supply baseLlmOptions or clearBaseLlmOptions, not both.";
             if (clearManagerBaseLlmOptions && managerBaseLlmOptions is not null)
@@ -542,17 +588,20 @@ public sealed partial class BoardTool(
                 Blocked: blocked,
                 Type: type, Flagged: flagged, FlagReason: flagReason,
                 WorkflowMode: workflowMode, ManagerSelection: managerSelection, ManagerBaseLlmOptions: managerBaseLlmOptions,
-                ClearManagerBaseLlmOptions: clearManagerBaseLlmOptions, ClearGhost: clearGhost);
+                ClearManagerBaseLlmOptions: clearManagerBaseLlmOptions, ClearGhost: clearGhost, DisplayId: displayId);
             var updated = await service.UpdateCardAsync(target.Project, target.CardId!, request, cancellationToken, author);
             if (updated is null)
                 return $"FAIL: card not found: {card}";
+            if (pinned is not null)
+                updated = await service.SetCardPinnedAsync(target.Project, updated.Id, pinned.Value, cancellationToken) ?? updated;
             await AutoLinkSessionAsync(target.Project, updated.Id, cancellationToken);
             await TrackDesktopActivityAsync(server, target.Project, updated.Id, author.Label, cancellationToken);
             if (descriptionAppend is not null && title is null && priority is null && points is null && tags is null && blocked is null && type is null && flagged is null
                 && assignee is null && baseLlmOptions is null && !clearBaseLlmOptions
                 && workflowMode is null && managerSelection is null && managerBaseLlmOptions is null && !clearManagerBaseLlmOptions && !clearGhost)
                 return $"Appended to the description of {updated.Key}.";
-            return $"Updated {updated.Key}: {updated.Title} ({updated.Priority}{(updated.Blocked ? ", blocked" : "")}{(updated.Flagged ? ", needs your attention" : "")})"
+            return $"Updated {updated.Key}: {updated.Title} ({updated.Priority}{(updated.Blocked ? ", blocked" : "")}{(updated.Flagged ? ", needs your attention" : "")}{(updated.Pinned ? ", pinned" : "")})"
+                + (displayId is not null ? $"\nDisplay ID: {updated.DisplayId ?? updated.Key}" : "")
                 + (clearGhost ? "\nGhost dismissed. Linked code and the original completion check are retained." : "")
                 + (assignee is not null || baseLlmOptions is not null || clearBaseLlmOptions
                     ? "\n" + DescribeAgentSettings(updated.Assignee, updated.BaseLlmOptions) + "\nApplies to the next launch; running agents are unchanged." : "")
@@ -988,7 +1037,7 @@ public sealed partial class BoardTool(
     /// shows an on-entry Automation, and in the card-session preamble (BoardPromptComposer).
     /// </summary>
     internal const string LaneAutomationGuidance =
-        "Lane Automations run in listed order after " + SettleSecondsText + " seconds with a dashboard open; busy Automations wait. Each step needs the preceding pass or a user skip. "
+        "Lane Automations run in listed order after " + SettleSecondsText + " seconds with a dashboard open; busy Automations wait. Each step starts when the previous run ends, whatever its result; a reported pass or fail is recorded evidence, not a gate. "
         + "Link commits and post a summary before moving into the lane once. Poll get_board_agent_status for step results. "
         + "move_board_card reports queued/skipped entries; skipAutomations=true moves without running them, and preview=true previews the move.";
 
@@ -1090,6 +1139,8 @@ public sealed partial class BoardTool(
         if (card.Points is int points) builder.Append(" · Points: ").Append(points);
         if (card.Blocked) builder.Append(" · BLOCKED");
         if (card.Flagged) builder.Append(" · FLAGGED: needs your attention");
+        // The tile's pin: activity on other cards does not move this one.
+        if (card.Pinned) builder.Append(" · Pinned");
         builder.Append(card.AgentMade ? " · Agent-made" : " · Human-made");
         if (card.AgentMade && card.AgentMadeBy is { } madeBy) builder.Append(" by ").Append(madeBy);
         if (card.AgentMade && card.AgentMadeSessionId is { } madeIn) builder.Append(" in session ").Append(madeIn);

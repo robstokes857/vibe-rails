@@ -37,6 +37,7 @@ public static class BoardMcpAuthorization
         "complete_board_agent",
         "end_agent_session",
         "read_board_attachment",
+        "read_board_commit",
         "create_board_card",
         "update_board_card",
         "move_board_card",
