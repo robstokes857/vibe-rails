@@ -1002,7 +1002,7 @@ public class TerminalRunner
         await using (terminal)
         {
             // Set input mode before the CLI can enable mouse/focus/paste reporting on the console.
-            using var macInput = MacConsoleInput.OpenConsole();
+            using var rawInput = UnixConsoleInput.OpenConsole();
             // Wire up console output
             terminal.Subscribe(new ConsoleOutputConsumer());
 
@@ -1015,7 +1015,7 @@ public class TerminalRunner
                 await ConsoleInputLoopAsync(
                     terminal,
                     sessionId,
-                    macInput,
+                    rawInput,
                     modifiedEnterAsLineFeed: llm == LLM.Codex,
                     ct);
             }
@@ -1083,7 +1083,7 @@ public class TerminalRunner
 
         await using (terminal)
         {
-            using var macInput = MacConsoleInput.OpenConsole();
+            using var rawInput = UnixConsoleInput.OpenConsole();
             // This path is always a real Environment/Automation window, so the PTY renders into
             // its own host console.
             terminal.Subscribe(new ConsoleOutputConsumer());
@@ -1119,7 +1119,7 @@ public class TerminalRunner
                 await ConsoleInputLoopAsync(
                     terminal,
                     sessionId,
-                    macInput,
+                    rawInput,
                     modifiedEnterAsLineFeed: llm == LLM.Codex,
                     ct);
             }
@@ -1168,13 +1168,13 @@ public class TerminalRunner
     }
 
     /// <summary>
-    /// Native console → PTY write loop. macOS preserves raw terminal bytes; other platforms
-    /// retain Console.ReadKey and semantic key translation.
+    /// Native console → PTY write loop. macOS and Linux preserve raw terminal bytes; Windows
+    /// retains Console.ReadKey and semantic key translation.
     /// </summary>
     private async Task ConsoleInputLoopAsync(
         Terminal terminal,
         string sessionId,
-        MacConsoleInput? macInput,
+        UnixConsoleInput? rawInput,
         bool modifiedEnterAsLineFeed,
         CancellationToken ct)
     {
@@ -1192,7 +1192,7 @@ public class TerminalRunner
         // riding the input rate.
         var geometryClock = System.Diagnostics.Stopwatch.StartNew();
         var nextGeometryCheck = TimeSpan.Zero;
-        var inputBuffer = macInput is null ? null : new byte[4096];
+        var inputBuffer = rawInput is null ? null : new byte[4096];
 
         while (!ct.IsCancellationRequested && !terminal.HasExited)
         {
@@ -1232,9 +1232,9 @@ public class TerminalRunner
                 }
             }
 
-            if (macInput is not null)
+            if (rawInput is not null)
             {
-                var count = macInput.ReadAvailable(inputBuffer!);
+                var count = rawInput.ReadAvailable(inputBuffer!);
                 if (count == 0)
                     await Task.Delay(50, ct);
                 else

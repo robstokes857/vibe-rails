@@ -27,4 +27,4 @@ jobs:
       - name: Verify real zsh argv, native PTY, raw console input, Board bootstrap prompts and Codex home copies under flock
         run: >-
           dotnet test Tests/Tests.csproj
-          --filter 'FullyQualifiedName~MacCliLaunchTests|FullyQualifiedName~MacConsoleInputTests|FullyQualifiedName~CommandServiceTests|FullyQualifiedName~CliSpawnCommandBuilderTests|FullyQualifiedName~CodexEnvironmentCreationTests'
+          --filter 'FullyQualifiedName~MacCliLaunchTests|FullyQualifiedName~UnixConsoleInputTests|FullyQualifiedName~CommandServiceTests|FullyQualifiedName~CliSpawnCommandBuilderTests|FullyQualifiedName~CodexEnvironmentCreationTests'

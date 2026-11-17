@@ -20,7 +20,7 @@ Stdio MCP has no such probe, so an unconfirmed end is reported as unknown, not e
 
 Primary files (reorg'd into subdirectories):
 - `Services/Terminal/Pty/Terminal.cs`, `KeyTranslator.cs`, `ShellCommandBuilder.cs`
-- `Services/Terminal/Core/TerminalRunner.cs`, `TerminalSessionService.cs`, `TerminalStateService.cs`, `TerminalTabHostService.cs`, `ChildParentWatchdogService.cs`, `NativeConsoleGeometry.cs`, `MacConsoleInput.cs`
+- `Services/Terminal/Core/TerminalRunner.cs`, `TerminalSessionService.cs`, `TerminalStateService.cs`, `TerminalTabHostService.cs`, `ChildParentWatchdogService.cs`, `NativeConsoleGeometry.cs`, `UnixConsoleInput.cs`
 - `Services/Terminal/Protocol/TerminalIoRouter.cs`, `CodexWindowsInputRewriter.cs`, `TerminalControlProtocol.cs`, `TerminalGridSerializer.cs`, `TerminalTextSanitizer.cs`, `TerminalTextWithControlPart.cs`
 - `Services/Terminal/Remote/RemoteTerminalConnection.cs`
 - `Services/Terminal/Consumers/*.cs`
@@ -575,22 +575,26 @@ Notes:
 ### `TerminalIoRouter.cs`
 Single I/O funnel and hook point.
 
-Native macOS input uses `Core/MacConsoleInput.cs`: a nonblocking raw `read` of the
-outer TTY forwards bytes through `TerminalIoRouter`, preserving mouse/focus reports,
+Native macOS and Linux input uses `Core/UnixConsoleInput.cs`: a nonblocking raw `read` of
+the outer TTY forwards bytes through `TerminalIoRouter`, preserving mouse/focus reports,
 bracketed paste, UTF-8 and modified-key sequences. Configure it before starting the
 PTY output loop; restore the original termios on disposal without flushing input.
 Do not use `Console.ReadKey`/`KeyAvailable` on that path: unrecognized CSI mouse reports
 can become a standalone Escape (interrupting the CLI) followed by literal composer text.
 Output processing is preserved; the reader does not own stdin or change the native
-output filter. If the console mode cannot be read or set, `OpenConsole` logs a warning and
-returns null (the `ReadKey` reader) instead of throwing: it runs after the PTY and recorded
-session exist, outside the cleanup that completes them. .NET rewrites termios only after
-it configured the console itself (a `ReadKey`/`KeyAvailable` in this process) or on
-`SIGCONT`, so do not add either to the native macOS process. `MacConsoleInputTests`
-exercises a disposable macOS PTY and runs in `macos-launch-tests.yml`; live native
-Agent verification on macOS is still needed for the reported incident (VB-RXHKP-417).
+output filter. termios goes to libc as an opaque buffer; `TermiosLayout` names the few
+offsets touched for Darwin (8-byte flags, `c_cc` at 32) and Linux glibc (4-byte flags,
+`c_line`, `c_cc` at 17). Bindings are `libSystem.B.dylib` and `libc.so.6`, as in Pty.Net.
+If the console mode cannot be read or set, or libc cannot be bound, `OpenConsole` logs a
+warning and returns null (the `ReadKey` reader) instead of throwing: it runs after the PTY
+and recorded session exist, outside the cleanup that completes them. .NET rewrites termios
+only after it configured the console itself (a `ReadKey`/`KeyAvailable` in this process) or
+on `SIGCONT`, so do not add either to the native process. `UnixConsoleInputTests` checks
+the layout against a fresh PTY's cooked defaults, then exercises the reader on it; they run
+in `macos-launch-tests.yml` and the release workflow's Ubuntu test job. Live native Agent
+verification on macOS and Linux is still needed for the reported incident (VB-RXHKP-417).
 
-Other platforms' native `Console.ReadKey` input is translated by `Pty/KeyTranslator.cs`. As of
+Windows native `Console.ReadKey` input is translated by `Pty/KeyTranslator.cs`. As of
 2026-09-14, Shift-only Tab emits `ESC[Z` (backtab), matching xterm's physical
 Shift+Tab. Plain Tab remains `\t`; previously the native path discarded Shift.
 `KeyTranslatorTests` and real `ConPtyEscapeKeyTests` cover this before and after

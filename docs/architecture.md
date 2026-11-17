@@ -523,7 +523,7 @@ Terminal.ReadLoop → dispatches to all ITerminalConsumer subscribers:
   ├── DbLoggingConsumer → TerminalOutputFilter → TerminalStateService.LogOutput()
   └── WebSocketConsumer → WebSocket binary frames (if browser connected)
   ↓
-MacConsoleInput (macOS raw bytes) / Console.ReadKey (other native) / WebSocket input
+UnixConsoleInput (macOS/Linux raw bytes) / Console.ReadKey (Windows native) / WebSocket input
   → TerminalIoRouter → TerminalStateService.RecordInput() → InputAccumulator
   ↓
 Git changes tracked on each user input (Enter key)
