@@ -70,8 +70,15 @@ public sealed partial class BoardToolTests
         Assert.Contains("- Code review (id " + review.Id + ", 1 card, default lane for new cards)", await _tool.ListBoardColumns(cancellationToken: Ct));
 
         // By id, one field: the name and colour are kept.
-        Assert.Equal($"Updated lane \"Code review\" (id {review.Id}); new cards no longer land here.",
+        const string cleared = "; no longer the board's chosen lane for new cards (with no lane chosen they land in the left-most lane).";
+        Assert.Equal($"Updated lane \"Code review\" (id {review.Id}){cleared}",
             await _tool.UpdateBoardColumn(review.Id, defaultForNewCards: false, cancellationToken: Ct));
+        // Clearing the choice on the left-most lane changes nothing about where cards land, and the reply does not claim it does.
+        var backlog = (await _service.FindColumnAsync(_project, "Backlog", Ct))!;
+        await _tool.UpdateBoardColumn("Backlog", defaultForNewCards: true, cancellationToken: Ct);
+        Assert.Equal($"Updated lane \"Backlog\" (id {backlog.Id}){cleared}", await _tool.UpdateBoardColumn("Backlog", defaultForNewCards: false, cancellationToken: Ct));
+        await _tool.CreateBoardCard("Lands on the left", cancellationToken: Ct);
+        Assert.Equal(backlog.Id, (await _service.GetCardAsync(_project, "PROJ-2", Ct))!.ColumnId);
         var kept = (await _service.FindColumnAsync(_project, review.Id, Ct))!;
         Assert.Equal(("Code review", "#123abc", false), (kept.Name, kept.Color, kept.IsDefaultForNewCards));
 

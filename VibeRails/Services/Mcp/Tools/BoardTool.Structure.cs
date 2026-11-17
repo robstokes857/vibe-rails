@@ -108,7 +108,7 @@ public sealed partial class BoardTool
         [Description("The lane: its id from list_board_columns, or its name on the board.")] string column,
         [Description("New lane name. Omitted keeps the name.")] string? name = null,
         [Description("New hex colour such as #a855f7. Omitted keeps the colour.")] string? color = null,
-        [Description("true: new cards land in this lane; false: clear that choice from this lane. Omitted keeps it.")] bool? defaultForNewCards = null,
+        [Description("true: new cards land in this lane; false: clear that choice from this lane (with no lane chosen, new cards land in the left-most lane). Omitted keeps it.")] bool? defaultForNewCards = null,
         [Description("New place among the board's lanes, counted from 1 on the left. Omitted keeps the order.")] int? position = null,
         [Description(BoardArgumentHelp)] string? board = null,
         CancellationToken cancellationToken = default,
@@ -210,7 +210,9 @@ public sealed partial class BoardTool
         var renamed = !string.Equals(nameBefore, updated.Name, StringComparison.Ordinal);
         if (renamed) reply.Append(": renamed from \"").Append(BoardPromptComposer.SanitizeLine(nameBefore, 120)).Append('"');
         if (asked.Color is not null) reply.Append("; colour ").Append(updated.Color);
-        if (asked.IsDefaultForNewCards is not null) reply.Append(updated.IsDefaultForNewCards ? "; new cards land here" : "; new cards no longer land here");
+        // Clearing the choice does not send cards elsewhere by itself: with no lane chosen the store uses the left-most lane, which may be this one.
+        if (asked.IsDefaultForNewCards is not null)
+            reply.Append(updated.IsDefaultForNewCards ? "; new cards land here" : "; no longer the board's chosen lane for new cards (with no lane chosen they land in the left-most lane)");
         reply.Append('.');
         if (renamed) reply.Append(LaneKindNote(nameBefore, updated.Name));
     }
