@@ -32,6 +32,29 @@ public sealed partial class BoardToolClientAuthorTests
     }
 
     [Fact]
+    public async Task StructureTools_RefuseATrackerBoard_ForANamedClient()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var board = await _store.CreateBoardAsync(_project, "Tracker", Ct);
+        await _store.SaveJiraConnectionAsync(new BoardJiraConnectionRecord("jira-connection", _project, board.Id, "https://jira.example", "user@example.com",
+            true, "saved", null, "project = APP", true, null, null, null, null, null, DedicatedBoard: true), Ct);
+        var lanes = (await _store.GetColumnsAsync(_project, Ct, board.Id)).Select(lane => (lane.Id, lane.Name, lane.Position)).ToList();
+        var client = await ConnectAsync("claude-code");
+
+        foreach (var (tool, arguments) in new (string, Dictionary<string, object?>)[]
+                 {
+                     ("create_board_column", new() { ["name"] = "QA", ["board"] = board.Id }),
+                     ("update_board_column", new() { ["column"] = lanes[0].Id, ["name"] = "Verified" }),
+                     ("update_board_column", new() { ["column"] = lanes[0].Id, ["position"] = 2 }),
+                     ("update_board", new() { ["board"] = board.Id, ["name"] = "Changed" }),
+                 })
+            Assert.Equal("FAIL: this board belongs to Jira. Its lanes and name are changed in the dashboard, not over MCP.", await CallAsync(client, tool, arguments));
+
+        Assert.Equal(lanes, (await _store.GetColumnsAsync(_project, Ct, board.Id)).Select(lane => (lane.Id, lane.Name, lane.Position)).ToList());
+        Assert.Equal("Tracker", (await _store.GetBoardAsync(_project, board.Id, Ct))!.Name);
+    }
+
+    [Fact]
     public async Task StructureTools_WorkForANamedClient()
     {
         await _store.EnsureDefaultColumnsAsync(_project, Ct);

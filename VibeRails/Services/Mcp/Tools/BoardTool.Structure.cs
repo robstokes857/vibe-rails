@@ -4,6 +4,7 @@ using ModelContextProtocol.Server;
 using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services.Board;
+using VibeRails.Services.Board.Tracker;
 
 namespace VibeRails.Services.Mcp.Tools;
 
@@ -13,27 +14,60 @@ namespace VibeRails.Services.Mcp.Tools;
 /// methods, so validation, the shared-copy refusal and the default-lane rule are the dashboard's.
 /// Nothing here deletes, and a lane's on-entry Agents and Actions stay a dashboard setting.
 /// The four tools are deliberately outside <c>BoardMcpAuthorization.ToolNames</c>: a card agent is
-/// not pre-approved to restructure the board it works on. The service records no author for
-/// these changes, so each one is written to the file log with the caller's name.
+/// not pre-approved to restructure the board it works on. A dedicated Jira or Azure DevOps board
+/// refuses: its lanes and name came from its tracker connection. The service records no author
+/// for these changes, so each one is written to the file log with the caller's name.
 /// </summary>
 public sealed partial class BoardTool
 {
     /// <summary>In the descriptions, so an agent knows before it calls. The replies say what one change did.</summary>
     private const string LaneMeaningNote =
-        "Lane names and order carry meaning: a lane whose name contains done, complete, ship or closed is treated as finished, "
+        "Lane names and order carry meaning: a lane whose name contains done, complete or ship is treated as finished (its cards leave the open totals), "
+        + "those names and closed end desktop-client activity on the lane's cards, "
         + "and cards that settle in the board's last lane get the completion check for landed code.";
 
     /// <summary>
-    /// The Board's finished-lane convention: <c>BoardStore.IsCompletedLane</c> and the dashboard page
-    /// lanes and total open work by ship, done and complete; the desktop-activity triggers add closed.
+    /// The Board's finished-lane convention, as <c>BoardStore.IsCompletedLane</c> and the dashboard
+    /// have it: ship, done and complete. These lanes page, and their cards leave the open totals.
     /// </summary>
     internal static bool IsFinishedLaneName(string? name) =>
         name is not null && (name.Contains("ship", StringComparison.OrdinalIgnoreCase)
             || name.Contains("done", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("complete", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("closed", StringComparison.OrdinalIgnoreCase));
+            || name.Contains("complete", StringComparison.OrdinalIgnoreCase));
 
-    [McpServerTool, Description("Create a lane on a local board, as the dashboard's + Lane does. Without position the lane is added after the board's last lane and becomes the last lane. Create a lane only when the user or the board's workflow asks for one. A lane's on-entry Agents and Actions are set in the dashboard. " + LaneMeaningNote)]
+    /// <summary>
+    /// <c>BoardStore.DesktopClosedLaneSql</c>: the finished names and closed. A card in such a lane,
+    /// or a lane renamed to one, ends desktop-client activity; closed alone leaves the totals as they were.
+    /// </summary>
+    internal static bool EndsDesktopActivity(string? name) =>
+        IsFinishedLaneName(name) || (name?.Contains("closed", StringComparison.OrdinalIgnoreCase) ?? false);
+
+    /// <summary>What a lane's name means to the Board, said only when a new lane or a rename changes it.</summary>
+    internal static string LaneKindNote(string? nameBefore, string name)
+    {
+        if (IsFinishedLaneName(nameBefore) != IsFinishedLaneName(name))
+            return IsFinishedLaneName(name)
+                ? "\nThe name makes it a finished lane: its cards leave the open totals and desktop-client activity on them ends."
+                : "\nThe name no longer makes it a finished lane: its cards count as open work again.";
+        if (EndsDesktopActivity(nameBefore) == EndsDesktopActivity(name)) return "";
+        return EndsDesktopActivity(name)
+            ? "\nThe name ends desktop-client activity on the lane's cards; they still count as open work."
+            : "\nThe name no longer ends desktop-client activity on the lane's cards.";
+    }
+
+    /// <summary>
+    /// A dedicated Jira or Azure DevOps board keeps the lanes and name its tracker connection gave
+    /// it. A person can still change them in the dashboard; an agent cannot.
+    /// </summary>
+    private async Task<string?> TrackerBoardRefusalAsync(string project, string? boardId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(boardId)) return null;
+        return await store.DedicatedProviderAsync(project, boardId, cancellationToken) is { } provider
+            ? $"FAIL: this board belongs to {TrackerBoards.DisplayName(provider)}. Its lanes and name are changed in the dashboard, not over MCP."
+            : null;
+    }
+
+    [McpServerTool, Description("Create a lane on a local board, as the dashboard's + Lane does. Without position the lane is added after the board's last lane and becomes the last lane. Create a lane only when the user or the board's workflow asks for one. A lane's on-entry Agents and Actions are set in the dashboard. Shared copies and Jira or Azure DevOps boards refuse. " + LaneMeaningNote)]
     public Task<string> CreateBoardColumn(
         [Description("Lane name (required).")] string name,
         [Description("Hex colour such as #3b82f6. Optional: grey when omitted.")] string? color = null,
@@ -51,26 +85,25 @@ public sealed partial class BoardTool
         if (await ResolveAuthorAsync(server, cancellationToken) is not { } author) return UnnamedClientHint;
 
         var lastBefore = await LastLaneAsync(target.Project, target.BoardId, cancellationToken);
+        if (await TrackerBoardRefusalAsync(target.Project, target.BoardId ?? lastBefore?.BoardId, cancellationToken) is { } tracker) return tracker;
         var lane = await service.CreateColumnAsync(target.Project,
             new CreateBoardColumnRequest(name, color, target.BoardId, defaultForNewCards), cancellationToken);
         Log.Information("[Board] MCP {Author} created lane {LaneId} {Lane} on board {BoardId} in {Project}", author.Label, lane.Id, lane.Name, lane.BoardId, target.Project);
 
         var reply = new StringBuilder("Created lane \"").Append(BoardPromptComposer.SanitizeLine(lane.Name, 120)).Append("\" (id ").Append(lane.Id).Append(')');
         if (target.BoardName is not null) reply.Append(" on board ").Append(BoardPromptComposer.SanitizeLine(target.BoardName, 120));
-        if (position is int wanted)
-        {
-            var (place, count) = await PlaceLaneAsync(target.Project, lane.BoardId, lane.Id, wanted, cancellationToken);
-            reply.Append(" at place ").Append(place).Append(" of ").Append(count);
-        }
-        else
-            reply.Append(" as lane ").Append(lane.Position + 1);
+        var placed = position is int wanted ? await TryPlaceLaneAsync(target.Project, lane.BoardId, lane.Id, wanted, cancellationToken) : default;
+        if (placed.Place > 0) reply.Append(" at place ").Append(placed.Place).Append(" of ").Append(placed.Count);
+        else reply.Append(" as lane ").Append(lane.Position + 1);
         reply.Append(lane.IsDefaultForNewCards ? "; new cards land here." : ".");
         AppendNewLaneNotes(reply, lane, color);
         await AppendLastLaneChangeAsync(reply, target.Project, lane.BoardId, lastBefore, cancellationToken);
+        if (placed.Failure is not null)
+            reply.Append(NotPlacedNote(lane.Id, position.GetValueOrDefault(), placed.Failure, "The lane exists, so do not create it again"));
         return reply.ToString();
     });
 
-    [McpServerTool, Description("Rename, recolour or move one lane, or make it the lane new cards land in, as the dashboard's lane settings and lane drag do. Pass only what should change. Cards stay in the lane. A lane's on-entry Agents and Actions are not changed here. " + LaneMeaningNote + " The reply says when a change alters either.")]
+    [McpServerTool, Description("Rename, recolour or move one lane, or make it the lane new cards land in, as the dashboard's lane settings and lane drag do. Pass only what should change. Cards stay in the lane. A lane's on-entry Agents and Actions are not changed here. Shared copies and Jira or Azure DevOps boards refuse. " + LaneMeaningNote + " The reply says when a change alters any of these.")]
     public Task<string> UpdateBoardColumn(
         [Description("The lane: its id from list_board_columns, or its name on the board.")] string column,
         [Description("New lane name. Omitted keeps the name.")] string? name = null,
@@ -88,6 +121,7 @@ public sealed partial class BoardTool
         if (target.Error is not null) return target.Error;
         var lane = await service.FindColumnAsync(target.Project, column.Trim(), cancellationToken, target.BoardId);
         if (lane is null) return $"FAIL: lane not found: {column}. Use list_board_columns to see the lanes.";
+        if (await TrackerBoardRefusalAsync(target.Project, lane.BoardId, cancellationToken) is { } tracker) return tracker;
         if (await ResolveAuthorAsync(server, cancellationToken) is not { } author) return UnnamedClientHint;
 
         var lastBefore = await LastLaneAsync(target.Project, lane.BoardId, cancellationToken);
@@ -101,13 +135,8 @@ public sealed partial class BoardTool
             laneName = updated.Name;
             AppendLaneUpdate(reply, lane.Name, updated, fields);
         }
-        if (position is int wanted)
-        {
-            var (place, count) = await PlaceLaneAsync(target.Project, lane.BoardId, lane.Id, wanted, cancellationToken);
-            Log.Information("[Board] MCP {Author} moved lane {LaneId} {Lane} to place {Place} in {Project}", author.Label, lane.Id, laneName, place, target.Project);
-            if (reply.Length > 0) reply.Append('\n');
-            reply.Append("Moved lane \"").Append(BoardPromptComposer.SanitizeLine(laneName, 120)).Append("\" to place ").Append(place).Append(" of ").Append(count).Append('.');
-        }
+        if (position is int wanted && await MoveLaneAsync(reply, target.Project, lane.BoardId, lane.Id, laneName, wanted, author.Label, cancellationToken) is { } refused)
+            return refused;
         await AppendLastLaneChangeAsync(reply, target.Project, lane.BoardId, lastBefore, cancellationToken);
         return reply.ToString();
     });
@@ -132,7 +161,7 @@ public sealed partial class BoardTool
             + $"\nPass board={created.Id} to the other Board tools to work on it.";
     });
 
-    [McpServerTool, Description("Rename a board or change the prefix of its new cards' display IDs, as Board settings does. Existing card IDs stay as they are. Pass only what should change.")]
+    [McpServerTool, Description("Rename a board or change the prefix of its new cards' display IDs, as Board settings does. Existing card IDs stay as they are. Pass only what should change. Shared copies and Jira or Azure DevOps boards refuse.")]
     public Task<string> UpdateBoard(
         [Description("The board: its id or unambiguous name from list_boards.")] string board,
         [Description("New board name. Omitted keeps the name.")] string? name = null,
@@ -145,6 +174,7 @@ public sealed partial class BoardTool
         var project = await projects.ResolveAsync(cancellationToken);
         var target = await ResolveBoardAsync(project, board, cancellationToken);
         if (target.Error is not null) return target.Error;
+        if (await TrackerBoardRefusalAsync(target.Project, target.BoardId, cancellationToken) is { } tracker) return tracker;
         if (await ResolveAuthorAsync(server, cancellationToken) is not { } author) return UnnamedClientHint;
         var updated = await service.UpdateBoardAsync(target.Project, target.BoardId!, new UpdateBoardRequest(name, displayPrefix), cancellationToken);
         if (updated is null) return $"FAIL: board not found: {board}. Use list_boards to see the boards.";
@@ -182,10 +212,7 @@ public sealed partial class BoardTool
         if (asked.Color is not null) reply.Append("; colour ").Append(updated.Color);
         if (asked.IsDefaultForNewCards is not null) reply.Append(updated.IsDefaultForNewCards ? "; new cards land here" : "; new cards no longer land here");
         reply.Append('.');
-        if (!renamed || IsFinishedLaneName(nameBefore) == IsFinishedLaneName(updated.Name)) return;
-        reply.Append(IsFinishedLaneName(updated.Name)
-            ? "\nThe new name makes it a finished lane: its cards leave the open totals."
-            : "\nThe new name no longer makes it a finished lane: its cards count as open work again.");
+        if (renamed) reply.Append(LaneKindNote(nameBefore, updated.Name));
     }
 
     private static void AppendNewLaneNotes(StringBuilder reply, BoardColumnResponse lane, string? askedColor)
@@ -193,7 +220,7 @@ public sealed partial class BoardTool
         // The dashboard's create falls back to grey for a colour it cannot read; an agent is told.
         if (!string.IsNullOrWhiteSpace(askedColor) && !string.Equals(askedColor.Trim(), lane.Color, StringComparison.OrdinalIgnoreCase))
             reply.Append("\nThe colour was not a hex colour like #3b82f6, so the lane is ").Append(lane.Color).Append('.');
-        if (IsFinishedLaneName(lane.Name)) reply.Append("\nIts name makes it a finished lane: cards in it leave the open totals.");
+        reply.Append(LaneKindNote(null, lane.Name));
     }
 
     /// <summary>The summary carries the prefix in effect, so a cleared one reads as the repository's default.</summary>
@@ -219,6 +246,41 @@ public sealed partial class BoardTool
         await service.ReorderColumnsAsync(project, ids, cancellationToken, boardId);
         return (index + 1, lanes.Count);
     }
+
+    /// <summary>
+    /// <see cref="PlaceLaneAsync"/> for a lane whose other changes may already be saved: an order
+    /// the store refuses comes back as text, so the reply can say what was saved and what was not.
+    /// Another writer adding or removing a lane between the read and the save causes exactly that.
+    /// </summary>
+    private async Task<(int Place, int Count, string? Failure)> TryPlaceLaneAsync(string project, string boardId, string laneId, int wanted, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var (place, count) = await PlaceLaneAsync(project, boardId, laneId, wanted, cancellationToken);
+            return (place, count, null);
+        }
+        catch (Exception ex) when (ex is BoardValidationException or BoardConflictException) { return (0, 0, ex.Message); }
+    }
+
+    /// <summary>Moves an existing lane and says so. The return value is a whole-reply refusal, given only when nothing else was saved.</summary>
+    private async Task<string?> MoveLaneAsync(StringBuilder reply, string project, string boardId, string laneId, string laneName, int wanted, string author, CancellationToken cancellationToken)
+    {
+        var placed = await TryPlaceLaneAsync(project, boardId, laneId, wanted, cancellationToken);
+        if (placed.Failure is not null)
+        {
+            if (reply.Length == 0) return "FAIL: " + placed.Failure;
+            reply.Append(NotPlacedNote(laneId, wanted, placed.Failure, "The changes above are saved"));
+            return null;
+        }
+        Log.Information("[Board] MCP {Author} moved lane {LaneId} {Lane} to place {Place} in {Project}", author, laneId, laneName, placed.Place, project);
+        if (reply.Length > 0) reply.Append('\n');
+        reply.Append("Moved lane \"").Append(BoardPromptComposer.SanitizeLine(laneName, 120)).Append("\" to place ").Append(placed.Place).Append(" of ").Append(placed.Count).Append('.');
+        return null;
+    }
+
+    /// <summary>A bare FAIL after a saved change would have the caller repeat the whole call, creating the lane twice.</summary>
+    private static string NotPlacedNote(string laneId, int wanted, string failure, string saved) =>
+        $"\nFAIL: the lane was not moved to place {wanted}: {failure} {saved}; call update_board_column(column=\"{laneId}\", position={wanted}) to place it.";
 
     private async Task<BoardColumnResponse?> LastLaneAsync(string project, string? boardId, CancellationToken cancellationToken) =>
         (await service.GetColumnsAsync(project, cancellationToken, boardId)).Columns.OrderBy(c => c.Position).LastOrDefault();

@@ -149,13 +149,17 @@ or filter is added on one side, add it on the other in the same change, with a t
 Lanes and boards (VIBE-342): `create_board_column`, `update_board_column` (rename, colour,
 default lane for new cards, `position`), `create_board` and `update_board` (name, display ID
 prefix) call the `IBoardService` methods behind + Lane, lane settings, lane drag, Create board
-and the board rename, so validation and the shared-copy refusal are the same. They never
+and the board rename, so validation and the shared-copy refusal are the same. A dedicated Jira
+or Azure DevOps board also refuses lane changes and a rename over MCP (the dashboard still
+allows them): its lanes and name came from its tracker connection. They never
 delete, and a lane's on-entry Agents and Actions stay a dashboard setting. They are outside
 `BoardMcpAuthorization.ToolNames`, so a Board launch does not pre-approve them. Lane names and
-order carry meaning (a name containing done, complete, ship or closed is a finished lane; the
-completion check follows the board's last lane), so the reply says when a rename, a new lane
-or a move changes either; `BoardTool.IsFinishedLaneName` repeats that convention and must
-follow `BoardStore.IsCompletedLane` and `DesktopClosedLaneSql`. The store records no author
+order carry meaning: a name containing done, complete or ship is a finished lane (it pages and
+its cards leave the open totals), those names and closed end desktop-client activity on the
+lane's cards, and the completion check follows the board's last lane. The reply says when a
+rename, a new lane or a move changes any of these. `BoardTool.IsFinishedLaneName` and
+`BoardTool.EndsDesktopActivity` repeat those conventions and must follow
+`BoardStore.IsCompletedLane` and `DesktopClosedLaneSql`. The store records no author
 for structure changes: each tool refuses an unnamed client and logs the caller's label.
 `list_boards`, the lane line and lane runs of `get_board_card` and the `move_board_card`
 report name a lane's Agents and Actions the way `list_board_columns` does.

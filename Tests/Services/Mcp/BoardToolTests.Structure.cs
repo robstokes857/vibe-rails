@@ -1,3 +1,5 @@
+using Moq;
+using VibeRails.DTOs;
 using VibeRails.Services.Board;
 using VibeRails.Services.Mcp.Tools;
 using VibeRails.Services.Terminal;
@@ -46,7 +48,7 @@ public sealed partial class BoardToolTests
         var finished = await _tool.CreateBoardColumn("Shipped to customers", color: "teal", position: 99, cancellationToken: Ct);
         Assert.Contains(" at place 9 of 9.", finished);
         Assert.Contains("The colour was not a hex colour like #3b82f6, so the lane is #64748b.", finished);
-        Assert.Contains("Its name makes it a finished lane", finished);
+        Assert.Contains("The name makes it a finished lane", finished);
         Assert.Contains("The board's last lane is now \"Shipped to customers\" (it was \"Archive\")", finished);
 
         Assert.Equal("FAIL: a lane needs a name.", await _tool.CreateBoardColumn("  ", cancellationToken: Ct));
@@ -89,9 +91,9 @@ public sealed partial class BoardToolTests
         // Done stops being a finished lane when its name no longer says so.
         var reopened = await _tool.UpdateBoardColumn("Done", name: "Released", cancellationToken: Ct);
         Assert.Contains("renamed from \"Done\".", reopened);
-        Assert.Contains("The new name no longer makes it a finished lane", reopened);
+        Assert.Contains("The name no longer makes it a finished lane", reopened);
         var closed = await _tool.UpdateBoardColumn("Build", name: "Build complete", cancellationToken: Ct);
-        Assert.Contains("The new name makes it a finished lane", closed);
+        Assert.Contains("The name makes it a finished lane", closed);
         // A rename that leaves the lane's kind alone says nothing about it.
         Assert.DoesNotContain("finished lane", await _tool.UpdateBoardColumn("Ready", name: "Next up", cancellationToken: Ct));
 
@@ -107,19 +109,161 @@ public sealed partial class BoardToolTests
         Assert.Contains("\nMoved lane \"Check\" to place 1 of 5.", both);
         Assert.DoesNotContain("last lane", both);
         Assert.Equal(["Check", "Next up", "Build complete", "Released", "Backlog"], await LaneNamesAsync());
+
+        // "closed" is not a finished name: it ends desktop-client activity and leaves the totals alone.
+        var parked = await _tool.UpdateBoardColumn("Next up", name: "Closed", cancellationToken: Ct);
+        Assert.Contains("The name ends desktop-client activity on the lane's cards; they still count as open work.", parked);
+        Assert.DoesNotContain("finished lane", parked);
+        Assert.Contains("The name no longer ends desktop-client activity on the lane's cards.",
+            await _tool.UpdateBoardColumn("Closed", name: "Parked", cancellationToken: Ct));
     }
 
+    // BoardStore.IsCompletedLane (paging, open totals) and DesktopClosedLaneSql (desktop activity)
+    // are the conventions these two repeat; a name they disagree on is "closed".
     [Theory]
-    [InlineData("Done", true)]
-    [InlineData("SHIPPED", true)]
-    [InlineData("Completed work", true)]
-    [InlineData("Closed", true)]
-    [InlineData("Review", false)]
-    [InlineData("NOT DOING", false)]
-    [InlineData("", false)]
-    [InlineData(null, false)]
-    public void IsFinishedLaneName_FollowsTheBoardsConvention(string? name, bool finished) =>
+    [InlineData("Done", true, true)]
+    [InlineData("SHIPPED", true, true)]
+    [InlineData("Completed work", true, true)]
+    [InlineData("Closed", false, true)]
+    [InlineData("Review", false, false)]
+    [InlineData("NOT DOING", false, false)]
+    [InlineData("", false, false)]
+    [InlineData(null, false, false)]
+    public void LaneNames_FollowTheBoardsConventions(string? name, bool finished, bool endsDesktopActivity)
+    {
         Assert.Equal(finished, BoardTool.IsFinishedLaneName(name));
+        Assert.Equal(endsDesktopActivity, BoardTool.EndsDesktopActivity(name));
+    }
+
+    // Code review of VIBE-342, F1: the store refuses only shared copies, so the tools refuse a
+    // dedicated tracker board themselves, whichever way the lane or board is named.
+    [Theory]
+    [InlineData(false, "Jira")]
+    [InlineData(true, "Azure DevOps")]
+    public async Task TrackerBoards_RefuseEveryStructureEdit_AndTheLocalBoardBesideThemDoesNot(bool ado, string provider)
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var board = await _store.CreateBoardAsync(_project, "Tracker", Ct);
+        if (ado)
+            await _store.SaveAdoConnectionAsync(AdoConnection(board.Id) with { DedicatedBoard = true }, Ct);
+        else
+            await _store.SaveJiraConnectionAsync(new BoardJiraConnectionRecord("jira-connection", _project, board.Id, "https://jira.example", "user@example.com",
+                true, "saved", null, "project = APP", true, null, null, null, null, null, DedicatedBoard: true), Ct);
+        var lanes = await _store.GetColumnsAsync(_project, Ct, board.Id);
+
+        foreach (var response in new[]
+        {
+            await _tool.CreateBoardColumn("QA", board: board.Id, cancellationToken: Ct),
+            await _tool.CreateBoardColumn("QA", board: "Tracker", position: 1, cancellationToken: Ct),
+            await _tool.UpdateBoardColumn("Review", name: "Verified", color: "#123456", defaultForNewCards: true, board: board.Id, cancellationToken: Ct),
+            // A lane id finds its lane on any board of the project, so the board argument is not what refuses.
+            await _tool.UpdateBoardColumn(lanes[0].Id, name: "Verified", cancellationToken: Ct),
+            await _tool.UpdateBoardColumn(lanes[0].Id, position: 3, cancellationToken: Ct),
+            await _tool.UpdateBoard(board.Id, name: "Changed tracker", displayPrefix: "TRACK", cancellationToken: Ct),
+            await _tool.UpdateBoard("Tracker", displayPrefix: "", cancellationToken: Ct)
+        })
+            Assert.Equal($"FAIL: this board belongs to {provider}. Its lanes and name are changed in the dashboard, not over MCP.", response);
+
+        var after = await _store.GetColumnsAsync(_project, Ct, board.Id);
+        Assert.Equal(lanes.Select(lane => (lane.Id, lane.Name, lane.Position, lane.Color, lane.IsDefaultForNewCards)),
+            after.Select(lane => (lane.Id, lane.Name, lane.Position, lane.Color, lane.IsDefaultForNewCards)));
+        var saved = (await _store.GetBoardAsync(_project, board.Id, Ct))!;
+        Assert.Equal(("Tracker", (string?)null), (saved.Name, saved.DisplayPrefix));
+        // The project's local board is not a tracker board, so it still takes the change.
+        Assert.StartsWith("Created lane \"QA\" (id ", await _tool.CreateBoardColumn("QA", cancellationToken: Ct));
+    }
+
+    // Code review of VIBE-342, F2: the reply describes the totals by the store's own rule. "Closed"
+    // is not a finished name, so cards in it keep counting; Done to Closed puts them back.
+    [Fact]
+    public async Task RenamingToClosed_SaysWhatHappensToTheOpenTotals_AndTheTotalsAgree()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var review = (await _service.FindColumnAsync(_project, "Review", Ct))!;
+        var done = (await _service.FindColumnAsync(_project, "Done", Ct))!;
+        await _store.CreateCardAsync(_project, new(review.Id, "Flagged in review", "", null, "medium", null, [], false) { Flagged = true, Points = 3 }, Ct);
+        await _store.CreateCardAsync(_project, new(done.Id, "Flagged when done", "", null, "medium", null, [], false) { Flagged = true, Points = 5 }, Ct);
+        var before = await _store.GetCardsPageAsync(_project, new(), Ct);
+        Assert.Equal((1, 3L), (before.FlaggedCount, before.RemainingPoints));
+
+        var parked = await _tool.UpdateBoardColumn(review.Id, name: "Closed", cancellationToken: Ct);
+        Assert.Contains("they still count as open work", parked);
+        Assert.DoesNotContain("leave the open totals", parked);
+        var unchanged = await _store.GetCardsPageAsync(_project, new(), Ct);
+        Assert.Equal((1, 3L), (unchanged.FlaggedCount, unchanged.RemainingPoints));
+
+        var reopened = await _tool.UpdateBoardColumn(done.Id, name: "Closed out", cancellationToken: Ct);
+        Assert.Contains("The name no longer makes it a finished lane: its cards count as open work again.", reopened);
+        var counted = await _store.GetCardsPageAsync(_project, new(), Ct);
+        Assert.Equal((2, 8L), (counted.FlaggedCount, counted.RemainingPoints));
+    }
+
+    // Code review of VIBE-342, F3: another writer changes the lanes between the read and the save
+    // of the order. The lane is already created, so the reply says so instead of a bare FAIL that
+    // would have the caller create it again.
+    [Fact]
+    public async Task ARefusedLaneOrder_AfterTheLaneIsSaved_SaysWhatWasSavedAndHowToFinish()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var raced = 0;
+        var service = new Mock<IBoardService>(MockBehavior.Strict);
+        service.Setup(s => s.GetColumnsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+            .Returns((string project, CancellationToken ct, string? board) => _service.GetColumnsAsync(project, ct, board));
+        service.Setup(s => s.FindColumnAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+            .Returns((string project, string lane, CancellationToken ct, string? board) => _service.FindColumnAsync(project, lane, ct, board));
+        service.Setup(s => s.CreateColumnAsync(It.IsAny<string>(), It.IsAny<CreateBoardColumnRequest>(), It.IsAny<CancellationToken>()))
+            .Returns((string project, CreateBoardColumnRequest request, CancellationToken ct) => _service.CreateColumnAsync(project, request, ct));
+        service.Setup(s => s.UpdateColumnAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<UpdateBoardColumnRequest>(), It.IsAny<CancellationToken>()))
+            .Returns((string project, string lane, UpdateBoardColumnRequest request, CancellationToken ct) => _service.UpdateColumnAsync(project, lane, request, ct));
+        service.Setup(s => s.ReorderColumnsAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+            .Returns(async (string project, IReadOnlyList<string> ids, CancellationToken ct, string? board) =>
+            {
+                // The first two saves lose the race; later ones go through.
+                if (raced++ < 2) await _service.CreateColumnAsync(project, new($"Concurrent addition {raced}", BoardId: board), ct);
+                return await _service.ReorderColumnsAsync(project, ids, ct, board);
+            });
+        var tool = new BoardTool(service.Object, _resolver, _store, new BoardWorkflowService());
+
+        var created = await tool.CreateBoardColumn("QA", position: 1, cancellationToken: Ct);
+        var qa = Assert.Single(await _store.GetColumnsAsync(_project, Ct), lane => lane.Name == "QA");
+        Assert.StartsWith($"Created lane \"QA\" (id {qa.Id}) as lane 6.", created);
+        Assert.EndsWith("\nFAIL: the lane was not moved to place 1: The lane order must list every lane on this board exactly once. "
+            + $"The lane exists, so do not create it again; call update_board_column(column=\"{qa.Id}\", position=1) to place it.", created);
+
+        // A rename that saved beside a move that did not: both are said, in that order.
+        var renamed = await tool.UpdateBoardColumn(qa.Id, name: "Verify", position: 1, cancellationToken: Ct);
+        Assert.StartsWith($"Updated lane \"Verify\" (id {qa.Id}): renamed from \"QA\".", renamed);
+        Assert.Contains($"\nFAIL: the lane was not moved to place 1: The lane order must list every lane on this board exactly once. The changes above are saved; call update_board_column(column=\"{qa.Id}\", position=1)", renamed);
+        Assert.Equal("Verify", (await _service.FindColumnAsync(_project, qa.Id, Ct))!.Name);
+
+        // Following the reply finishes the job, and nothing was created twice.
+        Assert.StartsWith("Moved lane \"Verify\" to place 1 of 8.", await tool.UpdateBoardColumn(qa.Id, position: 1, cancellationToken: Ct));
+        var names = await LaneNamesAsync();
+        Assert.Equal("Verify", names[0]);
+        Assert.Single(names, name => name is "QA" or "Verify");
+    }
+
+    [Fact]
+    public async Task ARefusedLaneOrder_WithNothingElseSaved_IsAPlainFailure()
+    {
+        await _store.EnsureDefaultColumnsAsync(_project, Ct);
+        var service = new Mock<IBoardService>(MockBehavior.Strict);
+        service.Setup(s => s.GetColumnsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+            .Returns((string project, CancellationToken ct, string? board) => _service.GetColumnsAsync(project, ct, board));
+        service.Setup(s => s.FindColumnAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+            .Returns((string project, string lane, CancellationToken ct, string? board) => _service.FindColumnAsync(project, lane, ct, board));
+        service.Setup(s => s.ReorderColumnsAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+            .Returns(async (string project, IReadOnlyList<string> ids, CancellationToken ct, string? board) =>
+            {
+                await _service.CreateColumnAsync(project, new("Concurrent addition", BoardId: board), ct);
+                return await _service.ReorderColumnsAsync(project, ids, ct, board);
+            });
+        var tool = new BoardTool(service.Object, _resolver, _store, new BoardWorkflowService());
+
+        Assert.Equal("FAIL: The lane order must list every lane on this board exactly once.",
+            await tool.UpdateBoardColumn("Review", position: 1, cancellationToken: Ct));
+        Assert.Equal("Backlog", (await LaneNamesAsync())[0]);
+    }
 
     [Fact]
     public async Task CreateBoard_AndUpdateBoard_DoWhatTheDashboardDoes()

@@ -729,7 +729,9 @@ transports) do what the dashboard's lane and board settings do: add a lane, rena
 reorder one, choose the default lane for new cards, create a board, rename it or change its
 display ID prefix. They call the `IBoardService` methods behind `/api/v1/board/columns` and
 `/api/v1/board/boards`, so validation and the read-only refusal for shared copies are the
-dashboard's; they add no route, listener or storage. There is still no delete tool, and no tool
+dashboard's; they add no route, listener or storage. The tools are narrower than the dashboard in
+one respect: a dedicated Jira or Azure DevOps board refuses lane changes and a rename over MCP.
+There is still no delete tool, and no tool
 sets a lane's on-entry Agents and Actions, so these four cannot schedule a script or an agent.
 They are not in `BoardMcpAuthorization.ToolNames`: a Board launch does not pre-approve them and
 the client's own approval applies. Codex's server-wide default described below covers them as it
