@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
         with:
           dotnet-version: '11.0.100'
-      - name: Verify real zsh argv, native PTY, Board bootstrap prompts and Codex home copies under flock
+      - name: Verify real zsh argv, native PTY, raw console input, Board bootstrap prompts and Codex home copies under flock
         run: >-
           dotnet test Tests/Tests.csproj
-          --filter 'FullyQualifiedName~MacCliLaunchTests|FullyQualifiedName~CommandServiceTests|FullyQualifiedName~CliSpawnCommandBuilderTests|FullyQualifiedName~CodexEnvironmentCreationTests'
+          --filter 'FullyQualifiedName~MacCliLaunchTests|FullyQualifiedName~MacConsoleInputTests|FullyQualifiedName~CommandServiceTests|FullyQualifiedName~CliSpawnCommandBuilderTests|FullyQualifiedName~CodexEnvironmentCreationTests'

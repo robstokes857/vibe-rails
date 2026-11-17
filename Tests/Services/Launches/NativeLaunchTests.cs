@@ -90,6 +90,64 @@ public sealed class NativeLaunchTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData("manual", null, false, true)]
+    [InlineData("manual", null, true, true)]
+    [InlineData("schedule", null, true, false)]
+    [InlineData("before-commit", null, true, false)]
+    [InlineData("board", null, false, false)]
+    [InlineData("board-lane", "card", false, false)]
+    [InlineData("manual", "card", false, false)]
+    public async Task TerminalPickerPresentationIsLimitedToManualNonBoardPresets(
+        string trigger, string? card, bool requestedNative, bool interactive)
+    {
+        var service = new LaunchService(store, scripts.Object);
+        var preset = (await service.SavePresetAsync(null, new("Agent", "", "codex", InitialPrompt: "Work"), Ct)).Preset;
+        var run = await service.EnqueueAsync("preset", preset.Id,
+            new(root, root, trigger, "picker", CardId: card, NativeTerminal: requestedNative, TerminalTab: true), Ct);
+        var saved = (await store.GetRunAsync(run.Id, Ct))!;
+        Assert.Equal(interactive, saved.Snapshot.IsInteractiveTerminal);
+        Assert.Equal(interactive, saved.Snapshot.Context.TerminalTab);
+        Assert.Equal(!interactive && card is null && trigger != "board", saved.Snapshot.Context.NativeTerminal);
+    }
+
+    [Theory]
+    [InlineData("Work")]
+    [InlineData(null)]
+    public async Task TerminalPickerDispatchCreatesAnOrdinaryTabAndRetryKeepsItsPresentation(string? prompt)
+    {
+        await using var services = Services();
+        var service = new LaunchService(store, scripts.Object);
+        var preset = (await service.SavePresetAsync(null, new("Saved launch", "", "codex", InitialPrompt: prompt), Ct)).Preset;
+        var run = await service.EnqueueAsync("preset", preset.Id,
+            new(root, root, "manual", "picker", TerminalTab: true), Ct);
+        var tabs = new Mock<ITerminalTabHostService>(MockBehavior.Strict);
+        tabs.Setup(t => t.CreateTabAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TerminalTabStatusResponse("tab", DateTime.UtcNow, false));
+        LaunchClaim? claim = null;
+        tabs.Setup(t => t.StartSessionAsync("tab", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, StartTerminalRequest request, CancellationToken token) =>
+            {
+                Assert.Equal("Saved launch", request.Title);
+                Assert.Equal(root, request.WorkingDirectory);
+                claim = request.LaunchClaim!;
+                await store.StartAsync(claim, "session", prompt, root, Environment.ProcessId, DateTime.UtcNow, ct: token);
+                return new TerminalStatusResponse(true, "session", "codex", root);
+            });
+        var dispatcher = new LaunchDispatcher(store, service, tabs.Object,
+            services.GetRequiredService<IServiceScopeFactory>(), services.GetRequiredService<IBoardStore>(),
+            Mock.Of<IJobProcessLauncher>(MockBehavior.Strict));
+        var started = await dispatcher.DispatchAsync(run.Id, Ct);
+        Assert.Equal("running", started.Status);
+        Assert.Equal("tab", started.TabId);
+        Assert.Equal("session", started.SessionId);
+        tabs.Verify(t => t.RegisterLaunchTab(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        await store.CompleteAsync(claim!, "failed", ct: Ct);
+        var retry = await service.RetryAsync(root, run.Id, Ct);
+        Assert.True(retry.Snapshot.IsInteractiveTerminal);
+        Assert.False(retry.Snapshot.Context.NativeTerminal);
+    }
+
     [Fact]
     public void NativeQuickLaunchDoesNotGetCompletionGuidance()
     {

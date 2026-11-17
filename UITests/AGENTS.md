@@ -140,6 +140,9 @@ npx playwright test --config playwright.terminal-automations.config.js
 Uses real terminal UI/xterm with intercepted API and WebSocket fixtures. Covers a long robot
 menu, finished-agent removal, retained output through Board links and reload, launch events/remount, independent close/undo,
 and narrow-window keyboard access. Does not launch a CLI or touch application state.
+Terminal-picker cases launch a saved Agent through the real picker and run API client,
+then check the regular tab strip, focus, controls, reload, close/undo grace period and
+separation from the Board Automation robot menu at desktop and phone widths.
 Snapshot fixtures are generated from current backend capture/serialization code by
 `Tests/headless/TerminalSnapshots`. The headless xterm tests check every history/screen row,
 repeat attach, cursor position and live input modes; browser tests use those same bytes and
@@ -181,6 +184,15 @@ emails, signed-out Settings access from 320px to desktop widths, and the signed-
 states, Escape and outside-click closing, drafts kept by **Account settings**, the compact bar at
 1280px and a 375px window. It opens no application database
 and creates no account or API key.
+
+### Remote access password tests (No Backend Required)
+
+From the repository root, run `node UITests/node_modules/@playwright/test/cli.js test --config UITests/playwright.remote-password.config.js`.
+Uses real Settings forms with intercepted APIs and installed Chrome. Covers password strength
+only during setup/change, current legacy PIN/password proofs, exact password text, recoverable
+failures, cancellation/focus at narrow width, and unrelated settings saves preserving PINs.
+No application database or real credential is read or changed. Backend authentication and
+reconnect/third-failure shutdown are covered by the `RemotePassword` .NET tests.
 
 ### View Report
 If a test fails, you can view the detailed HTML report:

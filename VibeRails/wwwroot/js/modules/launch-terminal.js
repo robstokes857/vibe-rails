@@ -13,10 +13,11 @@ export async function waitForNativeLaunch(api, initial, { signal } = {}) {
 }
 
 /** Follow a queued launch without keeping a timer or request alive after dismissal. */
-export async function openLaunchTerminal(app, api, initial, { signal } = {}) {
+export async function openLaunchTerminal(app, api, initial, { signal, metadata } = {}) {
     let run = initial;
     for (let attempt = 0; attempt < 30 && !signal?.aborted; attempt++) {
         if (run.tabId && run.sessionId) {
+            if (metadata) app.terminalController.rememberTabLaunch(run.tabId, metadata);
             if (!(await app.terminalController.adoptLaunchedTab(run.tabId)))
                 app.navigate('terminal-focus', { tabId: run.tabId });
             return true;

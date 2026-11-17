@@ -192,6 +192,13 @@ public class LaunchRoutesTests
             Assert.Equal(HttpStatusCode.OK, nativeResponse.StatusCode);
             var nativeRun = (await nativeResponse.Content.ReadFromJsonAsync<LaunchRun>(ct))!;
             Assert.True(nativeRun.Snapshot.Context.NativeTerminal);
+            using var tabResponse = await SendAsync(HttpMethod.Post, url + "/api/v1/runs",
+                new LaunchRequest(saved.Preset.Id, NativeTerminal: true, TerminalTab: true), ct);
+            Assert.Equal(HttpStatusCode.OK, tabResponse.StatusCode);
+            var tabRun = (await tabResponse.Content.ReadFromJsonAsync<LaunchRun>(ct))!;
+            Assert.True(tabRun.Snapshot.IsInteractiveTerminal);
+            Assert.False(tabRun.Snapshot.Context.NativeTerminal);
+            Assert.Equal(root, tabRun.Snapshot.Context.WorkingDirectory);
             Assert.Equal(root, nativeRun.Snapshot.Context.WorkingDirectory);
             using var prefixed = await SendAsync(HttpMethod.Post, url + "/api/v1/runs",
                 new LaunchRequest(saved.Preset.Id, PromptPrefix: "Fix selected finding", InitialPrompt: "Template value", ExpectedRevision: 1), ct);

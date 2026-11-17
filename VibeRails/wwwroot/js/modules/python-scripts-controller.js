@@ -1143,7 +1143,7 @@ export class PythonScriptsController {
                 const challenge = await this.app.apiCall('/api/v1/settings/security-challenge', 'GET');
                 const confirmation = await this._promptForm({
                     title: 'Confirm signing PIN setup',
-                    body: challenge.pinRequired ? 'Enter your current remote access PIN.'
+                    body: challenge.pinRequired ? 'Enter your current remote access password or PIN.'
                         : `Type this dashboard confirmation code: ${challenge.code}`,
                     fields: [{ key: 'proof', label: 'Confirmation', ...(challenge.pinRequired ? {} : { type: 'text' }) }],
                     submitLabel: 'Create PIN'

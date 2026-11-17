@@ -99,7 +99,8 @@ for (const width of [320, 375, 768, 1024]) test(`optional launch message reaches
     const menu = page.getByRole('dialog', { name:'Quick actions', exact:true });
     await trigger.click();
     // VIBE-334: rows open compact; the message box sits behind an "Add message" link.
-    await expect(menu.getByRole('button', { name:'Run Review changes', exact:true })).toBeFocused();
+    const run = menu.getByRole('button', { name:'Run Review changes', exact:true });
+    await expect(run).toBeFocused();
     const messages = menu.locator('[data-launch-message]');
     await expect(messages).toHaveCount(2);
     await expect(messages.first()).toBeHidden();
@@ -115,6 +116,15 @@ for (const width of [320, 375, 768, 1024]) test(`optional launch message reaches
     const input = menu.getByRole('textbox', { name:'User message for Review changes (optional)', exact:true });
     await expect(input).toBeFocused();
     await expect(input).not.toHaveAttribute('required');
+    await expect(menu.locator('.launch-menu-message-help')).toHaveCount(0);
+    const inputBox = await input.boundingBox();
+    const runBox = await run.boundingBox();
+    expect(runBox.y).toBeGreaterThanOrEqual(inputBox.y + inputBox.height);
+    // The visible form and the keyboard agree: the next action after typing is Run.
+    await input.press('Tab');
+    await expect(run).toBeFocused();
+    await run.press('Shift+Tab');
+    await expect(input).toBeFocused();
     const message = 'Focus on <input> and {{worktree}} literally';
     await input.fill(message);
     await input.press('Shift+Enter');
@@ -127,7 +137,10 @@ for (const width of [320, 375, 768, 1024]) test(`optional launch message reaches
     // Collapsing keeps the draft and says so; reopening returns to it.
     await toggle.click();
     await expect(input).toBeHidden();
+    await expect(run).toBeVisible();
     await expect(toggle).toHaveAccessibleName('Edit message for Review changes');
+    await toggle.press('Shift+Tab');
+    await expect(run).toBeFocused();
     await toggle.click();
     await expect(input).toBeFocused();
     await input.press('Enter');
@@ -430,12 +443,13 @@ test('quick actions use explicit Run buttons and preserve launch and keyboard be
     const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
     await trigger.click();
     await expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');
-    await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['Codex', 'Script']);
+    await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['Script']);
     for (const id of ['release', 'script']) {
         const catalogRow = page.locator('.launch-catalog-row').filter({ has: page.locator(`[data-agent-edit="${id}"]`) });
         const menuRow = panel.locator('.launch-menu-row').filter({ has: page.locator(`[data-launch-id="${id}"]`) });
         await expect(menuRow.locator('.launch-menu-name')).toHaveText(await catalogRow.locator('.launch-catalog-copy [data-agent-edit]').innerText());
-        await expect(menuRow.locator('.launch-menu-subtitle')).toHaveText(await catalogRow.locator('.launch-catalog-copy p').innerText());
+        if (id === 'release') await expect(menuRow.locator('.launch-menu-subtitle')).toHaveCount(0);
+        else await expect(menuRow.locator('.launch-menu-subtitle')).toHaveText(await catalogRow.locator('.launch-catalog-copy p').innerText());
         expect(await menuRow.locator('.launch-provider-logo').evaluate(el => el.outerHTML))
             .toBe(await catalogRow.locator('.launch-provider-logo').evaluate(el => el.outerHTML));
     }
@@ -494,12 +508,13 @@ test('quick actions match catalog descriptions and provider branding for other l
     await expect(page.locator('.launch-catalog-copy [data-agent-edit="claude"]')).toBeVisible();
     await page.getByRole('button', { name: 'Launch an agent or automation', exact: true }).click();
     const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
-    await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['Review <changes> & report', 'OpenCode', 'custom', 'Compile <client>']);
+    await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['Review <changes> & report', 'custom', 'Compile <client>']);
     await expect(panel.locator('changes, client')).toHaveCount(0);
     for (const id of ['claude', 'quick', 'unknown', 'script']) {
         const catalogRow = page.locator('.launch-catalog-row').filter({ has: page.locator(`[data-agent-edit="${id}"]`) });
         const menuRow = panel.locator('.launch-menu-row').filter({ has: page.locator(`[data-launch-id="${id}"]`) });
-        await expect(menuRow.locator('.launch-menu-subtitle')).toHaveText(await catalogRow.locator('.launch-catalog-copy p').innerText());
+        if (id === 'quick') await expect(menuRow.locator('.launch-menu-subtitle')).toHaveCount(0);
+        else await expect(menuRow.locator('.launch-menu-subtitle')).toHaveText(await catalogRow.locator('.launch-catalog-copy p').innerText());
         expect(await menuRow.locator('.launch-provider-logo').evaluate(el => el.outerHTML))
             .toBe(await catalogRow.locator('.launch-provider-logo').evaluate(el => el.outerHTML));
     }
@@ -516,6 +531,12 @@ for (const width of [320, 375, 768, 1024]) {
         await expect(panel.locator('.launch-menu-row')).toHaveCount(2);
         await panel.locator('[data-launch-message-toggle]').click();
         await expect(panel.locator('[data-launch-message]')).toBeFocused();
+        const inputBox = await panel.locator('[data-launch-message]').boundingBox();
+        const runBox = await panel.locator('.launch-menu-run').first().boundingBox();
+        const iconBox = await panel.locator('.launch-menu-icon').first().boundingBox();
+        expect(runBox.y).toBeGreaterThanOrEqual(inputBox.y + inputBox.height);
+        expect(Math.abs(inputBox.x - iconBox.x)).toBeLessThanOrEqual(1);
+        expect(Math.abs(inputBox.x + inputBox.width - runBox.x - runBox.width)).toBeLessThanOrEqual(1);
         for (const element of [panel, ...await panel.locator('.launch-menu-name, .launch-menu-run, .launch-menu-message-toggle, [data-launch-message]').all()]) {
             const box = await element.boundingBox();
             expect(box.x).toBeGreaterThanOrEqual(0);
@@ -1433,7 +1454,7 @@ for (const width of [375, 1280]) test(`library scripts list with script Actions 
     const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
     await trigger.click();
     await expect(panel.locator('.launch-menu-name')).toHaveText(['Release', 'Build', 'Start <CP210>']);
-    await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['Codex', 'Script', 'PowerShell script · run.ps1']);
+    await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['Script', 'PowerShell script · run.ps1']);
     const menuRow = panel.locator('.launch-menu-row').filter({ has: page.locator('[data-script-id="reg_run"]') });
     expect(await menuRow.locator('.launch-provider-logo').evaluate(el => el.outerHTML))
         .toBe(await signed.locator('.launch-provider-logo').evaluate(el => el.outerHTML));

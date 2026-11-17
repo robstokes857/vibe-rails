@@ -265,7 +265,7 @@ public sealed partial class PythonScriptService : IPythonScriptService
                 var document = ReadDocument();
                 if (document.Pin == null && !_firstPinPresenceVerifier(request.PresenceProof))
                     throw new PythonScriptValidationException(
-                        "Confirm the first signing PIN with your remote access PIN or a fresh dashboard code.");
+                        "Confirm the first signing PIN with your remote access password or PIN, or a fresh dashboard code.");
                 if (document.Pin == null || VerifyPin(document, request.CurrentPin))
                 {
                     var salt = RandomNumberGenerator.GetBytes(16);

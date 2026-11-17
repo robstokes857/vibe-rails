@@ -24,9 +24,10 @@ internal sealed class AgentIdleConsumer : ITerminalConsumer
         timer = this.clock.CreateTimer(_ => CheckIdle(), null, ScanInterval, ScanInterval);
     }
 
-    internal static void Attach(Terminal terminal, LaunchPreset? preset, TimeProvider? clock = null)
+    internal static void Attach(Terminal terminal, LaunchPreset? preset, TimeProvider? clock = null,
+        bool interactive = false)
     {
-        if (preset?.Kind == "agent")
+        if (preset?.Kind == "agent" && !interactive)
             terminal.Subscribe(new AgentIdleConsumer(terminal.CompleteAfterIdle, clock));
     }
 

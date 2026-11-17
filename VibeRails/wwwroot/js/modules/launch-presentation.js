@@ -36,13 +36,14 @@ export function libraryScripts(state) {
 }
 
 /** Shared identity for an AI Agents catalog row and its Quick actions entry. */
-export function launchPresentation(item) {
+export function launchPresentation(item, { showProviderLabel = true } = {}) {
     const brand = item.cli ? getCliBrand(item.cli) : null;
     const kind = Object.hasOwn(kinds, item.kind) ? kinds[item.kind] : { label: 'Action', icon: 'list-check' };
+    const providerLabel = !showProviderLabel && brand?.logo ? '' : brand?.label || item.cli || kind.label;
     return {
         logoHtml: brand?.logo
             ? `<img class="launch-provider-logo" src="${escapeHtml(brand.logo)}" alt=""${brand.logoFilter ? ` style="filter:${escapeHtml(brand.logoFilter)}"` : ''}>`
             : fallbackLogo(kind.icon),
-        subtitle: item.description || (item.definitionType === 'action' ? kind.label : brand?.label || item.cli || kind.label)
+        subtitle: item.description || (item.definitionType === 'action' ? kind.label : providerLabel)
     };
 }

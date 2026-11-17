@@ -143,7 +143,7 @@ test('card attention colors the originating terminal and Automation menu until c
     await expect(page.locator(button)).not.toHaveClass(/needs-attention/);
 });
 
-async function openFixture(page, total = 35) {
+async function openFixture(page, total = 35, presets = []) {
     const normal = { tabId: 'ordinary', sessionId: 'ordinary-session', cli: 'codex',
         hasActiveSession: true, createdUTC: '2026-09-23T09:00:00Z', workingDirectory: 'C:/fixture' };
     const tabs = new Map([[normal.tabId, normal]]);
@@ -155,6 +155,7 @@ async function openFixture(page, total = 35) {
     }
     const connections = [];
     const deleted = [];
+    const launches = [];
     let eventSocket;
     await page.addInitScript(() => {
         sessionStorage.setItem('viberails_tab', 'automation-fixture');
@@ -169,6 +170,18 @@ async function openFixture(page, total = 35) {
     });
     await page.route('**/api/v1/**', route => {
         const path = new URL(route.request().url()).pathname;
+        if (path.startsWith('/api/v1/presets/'))
+            return route.fulfill({ json: { ...presets.find(p => p.id === path.split('/').at(-1)), cli: 1 } });
+        if (path === '/api/v1/runs' && route.request().method() === 'POST') {
+            const body = route.request().postDataJSON();
+            launches.push(body);
+            const tab = { tabId: 'picker-agent', sessionId: 'picker-session', cli: 'codex',
+                hasActiveSession: true, createdUTC: new Date().toISOString(), workingDirectory: 'C:/fixture' };
+            tabs.set(tab.tabId, tab);
+            return route.fulfill({ json: { id: 'picker-run', status: 'queued' } });
+        }
+        if (path === '/api/v1/runs/picker-run')
+            return route.fulfill({ json: { id: 'picker-run', status: 'running', tabId: 'picker-agent', sessionId: 'picker-session' } });
         const snapshotMatch = path.match(/^\/api\/v1\/agent-tools\/terminal\/([^/]+)\/snapshot$/);
         if (snapshotMatch) {
             const tab = tabs.get(snapshotMatch[1]);
@@ -200,7 +213,10 @@ async function openFixture(page, total = 35) {
             '/api/v1/environments': { environments: [] },
             '/api/v1/agents': { agents: [] },
             '/api/v1/sandboxes': { sandboxes: [] },
-            '/api/v1/llm-picker/preferences': { items: [] },
+            '/api/v1/llm-picker/preferences': { items: presets.map((p, order) => ({
+                key: `preset:${p.id}:${p.cli}`, kind: p.initialPrompt ? 'agent' : 'quick-launch',
+                group: 'AI Agents', label: p.name, cli: p.cli, enabled: true, inProject: true, order
+            })) },
             '/api/v1/terminal/tabs': { tabs: [...tabs.values()], maxTabs: 100 }
         };
         return route.fulfill({ json: responses[path] || {} });
@@ -216,8 +232,42 @@ async function openFixture(page, total = 35) {
     )).toBe(false);
     // The terminal's documented initial focus retry runs180ms after connect.
     await page.waitForTimeout(220);
-    return { tabs, connections, deleted, emit: (type, payload) => eventSocket.send(JSON.stringify({ type, payload })) };
+    return { tabs, connections, deleted, launches, emit: (type, payload) => eventSocket.send(JSON.stringify({ type, payload })) };
 }
+
+for (const width of [1280, 390]) test(`terminal picker opens a regular Agent tab with controls and restores it at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 850 });
+    const fixture = await openFixture(page, 1, [{ id: 'reviewer', name: 'Saved reviewer', cli: 'codex',
+        initialPrompt: 'Review the changes.', revision: 4 }]);
+    await page.locator('#terminal-header-select-ts-control').click();
+    await page.locator('.ts-dropdown .option[data-value="preset:reviewer:codex"]').click();
+    await page.locator('#terminal-start-btn').click();
+    await expect(page.locator(normalTabs)).toHaveCount(2);
+    await expect.poll(() => page.evaluate(() => window.app.terminalController.manager.activeTabId)).toBe('picker-agent');
+    const tab = page.locator(normalTabs).filter({ hasText: 'Saved reviewer' });
+    await expect(tab).toBeVisible();
+    await expect(page.locator('.board-card-editor')).toHaveCount(0);
+    expect(fixture.launches).toEqual([expect.objectContaining({
+        definitionId: 'reviewer', terminalTab: true, nativeTerminal: false,
+        initialPrompt: 'Review the changes.', expectedRevision: 4
+    })]);
+    await expect(page.locator(count)).toHaveText('1');
+    expect(fixture.connections).toContain('picker-agent');
+    await tab.hover();
+    await expect(tab.getByRole('button', { name: 'Share session', exact: true })).toBeEnabled();
+    await page.screenshot({ path: testInfo.outputPath(`terminal-picker-agent-${width}.png`) });
+    await page.reload();
+    await expect(page.locator(normalTabs)).toHaveCount(2);
+    await expect(page.locator(normalTabs).filter({ hasText: 'Saved reviewer' })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.app.terminalController.manager.activeTabId)).toBe('picker-agent');
+    await page.locator(button).click();
+    await expect(page.locator('[data-automation-open="automation-1"]')).toBeVisible();
+    await expect(page.locator('[data-automation-open="picker-agent"]')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => window.app.terminalController.manager.closeTab('picker-agent'));
+    await expect(page.locator(normalTabs)).toHaveCount(1);
+    expect(fixture.deleted).not.toContain('picker-agent'); // Normal tabs retain the close/undo grace period.
+});
 
 test('finished workflows leave the robot menu even with an active wrapper shell', async ({ page }) => {
     const fixture = await openFixture(page);

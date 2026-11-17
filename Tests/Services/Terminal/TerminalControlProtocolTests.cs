@@ -92,6 +92,7 @@ public sealed class TerminalControlProtocolTests
     [Theory]
     [InlineData("__PIN__:1234", true)]
     [InlineData("__PIN__:123456", true)]
+    [InlineData("__PIN__:  Password7  ", true)]
     [InlineData("__PIN__:", true)]
     [InlineData("__PIN_", false)]
     [InlineData("1234", false)]
@@ -105,14 +106,16 @@ public sealed class TerminalControlProtocolTests
             TerminalControlProtocol.IsPinResponseFrame(System.Text.Encoding.UTF8.GetBytes(frame)));
     }
 
-    [Fact]
-    public void SanitizeFrameForLog_RedactsPinPayloads()
+    [Theory]
+    [InlineData("1234")]
+    [InlineData("123456")]
+    [InlineData("  Password7  ")]
+    [InlineData("秘密7\u001b[31m")]
+    public void SanitizeFrameForLog_RedactsCredentialPayloads(string credential)
     {
-        // A 4-6 digit PIN in a log file is the whole secret. Whatever else the
-        // sanitizer does, the digits must never survive into the log message.
-        var sanitized = TerminalControlProtocol.SanitizeFrameForLog("__PIN__:123456");
+        var sanitized = TerminalControlProtocol.SanitizeFrameForLog("__PIN__:" + credential);
 
-        Assert.DoesNotContain("123456", sanitized, StringComparison.Ordinal);
+        Assert.DoesNotContain(credential, sanitized, StringComparison.Ordinal);
         Assert.StartsWith("__PIN__:", sanitized, StringComparison.Ordinal);
         Assert.Contains("redacted", sanitized, StringComparison.OrdinalIgnoreCase);
     }

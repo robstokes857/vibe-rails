@@ -99,7 +99,7 @@ internal static class TerminalControlProtocol
     }
 
     /// <summary>
-    /// Renders a rejected frame safe to log: redacts PIN payloads (the digits are a
+    /// Renders a rejected frame safe to log: redacts credential payloads (passwords and PINs are
     /// secret and must never be persisted), strips control characters (a malformed
     /// frame can carry ANSI escapes, which must not land unescaped in the log) and
     /// truncates. Same concern and filter as <see cref="SanitizeReason"/>.

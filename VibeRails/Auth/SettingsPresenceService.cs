@@ -14,7 +14,7 @@ public sealed class SettingsPresenceService
     private int failures;
     private DateTime retryAfter;
 
-    /// <summary>Requests the current PIN, or issues a single-use dashboard confirmation code.</summary>
+    /// <summary>Requests the current password or legacy PIN, or issues a single-use dashboard confirmation code.</summary>
     public SecurityChallengeResponse Challenge(bool pinRequired)
     {
         lock (gate)
@@ -30,8 +30,9 @@ public sealed class SettingsPresenceService
     {
         lock (gate)
         {
-            if (DateTime.UtcNow < retryAfter || proof is not { Length: > 0 and <= 128 }) return false;
-            var pinRequired = !string.IsNullOrEmpty(settings.PinHash) && !string.IsNullOrEmpty(settings.PinSalt);
+            if (DateTime.UtcNow < retryAfter || !Services.RemoteConfig.IsCredentialWithinBounds(proof)) return false;
+            // Must match the Challenge caller's RemoteConfig.IsPinConfigured.
+            var pinRequired = Services.RemoteConfig.HasCredential(settings);
             var accepted = pinRequired ? Hasher.Verify(proof, settings.PinSalt, settings.PinHash)
                 : code is not null && DateTime.UtcNow < expires && CryptographicOperations.FixedTimeEquals(
                     Encoding.UTF8.GetBytes(proof), Encoding.UTF8.GetBytes(code));

@@ -869,7 +869,7 @@ test('First signing PIN setup sends typed presence proof and cancellation sends 
         };
         await controller.openPinSetupModal();
         assert.equal(forms.length, 2);
-        assert.match(forms[1].body, pinRequired ? /remote access PIN/ : /A1B2C3D4/);
+        assert.match(forms[1].body, pinRequired ? /remote access password or PIN/ : /A1B2C3D4/);
         assert.deepEqual(app.calls[1].body, { currentPin: null, newPin: '1234', presenceProof: 'typed-proof' });
         assert.equal(controller.state.presenceProof, undefined);
     }

@@ -62,7 +62,8 @@ export class LaunchApi {
             initialPrompt = null,
             userMessage = null,
             expectedRevision = null,
-            nativeTerminal = type === 'preset'
+            nativeTerminal = type === 'preset',
+            terminalTab = false
         } = {}
     ) {
         return this.call('runs', 'POST', {
@@ -73,7 +74,8 @@ export class LaunchApi {
             initialPrompt,
             userMessage,
             expectedRevision,
-            nativeTerminal
+            nativeTerminal,
+            terminalTab
         });
     }
     runs(id, before, options) {

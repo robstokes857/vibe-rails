@@ -3,7 +3,7 @@ import { LaunchApi } from './launch-api.js';
 import { launchPresentation, libraryScripts } from './launch-presentation.js';
 import { hiddenQuickActions, quickActionKey, openQuickActionPreferences } from './quick-action-preferences.js';
 
-const footer = '<div class="launch-menu-footer"><button type="button" class="btn btn-link launch-menu-manage" data-launch-customize>Manage quick actions…</button><button type="button" class="btn btn-link launch-menu-manage" data-launch-manage>Manage AI Agents<i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></div>';
+const footer = '<div class="launch-menu-footer"><button type="button" class="btn btn-secondary launch-menu-manage" data-launch-customize>Manage quick actions…<i class="fa-solid fa-gear" aria-hidden="true"></i></button><button type="button" class="btn btn-secondary launch-menu-manage" data-launch-manage>Manage AI Agents<i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></div>';
 
 /**
  * The optional user message, collapsed behind a link so rows stay compact (VIBE-334).
@@ -19,8 +19,7 @@ function messageDisclosure(name, messageId) {
             <div class="launch-menu-message-panel" id="${messageId}-panel" hidden>
                 <label class="form-label" for="${messageId}">User message <span class="text-muted">(optional)</span></label>
                 <textarea class="form-control" id="${messageId}" data-launch-message rows="3" maxlength="8000" autocomplete="off"
-                    aria-label="User message for ${safeName} (optional)" aria-describedby="${messageId}-help"></textarea>
-                <p class="launch-menu-message-help" id="${messageId}-help">Added to the prompt. Enter runs; Shift+Enter starts a new line.</p>
+                    aria-label="User message for ${safeName} (optional)"></textarea>
             </div>
         </div>`;
 }
@@ -31,7 +30,7 @@ export function menuRow(name, presentation, target, messageId = null) {
         <span class="launch-menu-icon">${presentation.logoHtml}</span>
         <div class="launch-menu-details">
             <span class="launch-menu-name">${escapeHtml(name)}</span>
-            <span class="launch-menu-subtitle">${escapeHtml(presentation.subtitle)}</span>
+            ${presentation.subtitle ? `<span class="launch-menu-subtitle">${escapeHtml(presentation.subtitle)}</span>` : ''}
         </div>
         <button type="button" class="btn btn-secondary launch-menu-run" ${target} aria-label="Run ${escapeHtml(name)}"><i class="fa-solid fa-play" aria-hidden="true"></i><span>Run</span></button>
         ${messageId ? messageDisclosure(name, messageId) : ''}
@@ -44,6 +43,12 @@ export function toggleMessage(toggle, open) {
     const input = panel?.querySelector('[data-launch-message]');
     if (!panel || !input) return;
     panel.hidden = !open;
+    const row = toggle.closest('.launch-menu-row');
+    const run = row.querySelector('.launch-menu-run');
+    row.classList.toggle('has-message', open);
+    // Move the existing button so Tab follows the expanded form's visual order.
+    if (open) panel.append(run);
+    else panel.closest('.launch-menu-message').before(run);
     toggle.setAttribute('aria-expanded', String(open));
     const verb = !open && input.value.trim() ? 'Edit' : 'Add';
     toggle.querySelector('span').textContent = `${verb} message`;
@@ -120,7 +125,7 @@ export class LaunchMenu {
             const available = items.filter((item) => item.canLaunch && !hidden.has(quickActionKey(item)));
             const scripts = libraryScripts(library?.state).filter((script) => script.canRun && !hidden.has(`script:${script.id}`));
             const rows = [
-                ...available.map((item, index) => menuRow(item.name, launchPresentation(item), `data-launch-id="${escapeHtml(item.id)}"`, item.definitionType === 'preset' ? `launch-message-${index}` : null)),
+                ...available.map((item, index) => menuRow(item.name, launchPresentation(item, { showProviderLabel: false }), `data-launch-id="${escapeHtml(item.id)}"`, item.definitionType === 'preset' ? `launch-message-${index}` : null)),
                 ...scripts.map((script) => menuRow(script.name, script, `data-script-id="${escapeHtml(script.id)}"`))
             ];
             panel.innerHTML = '<h2 class="launch-menu-heading">Quick actions</h2>' +

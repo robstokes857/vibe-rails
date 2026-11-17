@@ -6,8 +6,10 @@ The current launch model uses global presets and single typed Actions in
 `~/.vibe_rails/launches.db`, automatically initialized in Debug and Release.
 `LaunchService` snapshots admissions, `LaunchDispatcher` owns atomic execution
 claims, and `LaunchScheduler` runs only in an open root backend. Board launches
-use in-app terminals; all non-Board preset admissions and retries use native terminals,
-regardless of caller presentation flags. Script/check presentation is unchanged. Assignments
+use in-app terminals. The terminal picker explicitly requests `terminalTab:true` for
+ordinary interactive preset tabs; retries retain that presentation and these sessions
+have no agent idle deadline. Other non-Board preset admissions and retries use native
+terminals. Script/check presentation is unchanged. Assignments
 and ordered entries remain behind `IBoardStore`; recordings stay in the session
 store. Retired Environment/Job definitions are retained without adoption or
 execution. Historical sections describing their launch paths are superseded by
@@ -521,7 +523,8 @@ Terminal.ReadLoop → dispatches to all ITerminalConsumer subscribers:
   ├── DbLoggingConsumer → TerminalOutputFilter → TerminalStateService.LogOutput()
   └── WebSocketConsumer → WebSocket binary frames (if browser connected)
   ↓
-Console.ReadKey / WebSocket input → InputAccumulator → TerminalStateService.RecordInput()
+MacConsoleInput (macOS raw bytes) / Console.ReadKey (other native) / WebSocket input
+  → TerminalIoRouter → TerminalStateService.RecordInput() → InputAccumulator
   ↓
 Git changes tracked on each user input (Enter key)
   ↓

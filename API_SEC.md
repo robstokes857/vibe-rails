@@ -799,10 +799,10 @@ incident below. Ordinary authenticated terminal-input routes remain their own ca
 
 ### Repository access, scripts and local reads
 
-Settings writes and all remote-PIN routes are root-only. Account-key replacement/removal,
+Settings writes and all remote-credential routes are root-only. Account-key replacement/removal,
 Remote Access and relay toggle changes, pointing an Enterprise Network Proxy at a new host,
-and PIN set/clear require the current PIN. Without
-a configured PIN, the dashboard shows a random confirmation code that expires after two
+and password set/clear require the current password or legacy PIN. Without
+a configured credential, the dashboard shows a random confirmation code that expires after two
 minutes and is consumed once. Five failed proofs impose a five-minute process-wide cooldown;
 issuing another challenge does not reset it. Scoped CLI credentials cannot obtain a challenge
 or perform these writes. This is dashboard confirmation, not protection against arbitrary
@@ -1292,10 +1292,19 @@ hosted invitation ids are opaque identifiers in both directions, because each be
 segment that a client would otherwise resolve (`..`); and a lane colour is written into the page
 only as `#rrggbb`. Entries that fail are skipped and counted, never retried forever.
 
-A relay-attached terminal's viewer is unlocked only by the Remote Access PIN. A session is offered
-to the relay only while a PIN exists; if the PIN is cleared afterwards, live sessions lock (frames
-dropped, lock prompt, no snapshot) instead of opening, and frames sent while no PIN exists do not
-count toward the failed-PIN lockout. See `RemoteViewerLock`.
+A relay-attached terminal's viewer is unlocked only by the Remote Access password or legacy PIN.
+The API and terminal verifier accept exact, nonempty text up to 128 UTF-16 code units. Only the
+setup/change UI applies the six-character minimum with a letter and a number; login never applies
+that strength rule. Existing PIN hashes/salts and the `pin` JSON fields, routes and `__PIN__:` wire
+prefix stay compatible, with no conversion or forced reset. Deploy the password-capable hosted
+viewers before releasing desktop password creation. Older desktop builds still reject nonnumeric
+credentials; users who save a password must use an updated desktop for remote login.
+A session is offered to the relay only while a credential exists; if it is cleared afterwards,
+live sessions lock (frames dropped, lock prompt, no snapshot) instead of opening, and frames sent
+while none exists do not count toward lockout. Failed attempts survive browser and relay reconnects;
+the third failure disconnects the viewer and shuts down the terminal host, including the existing
+forced process-tree termination fallback. The relay's independent attempt limits remain in force.
+See `RemoteViewerLock`.
 
 Remote Start work is outbound polling by an open root backend, only for its own project's
 published, non-imported boards. Requests carry opaque board/card IDs and a required sync sequence,

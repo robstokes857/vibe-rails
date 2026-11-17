@@ -831,9 +831,10 @@ replaces the picker and offers **Show hidden entries**, which opens the panel.
 #### Desktop Quick actions
 
 The top-bar play button opens a compact **Quick actions** popover. Each launch row
-matches its AI Agents catalog entry: the same provider logo or fallback icon,
-name, and muted subtitle. Show the saved description when present; otherwise show
-the provider label (such as **Codex**) for presets and the type label for Actions.
+matches its AI Agents catalog entry: the same provider logo or fallback icon
+and name. Show a muted saved description when present; otherwise omit the preset's
+provider label when its logo already identifies it. Keep a text label for unknown
+providers with fallback icons, and keep the type label for Actions.
 Reuse the catalog's provider assets, filters and existing Font Awesome fallback
 icons, including `code` for Scripts, without adding a colored tile behind logos.
 Keep a separate secondary **Run** button matching the catalog's dark fill, border,
@@ -843,10 +844,13 @@ decorative; shared presentation logic keeps the catalog and dropdown aligned.
 Agent and Quick Launch rows keep that compact row and add a small teal **Add message**
 `btn-link` under the name and subtitle, aligned with them, with a chevron that turns
 down while open (no rotation under reduced motion). It toggles a labelled
-**User message (optional)** textarea (three rows, vertical resize) spanning the name
-and Run columns, with one hint: "Added to the prompt. Enter runs; Shift+Enter starts
-a new line." Opening the menu focuses the first Run; opening the box focuses the
-textarea. Collapsing keeps the text and the link then reads **Edit message**; Run
+**User message (optional)** textarea (three rows, vertical resize). When expanded,
+let the name use the space beside the logo, span the message field across the full
+row below it, and place the same **Run** button at the bottom right, after the input
+in keyboard order. Use 16px editable text and 8px between the label and field; omit
+the helper paragraph below the field. Enter runs; Shift+Enter adds a new line.
+Opening the menu focuses the first Run; opening the box focuses the textarea.
+Collapsing returns Run beside the name, keeps the text and the link then reads **Edit message**; Run
 sends whatever the box holds. Each opening starts collapsed and empty, and blank
 input launches normally. In the VS Code Launch view, the play icon and a row click
 run at once without asking. Agent and Quick Launch rows add an inline **Run with
@@ -867,7 +871,12 @@ definition editor's footer alike (never "Retire").
 
 Use the Menu panel surface, 16px padding and 8px gaps. Rows use the base surface,
 a quiet border and 12px padding. Keep Run visible beside long names, including on
-narrow screens. Place **Manage AI Agents** in a quieter footer after a separator.
+narrow screens. After a separator, stack **Manage quick actions…** and
+**Manage AI Agents** as full-width secondary buttons with an 8px gap. Use the
+shared dark fill, visible neutral border, light text and hover/focus states.
+Keep labels left-aligned, with a decorative gear on the right of **Manage quick
+actions…** and the existing right arrow on **Manage AI Agents**, using the menu's
+Font Awesome icons.
 Add **Manage quick actions…** in that footer and in the VS Code Launch view. Both
 open the same dialog: native show/hide switches for this project's saved Agents,
 Quick Launches, Actions and signed library scripts. Changes save immediately and
@@ -877,11 +886,13 @@ pickers. Explain saving and failures inline, keep the switch's previous value af
 a failed save, and return focus to the opener when the dialog closes.
 The trigger references the popover with `aria-controls` and `aria-haspopup="dialog"`;
 ordinary buttons support Tab, and Escape closes it and returns focus to the trigger.
-Saved Agents and Quick Launches open a native OS terminal for every non-Board launch,
-including the catalog, Quick actions, terminal picker, VS Code, Quality/Rules fixes,
-schedules and Git events. Keep the current page open rather than navigating to an
-in-app terminal or opening the definition editor. Board-launched agents, including
-card runs, lane agents and managers, use in-app terminals.
+Saved Agents and Quick Launches open a native OS terminal from the catalog, Quick
+actions, VS Code, Quality/Rules fixes, schedules and Git events. These launches keep
+the current page open. The terminal picker opens and focuses an ordinary in-app
+terminal tab with the usual controls, outside the robot menu, without opening the
+definition editor. These interactive sessions stay open while idle. Board-launched
+agents, including card runs, lane agents and managers, retain their in-app presentation;
+Board Automation terminals stay in the robot menu.
 Run on a library script opens its private, minimizable script terminal on the current page.
 Show launch progress and failures explicitly; queued work must not be reported as
 already running. Script and check execution keeps its existing presentation.

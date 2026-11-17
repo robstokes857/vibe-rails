@@ -1,4 +1,5 @@
 import { confirmDialog } from './utils.js';
+import { remotePasswordError } from './remote-access-password.js';
 import { SettingsKeysPanel } from './settings-keys.js';
 import { SetupPanel, refreshSetupStatus } from './setup-panel.js';
 import { SetupInstallWindow } from './setup-install-window.js';
@@ -116,7 +117,7 @@ export class SettingsController {
                 remoteAccessToggle.addEventListener('change', () => {
                     if (remoteAccessToggle.checked && !this._pinIsSet) {
                         remoteAccessToggle.checked = false;
-                        this.app.showToast('Remote Access', 'A PIN must be set before enabling remote access.', 'warning');
+                        this.app.showToast('Remote Access', 'Create a remote access password before enabling remote access.', 'warning');
                         this._updateDirtyState(root);
                     }
                 });
@@ -199,7 +200,7 @@ export class SettingsController {
 
                     const wantsRemote = remoteAccessToggle?.checked || false;
                     if (wantsRemote && !this._pinIsSet) {
-                        this.app.showToast('Remote Access', 'A PIN must be set before enabling remote access.', 'warning');
+                        this.app.showToast('Remote Access', 'Create a remote access password before enabling remote access.', 'warning');
                         if (remoteAccessToggle) remoteAccessToggle.checked = false;
                         this._updateDirtyState(root);
                         return;
@@ -780,7 +781,7 @@ export class SettingsController {
                     this.app.closeModal();
                     this._pinIsSet = true;
                     this._updatePinUI(badge, btnSet, btnClear, true);
-                    this.app.showToast('PIN Lock', 'PIN set successfully', 'success');
+                    this.app.showToast('Remote access', 'Password saved', 'success');
                 } catch (error) {
                     throw error;
                 }
@@ -794,16 +795,16 @@ export class SettingsController {
                 await this.app.apiCall('/api/v1/settings/pin', 'DELETE', { pin: '', presenceProof });
                 this._pinIsSet = false;
                 this._updatePinUI(badge, btnSet, btnClear, false);
-                this.app.showToast('PIN Lock', 'PIN cleared', 'success');
+                this.app.showToast('Remote access', 'Password cleared', 'success');
                 // Revert remote access toggle if it was enabled
                 const remoteToggle = root.querySelector('#setting-remote-access');
                 if (remoteToggle?.checked) {
                     remoteToggle.checked = false;
                     this._updateDirtyState(root);
-                    this.app.showToast('Remote Access', 'Remote access disabled because PIN was cleared.', 'warning');
+                    this.app.showToast('Remote Access', 'Remote access disabled because the password was cleared.', 'warning');
                 }
             } catch (error) {
-                this.app.showError('Failed to clear PIN: ' + error.message);
+                this.app.showError('Failed to clear password: ' + error.message);
             }
         });
     }
@@ -815,13 +816,13 @@ export class SettingsController {
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
                     <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2m3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2"/>
                 </svg>
-                PIN Set`;
+                Password or PIN set`;
             btnSet.textContent = '';
             btnSet.innerHTML = `
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
                     <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2m3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2"/>
                 </svg>
-                Change PIN`;
+                Change password`;
             btnClear.style.removeProperty('display');
         } else {
             badge.className = 'pin-status-badge not-set';
@@ -829,12 +830,12 @@ export class SettingsController {
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
                     <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2m3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2"/>
                 </svg>
-                Not Set`;
+                Not set`;
             btnSet.innerHTML = `
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
                     <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2m3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2"/>
                 </svg>
-                Set PIN`;
+                Create password`;
             btnClear.style.setProperty('display', 'none', 'important');
         }
     }
@@ -842,15 +843,22 @@ export class SettingsController {
     async _requestPresenceProof() {
         const challenge = await this.app.apiCall('/api/v1/settings/security-challenge', 'GET');
         return new Promise(resolve => {
+            let input;
             this.app.showModal('Confirm security change', `
-                <p>${challenge.pinRequired ? 'Enter your current remote access PIN.' : 'Type the confirmation code shown below to approve this change.'}</p>
-                ${challenge.pinRequired ? '' : `<p><strong>${this.app.escapeHtml(challenge.code)}</strong></p>`}
-                <input id="settings-presence-proof" class="form-control" type="${challenge.pinRequired ? 'password' : 'text'}" maxlength="128" autocomplete="off" aria-label="Confirmation">
-                <div class="mt-3"><button class="btn btn-secondary" data-action="close-modal">Cancel</button>
-                <button id="settings-presence-confirm" class="btn btn-primary">Continue</button></div>`,
-                { onClose: () => resolve(null) });
-            const input = document.getElementById('settings-presence-proof');
-            document.getElementById('settings-presence-confirm').addEventListener('click', () => {
+                <form id="settings-presence-form">
+                    <p>${challenge.pinRequired ? 'Enter your current remote access password or PIN.' : 'Type the confirmation code shown below to approve this change.'}</p>
+                    ${challenge.pinRequired ? '' : `<p><strong>${this.app.escapeHtml(challenge.code)}</strong></p>`}
+                    <label class="form-label" for="settings-presence-proof">${challenge.pinRequired ? 'Current password or PIN' : 'Confirmation code'} (required)</label>
+                    <input id="settings-presence-proof" class="form-control" type="${challenge.pinRequired ? 'password' : 'text'}" maxlength="128" autocomplete="${challenge.pinRequired ? 'current-password' : 'off'}" autocapitalize="off" spellcheck="false" required>
+                    <div class="mt-3 d-flex flex-wrap gap-2 justify-content-end">
+                        <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
+                        <button type="submit" id="settings-presence-confirm" class="btn btn-primary">Continue</button>
+                    </div>
+                </form>`,
+                { onClose: () => { if (input) input.value = ''; resolve(null); } });
+            input = document.getElementById('settings-presence-proof');
+            document.getElementById('settings-presence-form').addEventListener('submit', event => {
+                event.preventDefault();
                 const proof = input.value;
                 input.value = '';
                 resolve(proof);
@@ -861,162 +869,62 @@ export class SettingsController {
     }
 
     _showPinModal(onConfirm) {
-        const MAX_DIGITS = 6;
-        const MIN_DIGITS = 4;
-
-        const modalHtml = `
-            <div class="text-center">
-                <p class="pin-modal-subtitle">Enter a ${MIN_DIGITS}–${MAX_DIGITS} digit PIN to protect remote viewer access</p>
-                <div class="pin-digit-row" id="pin-digit-row">
-                    ${Array.from({ length: MAX_DIGITS }, (_, i) => `
-                        <input
-                            class="pin-digit"
-                            type="password"
-                            inputmode="numeric"
-                            maxlength="1"
-                            pattern="[0-9]"
-                            autocomplete="off"
-                            data-pin-index="${i}"
-                            aria-label="PIN digit ${i + 1}"
-                        >`).join('')}
-                </div>
-                <div class="pin-length-hint" id="pin-length-hint">Enter ${MIN_DIGITS}–${MAX_DIGITS} digits</div>
-                <div class="pin-actions">
+        let input;
+        this.app.showModal(this._pinIsSet ? 'Change remote access password' : 'Create remote access password', `
+            <form id="remote-password-form" novalidate>
+                <label class="form-label" for="remote-access-password">New password (required)</label>
+                <input id="remote-access-password" class="form-control" type="password" maxlength="128"
+                    autocomplete="new-password" autocapitalize="off" spellcheck="false"
+                    aria-describedby="remote-password-help remote-password-error" required>
+                <p id="remote-password-help" class="form-text">Use at least 6 characters, including a letter and a number. Maximum 128 characters.</p>
+                <p id="remote-password-error" class="text-danger" role="alert" hidden></p>
+                <div class="mt-3 d-flex flex-wrap gap-2 justify-content-end">
                     <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" id="btn-pin-confirm" disabled>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" class="me-1" viewBox="0 0 16 16">
-                            <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2m3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2"/>
-                        </svg>
-                        Set PIN
-                    </button>
+                    <button type="submit" class="btn btn-primary" id="btn-pin-confirm">Save password</button>
                 </div>
-                <div id="pin-error-msg" class="text-danger mt-2" style="min-height:1.2em;font-size:0.82rem;"></div>
-            </div>
-        `;
+            </form>`, { onClose: () => { if (input) input.value = ''; } });
 
-        const titleHtml = `
-            <span class="pin-modal-title">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
-                    <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2m3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2"/>
-                </svg>
-                Set Remote PIN
-            </span>`;
-
-        this.app.showModal(titleHtml, modalHtml);
-
-        // After modal is in DOM, wire up the digit inputs
         const container = document.getElementById('modal-container');
-        const digits = Array.from(container.querySelectorAll('.pin-digit'));
+        input = container.querySelector('#remote-access-password');
+        const form = container.querySelector('#remote-password-form');
         const confirmBtn = container.querySelector('#btn-pin-confirm');
-        const hintEl = container.querySelector('#pin-length-hint');
-        const errorEl = container.querySelector('#pin-error-msg');
+        const errorEl = container.querySelector('#remote-password-error');
+        container.querySelector('.modal-dialog')?.classList.add('pin-modal-dialog');
+        let saving = false;
 
-        // Override modal title with raw HTML (showModal escapes, so patch it)
-        const titleEl = container.querySelector('.modal-title');
-        if (titleEl) titleEl.innerHTML = titleHtml;
-
-        // Narrow the modal dialog
-        const dialogEl = container.querySelector('.modal-dialog');
-        if (dialogEl) dialogEl.classList.add('pin-modal-dialog');
-
-        const getPin = () => digits.map(d => d.value).join('').replace(/\D/g, '');
-
-        const updateState = () => {
-            const pin = getPin();
-            const len = pin.length;
-
-            digits.forEach((d, i) => {
-                d.classList.toggle('filled', d.value !== '');
-            });
-
-            if (len === 0) {
-                hintEl.textContent = `Enter ${MIN_DIGITS}–${MAX_DIGITS} digits`;
-            } else if (len < MIN_DIGITS) {
-                hintEl.textContent = `${MIN_DIGITS - len} more digit${MIN_DIGITS - len > 1 ? 's' : ''} needed`;
-            } else {
-                hintEl.textContent = `${len} digit${len > 1 ? 's' : ''} entered — looks good!`;
-            }
-
-            confirmBtn.disabled = len < MIN_DIGITS;
+        input.addEventListener('input', () => {
+            input.removeAttribute('aria-invalid');
+            errorEl.hidden = true;
             errorEl.textContent = '';
-        };
-
-        digits.forEach((input, idx) => {
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Backspace') {
-                    if (input.value === '' && idx > 0) {
-                        digits[idx - 1].value = '';
-                        digits[idx - 1].focus();
-                        updateState();
-                        e.preventDefault();
-                    }
-                } else if (e.key === 'ArrowLeft' && idx > 0) {
-                    digits[idx - 1].focus();
-                    e.preventDefault();
-                } else if (e.key === 'ArrowRight' && idx < digits.length - 1) {
-                    digits[idx + 1].focus();
-                    e.preventDefault();
-                } else if (e.key === 'Enter') {
-                    const pin = getPin();
-                    if (pin.length >= MIN_DIGITS) confirmBtn.click();
-                }
-            });
-
-            input.addEventListener('input', (e) => {
-                const raw = input.value.replace(/\D/g, '');
-                if (raw.length === 0) {
-                    input.value = '';
-                    updateState();
-                    return;
-                }
-
-                // Handle paste across multiple digits
-                if (raw.length > 1) {
-                    const chars = raw.split('');
-                    chars.forEach((ch, offset) => {
-                        if (idx + offset < digits.length) {
-                            digits[idx + offset].value = ch;
-                        }
-                    });
-                    const nextIdx = Math.min(idx + chars.length, digits.length - 1);
-                    digits[nextIdx].focus();
-                    updateState();
-                    return;
-                }
-
-                input.value = raw;
-                updateState();
-
-                if (idx < digits.length - 1) {
-                    digits[idx + 1].focus();
-                }
-            });
         });
-
-        confirmBtn.addEventListener('click', async () => {
-            const pin = getPin();
-            if (pin.length < MIN_DIGITS) return;
-
+        form.addEventListener('submit', async event => {
+            event.preventDefault();
+            if (saving) return;
+            const error = remotePasswordError(input.value);
+            if (error) {
+                input.setAttribute('aria-invalid', 'true');
+                errorEl.textContent = error;
+                errorEl.hidden = false;
+                input.focus();
+                return;
+            }
+            saving = true;
+            input.disabled = true;
             confirmBtn.disabled = true;
-            confirmBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Saving…`;
-
+            confirmBtn.textContent = 'Saving…';
             try {
-                await onConfirm(pin);
+                await onConfirm(input.value);
+                input.value = '';
             } catch (error) {
-                // Flash error state on all filled digits
-                digits.forEach(d => { if (d.value) d.classList.add('error'); });
-                setTimeout(() => digits.forEach(d => d.classList.remove('error')), 600);
-                errorEl.textContent = error.message || 'Failed to set PIN';
+                errorEl.textContent = error.message || 'Could not save the password. Try again.';
+                errorEl.hidden = false;
+            } finally {
+                saving = false;
+                input.disabled = false;
                 confirmBtn.disabled = false;
-                confirmBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" class="me-1" viewBox="0 0 16 16">
-                        <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2m3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2"/>
-                    </svg>
-                    Set PIN`;
+                confirmBtn.textContent = 'Save password';
             }
         });
-
-        // Focus first digit after render
-        requestAnimationFrame(() => digits[0]?.focus());
+        input.focus();
     }
 }

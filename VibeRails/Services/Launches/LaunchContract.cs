@@ -12,7 +12,7 @@ public sealed record SaveBindingRequest(string DefinitionId, string DefinitionTy
     bool Enabled = true, long ExpectedRevision = 0, RuleLaunchTrigger? Rule = null);
 public sealed record LaunchRequest(string DefinitionId, string DefinitionType = "preset", string? OccurrenceId = null,
     string? PromptPrefix = null, string? InitialPrompt = null, long? ExpectedRevision = null,
-    bool NativeTerminal = false, string? UserMessage = null);
+    bool NativeTerminal = false, string? UserMessage = null, bool TerminalTab = false);
 public sealed record ResolveUncertainLaunchRequest(bool ConfirmedStopped);
 public sealed record RetireLaunchRequest(long ExpectedRevision);
 public sealed record LaunchError(string Error, string Code, long? CurrentRevision = null);

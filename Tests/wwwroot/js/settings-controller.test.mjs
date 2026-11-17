@@ -150,7 +150,7 @@ test('settings page groups its cards under a section tab bar', () => {
     assert.match(html, /id="settings-panel-llm"[\s\S]{0,120}hidden/);
     // Like settings stay on their own tabs.
     assert.match(html, /id="settings-panel-llm"[\s\S]*?Codex Settings[\s\S]*?Token Saver/);
-    assert.match(html, /id="settings-panel-general"[\s\S]*?Remote PIN Lock[\s\S]*?Application Settings/);
+    assert.match(html, /id="settings-panel-general"[\s\S]*?Remote access password[\s\S]*?Application Settings/);
 });
 
 test('the Context tab reuses the board context editor for App context, and the nudge help names it', () => {

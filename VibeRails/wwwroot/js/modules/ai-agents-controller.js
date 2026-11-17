@@ -225,14 +225,17 @@ export class AiAgentsController {
     async launch(
         id,
         type = 'preset',
-        { focusTerminal = false, promptPrefix = null, userMessage = null, nativeTerminal = !focusTerminal } = {}
+        { focusTerminal = false, promptPrefix = null, userMessage = null, nativeTerminal = !focusTerminal,
+            terminalTab = false, terminalSelection = null, signal } = {}
     ) {
-        if (type === 'preset') nativeTerminal = true;
+        terminalTab = type === 'preset' && terminalTab;
+        if (type === 'preset') nativeTerminal = !terminalTab;
         if (this.launching.has(id)) return;
         this.launching.add(id);
         try {
             let initialPrompt = null,
-                expectedRevision = null;
+                expectedRevision = null,
+                terminalMetadata = null;
             if (type === 'preset') {
                 const preset = await this.api.definition(type, id);
                 const resolved = await resolvePromptTemplateForLaunch(
@@ -243,17 +246,34 @@ export class AiAgentsController {
                         userMessage
                     }
                 );
-                if (!resolved || resolved.canceled) return;
+                if (!resolved || resolved.canceled || signal?.aborted) return;
                 initialPrompt = resolved.initialPrompt;
                 expectedRevision = preset.revision;
+                terminalMetadata = {
+                    selection: terminalSelection,
+                    label: preset.name,
+                    title: preset.name
+                };
             }
             const run = await this.api.run(id, type, {
                 promptPrefix,
                 initialPrompt,
                 userMessage,
                 expectedRevision,
-                nativeTerminal
+                nativeTerminal,
+                terminalTab
             });
+            if (terminalTab) {
+                this.app.showToast('AI Agents', 'Opening terminal tab…', 'info');
+                try {
+                    if (!(await openLaunchTerminal(this.app, this.api, run, { signal, metadata: terminalMetadata })) && !signal?.aborted)
+                        this.app.showToast('AI Agents', 'Terminal has not opened. Check Run history before running again.', 'warning');
+                } catch (error) {
+                    if (error.name !== 'AbortError')
+                        this.app.showToast('AI Agents', 'Run queued, but its terminal could not be opened. Check Run history before retrying.', 'warning');
+                }
+                return run;
+            }
             if (nativeTerminal) {
                 this.app.showToast('AI Agents', 'Starting in a native terminal…', 'info');
                 let started;

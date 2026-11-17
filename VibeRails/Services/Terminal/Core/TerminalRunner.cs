@@ -287,386 +287,9 @@ public class TerminalRunner
 
                 if (remoteConn.IsConnected)
                 {
-                    var takeoverGate = new SemaphoreSlim(1, 1);
-                    var remoteViewerAuthorized = RemoteViewerLock.Initial;
-                    var remoteTakeoverNotified = false;
-                    var lockPromptSent = false;
-                    // Deliberately persists for the whole session and is reset ONLY on a
-                    // successful PIN. The disconnect / reconnect handlers re-lock the viewer but
-                    // must NOT reset this, or an attacker could refill the guess budget by forcing
-                    // a reconnect (network blip, idle timeout, output-overflow resync) or by
-                    // disconnect/reconnect cycling — defeating the 3-strikes lockout.
-                    var failedPinAttempts = 0;
-                    var remoteOutputConsumer = new RemoteOutputConsumer(
-                        remoteConn,
-                        canForward: () => System.Threading.Volatile.Read(ref remoteViewerAuthorized) == 1);
-                    terminal.Subscribe(remoteOutputConsumer);
-
-                    async Task NotifyRemoteTakeoverAsync(string trigger)
-                    {
-                        if (remoteTakeoverNotified)
-                            return;
-
-                        remoteTakeoverNotified = true;
-
-                        Log.Information("[VibeRails] Remote viewer connected");
-
-                        // Update the native terminal's title bar so the local user knows someone is watching.
-                        // Published via the output path (not PTY stdin) so ConPTY/the terminal emulator
-                        // interprets the OSC title sequence rather than passing it to the shell as input.
-                        terminal.PublishOutput(
-                            System.Text.Encoding.UTF8.GetBytes("\u001b]0;\u26a0 REMOTE USER CONNECTED TO THIS SESSION\u0007"));
-
-                        if (onRemoteTakeoverAuthorized == null)
-                            return;
-
-                        try
-                        {
-                            await onRemoteTakeoverAuthorized(trigger);
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Error(ex, "[Terminal] Remote takeover callback failed");
-                        }
-                    }
-
-                    async Task SendLockedAsync(bool force = false)
-                    {
-                        if (!force && lockPromptSent)
-                            return;
-
-                        lockPromptSent = true;
-                        await remoteConn.SendControlAsync(TerminalControlProtocol.Locked);
-                    }
-
-                    async Task HandleLockoutAsync()
-                    {
-                        await remoteConn.SendControlAsync(
-                            TerminalControlProtocol.BuildDisconnectBrowserCommand("Too many failed PIN attempts"));
-
-                        RequestEmergencyShutdown("3 failed pins.. Killing app.");
-                    }
-
-                    // Single authorization gate for every remote-triggered handler.
-                    // Call only while holding takeoverGate. Re-reads RemoteConfig each
-                    // time (a PIN can be configured or cleared mid-session). No PIN means
-                    // locked, never open: clearing the PIN re-locks a live session instead
-                    // of unlocking it (RemoteViewerLock). Anything a remote frame
-                    // can cause — input, replay, resize, __cmd__ — must pass this
-                    // first: a locked viewer's frames are dropped, never acted on.
-                    bool IsRemoteViewerAuthorized(out bool pinConfigured)
-                    {
-                        pinConfigured = RemoteConfig.IsPinConfigured;
-                        var state = RemoteViewerLock.Current(
-                            System.Threading.Volatile.Read(ref remoteViewerAuthorized), pinConfigured);
-                        System.Threading.Volatile.Write(ref remoteViewerAuthorized, state);
-                        return state == RemoteViewerLock.Unlocked;
-                    }
-
-                    async Task HandleRemoteInputAsync(byte[] bytes)
-                    {
-                        try
-                        {
-                            await takeoverGate.WaitAsync(CancellationToken.None);
-                            try
-                            {
-                                if (!IsRemoteViewerAuthorized(out var pinConfigured))
-                                {
-                                    // With no PIN there is nothing to verify: stay locked, and do
-                                    // not count the frame as a failed attempt toward the lockout.
-                                    if (!pinConfigured)
-                                    {
-                                        await SendLockedAsync();
-                                        return;
-                                    }
-
-                                    var text = System.Text.Encoding.UTF8.GetString(bytes).Trim();
-                                    if (text.StartsWith(TerminalControlProtocol.PinResponse, StringComparison.Ordinal))
-                                    {
-                                        var pin = text[TerminalControlProtocol.PinResponse.Length..].Trim();
-                                        var isPinFormatValid = pin.Length is >= 4 and <= 6 && pin.All(char.IsDigit);
-                                        var verified = isPinFormatValid && RemoteConfig.VerifyPin(pin);
-
-                                        if (verified)
-                                        {
-                                            System.Threading.Volatile.Write(ref remoteViewerAuthorized, 1);
-                                            failedPinAttempts = 0;
-                                            lockPromptSent = false;
-                                            Log.Information("[PIN] Remote PIN verified successfully");
-
-                                            await remoteConn.SendControlAsync(TerminalControlProtocol.Unlocked);
-                                            await NotifyRemoteTakeoverAsync("pin");
-                                            // Atomic snapshot delivery: the remote consumer is already
-                                            // subscribed, so PushSnapshotTo hands it a fresh state dump
-                                            // under the subscriber lock — no live bytes interleave, no
-                                            // TUI poking required.
-                                            terminal.PushSnapshotTo(remoteOutputConsumer);
-                                            return;
-                                        }
-
-                                        failedPinAttempts++;
-                                        Log.Warning(
-                                            "[PIN] Remote PIN rejected, attempt {Attempt}/{Max}",
-                                            failedPinAttempts,
-                                            3);
-
-                                        if (failedPinAttempts >= 3)
-                                        {
-                                            await HandleLockoutAsync();
-                                            return;
-                                        }
-
-                                        await SendLockedAsync(force: true);
-                                        return;
-                                    }
-
-                                    await SendLockedAsync();
-                                    return;
-                                }
-
-                                // The receive loop forwards __PIN__: frames so the verifier
-                                // above can consume them while locked. Once authorized, a
-                                // stray one must be dropped here — routing it would type the
-                                // user's PIN into the TUI as keystrokes.
-                                if (TerminalControlProtocol.IsPinResponseFrame(bytes))
-                                {
-                                    Log.Warning("[PIN] Dropped stray PIN frame after authorization");
-                                    return;
-                                }
-
-                                await NotifyRemoteTakeoverAsync("input");
-                                await TerminalIoRouter.RouteInputAsync(
-                                    _stateService,
-                                    terminal,
-                                    sessionId,
-                                    bytes,
-                                    TerminalIoSource.RemoteWebUi,
-                                    CancellationToken.None);
-                            }
-                            finally
-                            {
-                                takeoverGate.Release();
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Error(ex, "[Remote] Failed to handle remote input");
-                        }
-                    }
-
-                    async Task HandleRemoteReplayRequestAsync()
-                    {
-                        try
-                        {
-                            // A replay request is the "a remote viewer attached / woke up" marker —
-                            // logged unconditionally for the same reason as the resize request above.
-                            Log.Information(
-                                "[Remote] Replay requested by remote viewer for session {SessionId}",
-                                sessionId);
-                            await takeoverGate.WaitAsync(CancellationToken.None);
-                            try
-                            {
-                                if (!IsRemoteViewerAuthorized(out _))
-                                {
-                                    await SendLockedAsync();
-                                    return;
-                                }
-
-                                await NotifyRemoteTakeoverAsync("replay");
-                                // Atomic snapshot delivery: PushSnapshotTo captures emulator state
-                                // and hands it to the already-subscribed remote consumer under the
-                                // terminal's subscriber lock, so no live bytes can interleave. The
-                                // snapshot begins with ED2 + ED3 + cursor home so whatever the remote
-                                // had on screen is wiped and rebuilt from ground truth.
-                                terminal.PushSnapshotTo(remoteOutputConsumer);
-                            }
-                            finally
-                            {
-                                takeoverGate.Release();
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Error(ex, "[Remote] Failed to handle replay request");
-                        }
-                    }
-
-                    async Task HandleRemoteResizeAsync(int cols, int rows)
-                    {
-                        try
-                        {
-                            // Log every remote resize request unconditionally — before the auth
-                            // check, the same-size early-return, and the local-viewer authority
-                            // gate, all of which can swallow it silently. Session b92fb476
-                            // was resized over this path with zero
-                            // log evidence; "did anything remote touch this session" must be
-                            // answerable from the log alone.
-                            Log.Information(
-                                "[Remote] Resize request from remote viewer: {Cols}x{Rows} for session {SessionId}",
-                                cols, rows, sessionId);
-                            await takeoverGate.WaitAsync(CancellationToken.None);
-                            try
-                            {
-                                // Resize reaches the real PTY (reflow, and the child sees
-                                // the new dimensions) just like input does, so it rides
-                                // the same authorization gate.
-                                if (!IsRemoteViewerAuthorized(out _))
-                                {
-                                    Log.Warning(
-                                        "[Remote] Dropped resize from unauthorized viewer ({Cols}x{Rows})",
-                                        cols,
-                                        rows);
-                                    await SendLockedAsync();
-                                    return;
-                                }
-
-                                TerminalResizeCoordinator.ApplyResize(
-                                    terminal,
-                                    _stateService,
-                                    sessionId,
-                                    cols,
-                                    rows,
-                                    TerminalIoSource.RemoteWebUi);
-                            }
-                            finally
-                            {
-                                takeoverGate.Release();
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Error(ex, "[Remote] Failed to resize PTY to {Cols}x{Rows}", cols, rows);
-                        }
-                    }
-
-                    async Task HandleRemoteCommandAsync(string command, string? payload)
-                    {
-                        try
-                        {
-                            await takeoverGate.WaitAsync(CancellationToken.None);
-                            try
-                            {
-                                // __cmd__ frames feed session activity state and the
-                                // ITerminalIoObserver hook pipeline — same trust boundary
-                                // as input, so same gate. The command/payload are NOT
-                                // logged here: they're attacker-controlled while locked.
-                                if (!IsRemoteViewerAuthorized(out _))
-                                {
-                                    Log.Warning("[Remote] Dropped command from unauthorized viewer");
-                                    await SendLockedAsync();
-                                    return;
-                                }
-
-                                if (string.Equals(command, TerminalControlProtocol.EscapeCommandName, StringComparison.Ordinal))
-                                {
-                                    if (!TerminalControlProtocol.IsEscapeCommand(command, payload))
-                                        return;
-
-                                    await NotifyRemoteTakeoverAsync("input");
-                                    await TerminalIoRouter.RouteEscapeKeyAsync(
-                                        _stateService, terminal, sessionId, TerminalIoSource.RemoteWebUi);
-                                    return;
-                                }
-
-                                _stateService.RecordRemoteCommand(sessionId, command, payload, TerminalIoSource.RemoteWebUi);
-                            }
-                            finally
-                            {
-                                takeoverGate.Release();
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Error(ex, "[Remote] Failed to handle custom command {Command}", command);
-                        }
-                    }
-
-                    async Task HandleRemoteBrowserDisconnectedAsync()
-                    {
-                        try
-                        {
-                            await takeoverGate.WaitAsync(CancellationToken.None);
-                            try
-                            {
-                                System.Threading.Volatile.Write(
-                                    ref remoteViewerAuthorized,
-                                    RemoteViewerLock.Initial);
-                                remoteTakeoverNotified = false;
-                                lockPromptSent = false;
-                                // failedPinAttempts is intentionally NOT reset here — the lockout
-                                // must survive a disconnect/reconnect so it can't be brute-forced.
-                            }
-                            finally
-                            {
-                                takeoverGate.Release();
-                            }
-
-                            Log.Information("[VibeRails] Remote viewer disconnected");
-
-                            // Restore the native terminal title bar now that the remote viewer is gone.
-                            terminal.PublishOutput(
-                                System.Text.Encoding.UTF8.GetBytes($"\u001b]0;{sessionTitle}\u0007"));
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Error(ex, "[Remote] Failed to process remote browser disconnect");
-                        }
-                    }
-
-                    async Task HandleRemoteReconnectedAsync()
-                    {
-                        try
-                        {
-                            // The relay socket dropped and was re-established. The browser
-                            // viewer (if any) lost its pairing during the gap, so treat the
-                            // reconnect as a brand-new viewer: re-lock behind the PIN and
-                            // force a fresh lock prompt. A correct PIN re-pushes the snapshot
-                            // via the normal input path.
-                            await takeoverGate.WaitAsync(CancellationToken.None);
-                            try
-                            {
-                                System.Threading.Volatile.Write(
-                                    ref remoteViewerAuthorized,
-                                    RemoteViewerLock.Initial);
-                                remoteTakeoverNotified = false;
-                                lockPromptSent = false;
-                                // failedPinAttempts is intentionally NOT reset here — the lockout
-                                // must survive a reconnect so it can't be brute-forced by forcing
-                                // the relay socket to drop and re-establish.
-                            }
-                            finally
-                            {
-                                takeoverGate.Release();
-                            }
-
-                            // Always the lock prompt, never an unprompted snapshot: without a
-                            // PIN the viewer simply stays locked.
-                            await SendLockedAsync(force: true);
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Error(ex, "[Remote] Failed to handle reconnect");
-                        }
-                    }
-
-                    remoteConn.OnInputReceived += bytes =>
-                        _ = HandleRemoteInputAsync(bytes);
-                    remoteConn.OnResizeRequested += (cols, rows) =>
-                        _ = HandleRemoteResizeAsync(cols, rows);
-                    remoteConn.OnCommandReceived += (command, payload) =>
-                        _ = HandleRemoteCommandAsync(command, payload);
-                    remoteConn.OnReplayRequested += () =>
-                    {
-                        _ = HandleRemoteReplayRequestAsync();
-                    };
-                    remoteConn.OnBrowserDisconnected += () =>
-                    {
-                        _ = HandleRemoteBrowserDisconnectedAsync();
-                    };
-                    remoteConn.OnReconnected += () =>
-                    {
-                        _ = HandleRemoteReconnectedAsync();
-                    };
+                    AttachRemoteViewer(terminal, remoteConn, sessionId, sessionTitle,
+                        onRemoteTakeoverAuthorized, () => RemoteConfig.IsPinConfigured,
+                        RemoteConfig.VerifyPin, RequestEmergencyShutdown);
                     activeRemoteConn = remoteConn;
                 }
                 else
@@ -689,7 +312,8 @@ public class TerminalRunner
             // Both native and tab launches come through here. Quick Launches and ordinary
             // interactive terminals stay open; only a snapshotted Agent owns an idle deadline.
             // Attach after startup's synthetic output and before either caller starts the PTY reader.
-            AgentIdleConsumer.Attach(terminal, launch?.Run.Snapshot.Preset);
+            AgentIdleConsumer.Attach(terminal, launch?.Run.Snapshot.Preset,
+                interactive: launch?.Run.Snapshot.IsInteractiveTerminal == true);
             return (terminal, sessionId, activeRemoteConn);
         }
         catch
@@ -729,6 +353,414 @@ public class TerminalRunner
             await _stateService.CompleteSessionAsync(sessionId, -1);
             await VibeRails.Services.Launches.LaunchExecution.CompleteSessionAsync(sessionId, -1);
             throw;
+        }
+    }
+
+    // One attachment per terminal session, not per socket. Keeping the handlers together
+    // retains the failed-attempt budget when either the browser or relay reconnects.
+    internal void AttachRemoteViewer(
+        Terminal terminal,
+        IRemoteTerminalConnection remoteConn,
+        string sessionId,
+        string sessionTitle,
+        Func<string, Task>? onRemoteTakeoverAuthorized,
+        Func<bool> isPinConfigured,
+        Func<string, bool> verifyPin,
+        Action<string> requestEmergencyShutdown)
+    {
+        var takeoverGate = new SemaphoreSlim(1, 1);
+        var remoteViewerAuthorized = RemoteViewerLock.Initial;
+        var remoteTakeoverNotified = false;
+        var lockPromptSent = false;
+        // Deliberately persists for the whole session and is reset ONLY on a
+        // successful PIN. The disconnect / reconnect handlers re-lock the viewer but
+        // must NOT reset this, or an attacker could refill the guess budget by forcing
+        // a reconnect (network blip, idle timeout, output-overflow resync) or by
+        // disconnect/reconnect cycling — defeating the 3-strikes lockout.
+        var failedPinAttempts = 0;
+        var remoteOutputConsumer = new RemoteOutputConsumer(
+            remoteConn,
+            canForward: () => System.Threading.Volatile.Read(ref remoteViewerAuthorized) == 1);
+        terminal.Subscribe(remoteOutputConsumer);
+
+        async Task NotifyRemoteTakeoverAsync(string trigger)
+        {
+            if (remoteTakeoverNotified)
+                return;
+
+            remoteTakeoverNotified = true;
+
+            Log.Information("[VibeRails] Remote viewer connected");
+
+            // Update the native terminal's title bar so the local user knows someone is watching.
+            // Published via the output path (not PTY stdin) so ConPTY/the terminal emulator
+            // interprets the OSC title sequence rather than passing it to the shell as input.
+            terminal.PublishOutput(
+                System.Text.Encoding.UTF8.GetBytes("\u001b]0;\u26a0 REMOTE USER CONNECTED TO THIS SESSION\u0007"));
+
+            if (onRemoteTakeoverAuthorized == null)
+                return;
+
+            try
+            {
+                await onRemoteTakeoverAuthorized(trigger);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[Terminal] Remote takeover callback failed");
+            }
+        }
+
+        async Task SendLockedAsync(bool force = false)
+        {
+            if (!force && lockPromptSent)
+                return;
+
+            lockPromptSent = true;
+            await remoteConn.SendControlAsync(TerminalControlProtocol.Locked);
+        }
+
+        async Task HandleLockoutAsync()
+        {
+            await remoteConn.SendControlAsync(
+                TerminalControlProtocol.BuildDisconnectBrowserCommand("Too many failed password attempts"));
+
+            requestEmergencyShutdown("Three failed remote-access credentials. Stopping terminal host.");
+        }
+
+        // Single authorization gate for every remote-triggered handler.
+        // Call only while holding takeoverGate. Re-reads RemoteConfig each
+        // time (a PIN can be configured or cleared mid-session). No PIN means
+        // locked, never open: clearing the PIN re-locks a live session instead
+        // of unlocking it (RemoteViewerLock). Anything a remote frame
+        // can cause — input, replay, resize, __cmd__ — must pass this
+        // first: a locked viewer's frames are dropped, never acted on.
+        bool IsRemoteViewerAuthorized(out bool pinConfigured)
+        {
+            pinConfigured = isPinConfigured();
+            var state = RemoteViewerLock.Current(
+                System.Threading.Volatile.Read(ref remoteViewerAuthorized), pinConfigured);
+            System.Threading.Volatile.Write(ref remoteViewerAuthorized, state);
+            return state == RemoteViewerLock.Unlocked;
+        }
+
+        async Task HandleRemoteInputAsync(byte[] bytes)
+        {
+            try
+            {
+                await takeoverGate.WaitAsync(CancellationToken.None);
+                try
+                {
+                    if (!IsRemoteViewerAuthorized(out var pinConfigured))
+                    {
+                        // With no PIN there is nothing to verify: stay locked, and do
+                        // not count the frame as a failed attempt toward the lockout.
+                        if (!pinConfigured)
+                        {
+                            await SendLockedAsync();
+                            return;
+                        }
+
+                        if (TerminalControlProtocol.IsPinResponseFrame(bytes))
+                        {
+                            var verified = VerifyRemoteCredential(bytes, verifyPin);
+
+                            if (verified)
+                            {
+                                System.Threading.Volatile.Write(ref remoteViewerAuthorized, 1);
+                                failedPinAttempts = 0;
+                                lockPromptSent = false;
+                                Log.Information("[PIN] Remote PIN verified successfully");
+
+                                await remoteConn.SendControlAsync(TerminalControlProtocol.Unlocked);
+                                await NotifyRemoteTakeoverAsync("pin");
+                                // Atomic snapshot delivery: the remote consumer is already
+                                // subscribed, so PushSnapshotTo hands it a fresh state dump
+                                // under the subscriber lock — no live bytes interleave, no
+                                // TUI poking required.
+                                terminal.PushSnapshotTo(remoteOutputConsumer);
+                                return;
+                            }
+
+                            failedPinAttempts++;
+                            Log.Warning(
+                                "[PIN] Remote PIN rejected, attempt {Attempt}/{Max}",
+                                failedPinAttempts,
+                                3);
+
+                            if (failedPinAttempts >= 3)
+                            {
+                                await HandleLockoutAsync();
+                                return;
+                            }
+
+                            await SendLockedAsync(force: true);
+                            return;
+                        }
+
+                        await SendLockedAsync();
+                        return;
+                    }
+
+                    // The receive loop forwards __PIN__: frames so the verifier
+                    // above can consume them while locked. Once authorized, a
+                    // stray one must be dropped here — routing it would type the
+                    // user's PIN into the TUI as keystrokes.
+                    if (TerminalControlProtocol.IsPinResponseFrame(bytes))
+                    {
+                        Log.Warning("[PIN] Dropped stray PIN frame after authorization");
+                        return;
+                    }
+
+                    await NotifyRemoteTakeoverAsync("input");
+                    await TerminalIoRouter.RouteInputAsync(
+                        _stateService,
+                        terminal,
+                        sessionId,
+                        bytes,
+                        TerminalIoSource.RemoteWebUi,
+                        CancellationToken.None);
+                }
+                finally
+                {
+                    takeoverGate.Release();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[Remote] Failed to handle remote input");
+            }
+        }
+
+        async Task HandleRemoteReplayRequestAsync()
+        {
+            try
+            {
+                // A replay request is the "a remote viewer attached / woke up" marker —
+                // logged unconditionally for the same reason as the resize request above.
+                Log.Information(
+                    "[Remote] Replay requested by remote viewer for session {SessionId}",
+                    sessionId);
+                await takeoverGate.WaitAsync(CancellationToken.None);
+                try
+                {
+                    if (!IsRemoteViewerAuthorized(out _))
+                    {
+                        await SendLockedAsync();
+                        return;
+                    }
+
+                    await NotifyRemoteTakeoverAsync("replay");
+                    // Atomic snapshot delivery: PushSnapshotTo captures emulator state
+                    // and hands it to the already-subscribed remote consumer under the
+                    // terminal's subscriber lock, so no live bytes can interleave. The
+                    // snapshot begins with ED2 + ED3 + cursor home so whatever the remote
+                    // had on screen is wiped and rebuilt from ground truth.
+                    terminal.PushSnapshotTo(remoteOutputConsumer);
+                }
+                finally
+                {
+                    takeoverGate.Release();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[Remote] Failed to handle replay request");
+            }
+        }
+
+        async Task HandleRemoteResizeAsync(int cols, int rows)
+        {
+            try
+            {
+                // Log every remote resize request unconditionally — before the auth
+                // check, the same-size early-return, and the local-viewer authority
+                // gate, all of which can swallow it silently. Session b92fb476
+                // was resized over this path with zero
+                // log evidence; "did anything remote touch this session" must be
+                // answerable from the log alone.
+                Log.Information(
+                    "[Remote] Resize request from remote viewer: {Cols}x{Rows} for session {SessionId}",
+                    cols, rows, sessionId);
+                await takeoverGate.WaitAsync(CancellationToken.None);
+                try
+                {
+                    // Resize reaches the real PTY (reflow, and the child sees
+                    // the new dimensions) just like input does, so it rides
+                    // the same authorization gate.
+                    if (!IsRemoteViewerAuthorized(out _))
+                    {
+                        Log.Warning(
+                            "[Remote] Dropped resize from unauthorized viewer ({Cols}x{Rows})",
+                            cols,
+                            rows);
+                        await SendLockedAsync();
+                        return;
+                    }
+
+                    TerminalResizeCoordinator.ApplyResize(
+                        terminal,
+                        _stateService,
+                        sessionId,
+                        cols,
+                        rows,
+                        TerminalIoSource.RemoteWebUi);
+                }
+                finally
+                {
+                    takeoverGate.Release();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[Remote] Failed to resize PTY to {Cols}x{Rows}", cols, rows);
+            }
+        }
+
+        async Task HandleRemoteCommandAsync(string command, string? payload)
+        {
+            try
+            {
+                await takeoverGate.WaitAsync(CancellationToken.None);
+                try
+                {
+                    // __cmd__ frames feed session activity state and the
+                    // ITerminalIoObserver hook pipeline — same trust boundary
+                    // as input, so same gate. The command/payload are NOT
+                    // logged here: they're attacker-controlled while locked.
+                    if (!IsRemoteViewerAuthorized(out _))
+                    {
+                        Log.Warning("[Remote] Dropped command from unauthorized viewer");
+                        await SendLockedAsync();
+                        return;
+                    }
+
+                    if (string.Equals(command, TerminalControlProtocol.EscapeCommandName, StringComparison.Ordinal))
+                    {
+                        if (!TerminalControlProtocol.IsEscapeCommand(command, payload))
+                            return;
+
+                        await NotifyRemoteTakeoverAsync("input");
+                        await TerminalIoRouter.RouteEscapeKeyAsync(
+                            _stateService, terminal, sessionId, TerminalIoSource.RemoteWebUi);
+                        return;
+                    }
+
+                    _stateService.RecordRemoteCommand(sessionId, command, payload, TerminalIoSource.RemoteWebUi);
+                }
+                finally
+                {
+                    takeoverGate.Release();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[Remote] Failed to handle custom command {Command}", command);
+            }
+        }
+
+        async Task HandleRemoteBrowserDisconnectedAsync()
+        {
+            try
+            {
+                await takeoverGate.WaitAsync(CancellationToken.None);
+                try
+                {
+                    System.Threading.Volatile.Write(
+                        ref remoteViewerAuthorized,
+                        RemoteViewerLock.Initial);
+                    remoteTakeoverNotified = false;
+                    lockPromptSent = false;
+                    // failedPinAttempts is intentionally NOT reset here — the lockout
+                    // must survive a disconnect/reconnect so it can't be brute-forced.
+                }
+                finally
+                {
+                    takeoverGate.Release();
+                }
+
+                Log.Information("[VibeRails] Remote viewer disconnected");
+
+                // Restore the native terminal title bar now that the remote viewer is gone.
+                terminal.PublishOutput(
+                    System.Text.Encoding.UTF8.GetBytes($"\u001b]0;{sessionTitle}\u0007"));
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[Remote] Failed to process remote browser disconnect");
+            }
+        }
+
+        async Task HandleRemoteReconnectedAsync()
+        {
+            try
+            {
+                // The relay socket dropped and was re-established. The browser
+                // viewer (if any) lost its pairing during the gap, so treat the
+                // reconnect as a brand-new viewer: re-lock behind the PIN and
+                // force a fresh lock prompt. A correct PIN re-pushes the snapshot
+                // via the normal input path.
+                await takeoverGate.WaitAsync(CancellationToken.None);
+                try
+                {
+                    System.Threading.Volatile.Write(
+                        ref remoteViewerAuthorized,
+                        RemoteViewerLock.Initial);
+                    remoteTakeoverNotified = false;
+                    lockPromptSent = false;
+                    // failedPinAttempts is intentionally NOT reset here — the lockout
+                    // must survive a reconnect so it can't be brute-forced by forcing
+                    // the relay socket to drop and re-establish.
+                }
+                finally
+                {
+                    takeoverGate.Release();
+                }
+
+                // Always the lock prompt, never an unprompted snapshot: without a
+                // PIN the viewer simply stays locked.
+                await SendLockedAsync(force: true);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[Remote] Failed to handle reconnect");
+            }
+        }
+
+        remoteConn.OnInputReceived += bytes =>
+            _ = HandleRemoteInputAsync(bytes);
+        remoteConn.OnResizeRequested += (cols, rows) =>
+            _ = HandleRemoteResizeAsync(cols, rows);
+        remoteConn.OnCommandReceived += (command, payload) =>
+            _ = HandleRemoteCommandAsync(command, payload);
+        remoteConn.OnReplayRequested += () =>
+        {
+            _ = HandleRemoteReplayRequestAsync();
+        };
+        remoteConn.OnBrowserDisconnected += () =>
+        {
+            _ = HandleRemoteBrowserDisconnectedAsync();
+        };
+        remoteConn.OnReconnected += () =>
+        {
+            _ = HandleRemoteReconnectedAsync();
+        };
+    }
+
+    private static bool VerifyRemoteCredential(byte[] frame, Func<string, bool> verifyPin)
+    {
+        var payload = frame.AsSpan(TerminalControlProtocol.PinResponse.Length);
+        // A UTF-16 character occupies at most three UTF-8 bytes. Check before decoding;
+        // malformed and oversized responses still consume an attempt, but never reach hashing.
+        if (payload.Length is 0 or > RemoteConfig.MaxCredentialLength * 3) return false;
+        try
+        {
+            var credential = new System.Text.UTF8Encoding(false, true).GetString(payload);
+            return RemoteConfig.IsCredentialWithinBounds(credential) && verifyPin(credential);
+        }
+        catch (System.Text.DecoderFallbackException)
+        {
+            return false;
         }
     }
 
@@ -969,6 +1001,8 @@ public class TerminalRunner
 
         await using (terminal)
         {
+            // Set input mode before the CLI can enable mouse/focus/paste reporting on the console.
+            using var macInput = MacConsoleInput.OpenConsole();
             // Wire up console output
             terminal.Subscribe(new ConsoleOutputConsumer());
 
@@ -981,6 +1015,7 @@ public class TerminalRunner
                 await ConsoleInputLoopAsync(
                     terminal,
                     sessionId,
+                    macInput,
                     modifiedEnterAsLineFeed: llm == LLM.Codex,
                     ct);
             }
@@ -1048,6 +1083,7 @@ public class TerminalRunner
 
         await using (terminal)
         {
+            using var macInput = MacConsoleInput.OpenConsole();
             // This path is always a real Environment/Automation window, so the PTY renders into
             // its own host console.
             terminal.Subscribe(new ConsoleOutputConsumer());
@@ -1083,6 +1119,7 @@ public class TerminalRunner
                 await ConsoleInputLoopAsync(
                     terminal,
                     sessionId,
+                    macInput,
                     modifiedEnterAsLineFeed: llm == LLM.Codex,
                     ct);
             }
@@ -1131,11 +1168,13 @@ public class TerminalRunner
     }
 
     /// <summary>
-    /// Console.ReadKey → PTY write loop for CLI path.
+    /// Native console → PTY write loop. macOS preserves raw terminal bytes; other platforms
+    /// retain Console.ReadKey and semantic key translation.
     /// </summary>
     private async Task ConsoleInputLoopAsync(
         Terminal terminal,
         string sessionId,
+        MacConsoleInput? macInput,
         bool modifiedEnterAsLineFeed,
         CancellationToken ct)
     {
@@ -1153,6 +1192,7 @@ public class TerminalRunner
         // riding the input rate.
         var geometryClock = System.Diagnostics.Stopwatch.StartNew();
         var nextGeometryCheck = TimeSpan.Zero;
+        var inputBuffer = macInput is null ? null : new byte[4096];
 
         while (!ct.IsCancellationRequested && !terminal.HasExited)
         {
@@ -1190,6 +1230,18 @@ public class TerminalRunner
                             currentSize.Rows);
                     }
                 }
+            }
+
+            if (macInput is not null)
+            {
+                var count = macInput.ReadAvailable(inputBuffer!);
+                if (count == 0)
+                    await Task.Delay(50, ct);
+                else
+                    await TerminalIoRouter.RouteInputAsync(
+                        _stateService, terminal, sessionId, inputBuffer!.AsMemory(0, count),
+                        TerminalIoSource.LocalCli, ct);
+                continue;
             }
 
             if (Console.IsInputRedirected || !Console.KeyAvailable)

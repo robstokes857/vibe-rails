@@ -85,11 +85,12 @@ public sealed class AgentIdleConsumerTests
     }
 
     [Theory]
-    [InlineData("Do the work", true)]
-    [InlineData("", false)]
-    [InlineData("   ", false)]
-    [InlineData(null, false)]
-    public async Task OnlyPromptBearingPresetsOwnAnIdleDeadline(string? prompt, bool closes)
+    [InlineData("Do the work", false, true)]
+    [InlineData("Do the work", true, false)]
+    [InlineData("", false, false)]
+    [InlineData("   ", false, false)]
+    [InlineData(null, false, false)]
+    public async Task OnlyNonInteractivePromptBearingPresetsOwnAnIdleDeadline(string? prompt, bool interactive, bool closes)
     {
         var clock = new IdleClock();
         var pty = new Mock<IPtyConnection>();
@@ -97,7 +98,7 @@ public sealed class AgentIdleConsumerTests
         await using var terminal = new TerminalPty(pty.Object, 80, 24);
         var preset = new LaunchPreset("preset", "Agent", "", LLM.Codex, new(), [], prompt,
             true, 1, DateTime.UtcNow, DateTime.UtcNow);
-        AgentIdleConsumer.Attach(terminal, preset, clock);
+        AgentIdleConsumer.Attach(terminal, preset, clock, interactive);
         clock.Advance(120);
         pty.Verify(p => p.KillProcessTree(), closes ? Times.Once : Times.Never);
         Assert.Equal(closes ? AgentSessionClosedPayload.IdleReason : null, terminal.AgentCompletionReason);

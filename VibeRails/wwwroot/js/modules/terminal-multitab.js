@@ -332,6 +332,7 @@ export class TerminalManager {
         }
 
         this._destroyed = true;
+        this._presetLaunchAbort?.abort();
         this._tabScrollRO?.disconnect();
         this._tabScrollRO = null;
         this.removeFocusLayoutHandler();
@@ -1519,7 +1520,12 @@ export class TerminalManager {
         const selectionForMeta = selection || (!tab?.state?.hasActiveSession ? tab?.state?.selection : null);
         const meta = this.getSelectionMeta(selectionForMeta);
         if (String(selectionForMeta || '').startsWith('preset:')) {
-            await this.app.aiAgentsController.launch(selectionForMeta.split(':')[1], 'preset');
+            this._presetLaunchAbort ??= new AbortController();
+            await this.app.aiAgentsController.launch(selectionForMeta.split(':')[1], 'preset', {
+                terminalTab: true,
+                terminalSelection: selectionForMeta,
+                signal: this._presetLaunchAbort.signal
+            });
             return;
         }
         if (String(selectionForMeta || '').startsWith('env:')) {

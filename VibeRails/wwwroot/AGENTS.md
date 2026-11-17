@@ -21,9 +21,12 @@ launches pass through the dashboard prompt resolver; Action runs can queue in th
 **Run** in the catalog and top-bar Quick actions requests `nativeTerminal:true` and
 opens a native OS terminal without opening the editor or navigating. Report actual
 startup/failure from the run status; enqueue alone is not successful execution.
-All non-Board saved preset launches use native terminals, including terminal-picker,
-VS Code and Quality/Rules launches. Legacy `focusTerminal:true` and `nativeTerminal:false`
-requests cannot switch a saved preset back to an in-app tab. Board launches stay in-app;
+The terminal picker (including **Manage quick launches**) requests `terminalTab:true` for saved Agents and Quick Launches:
+they open and focus ordinary tabs with normal controls, outside the robot menu, and
+remain open while idle. This explicit mode preserves the saved prompt/options and
+run history; it does not open the definition editor. Other non-Board preset launches,
+including VS Code and Quality/Rules, use native terminals. Legacy `focusTerminal:true`
+and `nativeTerminal:false` alone do not change that default. Board launches stay in-app;
 script/check presentation and signed library script windows retain their existing flow.
 
 The catalog presents Agents, Quick Launches and Scripts with the shared surface and
@@ -168,9 +171,10 @@ Quick actions for eligible Agents, Quick Launches and Actions. Application Setti
 stays visible beside **Sign in / Sign up**. There is no standalone Settings icon.
 Its footer opens **Manage AI Agents**.
 `launch-menu.js` renders each eligible item with the same provider logo or fallback icon,
-name and subtitle as the AI Agents catalog, plus a matching secondary **Run** button.
-Both use `launch-presentation.js`: descriptions take precedence over provider/type labels,
-and Scripts retain the catalog's distinct code icon. The popover uses ordinary buttons and dialog semantics, with Tab navigation
+name and saved description as the AI Agents catalog, plus a matching secondary **Run** button.
+Both use `launch-presentation.js`: Quick actions omits redundant known-provider labels,
+retains unknown-provider and Action type labels, and gives descriptions precedence.
+Scripts retain the catalog's distinct code icon. The popover uses ordinary buttons and dialog semantics, with Tab navigation
 and Escape returning focus to the top-bar trigger. Keep launch dispatch keyed by definition ID.
 Rules runs validation only; Quality restores or starts its own cached scan when opened.
 
@@ -1496,7 +1500,10 @@ and CSV quote wrappers are rejected. Backend write validation remains authoritat
 Agent and Quick Launch rows also offer **User message (optional)**, empty on each
 opening. It is a `<textarea data-launch-message>` behind an **Add message** toggle
 (`data-launch-message-toggle`, `aria-expanded`/`aria-controls`, VIBE-334); the panel's
-click handler must handle that toggle before the branch that closes the menu. Enter
+click handler must handle that toggle before the branch that closes the menu. Expanding
+adds `has-message` to the row, gives the input the full row width, and moves the same
+Run button below the input in both visual and keyboard order. Collapsing restores Run
+beside the name. Keep the persistent label and omit the helper paragraph. Enter
 runs the row, Shift+Enter adds a newline, and a collapsed box still sends its text
 (the toggle then reads **Edit message**). Opening focuses the first Run, not the box.
 `launch-menu.js` passes it through `ai-agents-controller.js` and
@@ -1742,7 +1749,7 @@ recovery rechecks content after a library refresh: retained registrations do not
 - **Shared flows**: signing (PIN prompt), revoke, rename, delete, duplicate, copy path,
   run and `saveContent` are public methods on `PythonScriptsController`
   (`app.jobController.pythonScripts`) that work unmounted; the workbench follows list
-  updates through `onStateChange`. First signing-PIN setup prompts for the remote access PIN
+  updates through `onStateChange`. First signing-PIN setup prompts for the remote access password or PIN
   or a fresh dashboard confirmation code. Server-provided `requiresWritePin` prompts for the
   signing PIN on external saves/renames; cancelling sends no mutation. PINs/proofs stay in
   local call variables and never enter controller state. New files stay inside UserScripts

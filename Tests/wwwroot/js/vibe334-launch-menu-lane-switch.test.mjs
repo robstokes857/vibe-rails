@@ -23,11 +23,11 @@ test('agent rows put the message box behind a collapsed Add message link after R
     const textarea = html.match(/<textarea[^>]*>/s)?.[0];
     assert.ok(textarea, 'the message is a textarea, not a one-line input');
     for (const attribute of ['id="launch-message-0"', 'data-launch-message', 'rows="3"', 'maxlength="8000"',
-        'aria-describedby="launch-message-0-help"', 'aria-label="User message for Review &lt;changes&gt; (optional)"'])
+        'aria-label="User message for Review &lt;changes&gt; (optional)"'])
         assert.ok(textarea.includes(attribute), attribute);
     assert.doesNotMatch(textarea, /required/);
     assert.match(html, /<label class="form-label" for="launch-message-0">User message <span class="text-muted">\(optional\)<\/span><\/label>/);
-    assert.match(html, /id="launch-message-0-help">Added to the prompt\. Enter runs; Shift\+Enter starts a new line\.<\/p>/);
+    assert.doesNotMatch(html, /launch-menu-message-help|Added to the prompt|aria-describedby/);
     assert.doesNotMatch(html, /<input/, 'no one-line field is left in the row');
     assert.doesNotMatch(html, /<changes>/, 'names are escaped');
 
@@ -48,13 +48,26 @@ function messageHarness(value = '') {
     const attributes = { 'aria-controls': 'launch-message-0-panel', 'aria-expanded': 'false', 'aria-label': 'Add message for Review' };
     const span = { textContent: 'Add message' };
     const input = { value, focused: 0, focus() { this.focused++; } };
-    const panel = { hidden: true, querySelector: selector => selector === '[data-launch-message]' ? input : null };
+    const run = { position: 'header' };
+    const wrapper = { before: element => { element.position = 'header'; } };
+    const row = {
+        classList: { toggle() {} },
+        querySelector: selector => selector === '.launch-menu-run' ? run : null
+    };
+    const closest = selector => selector === '.launch-menu-row' ? row : selector === '.launch-menu-message' ? wrapper : null;
+    const panel = {
+        hidden: true,
+        querySelector: selector => selector === '[data-launch-message]' ? input : null,
+        closest,
+        append: element => { element.position = 'footer'; }
+    };
     const toggle = {
         getAttribute: name => attributes[name],
         setAttribute: (name, next) => { attributes[name] = next; },
-        querySelector: selector => selector === 'span' ? span : null
+        querySelector: selector => selector === 'span' ? span : null,
+        closest
     };
-    return { attributes, span, input, panel, toggle };
+    return { attributes, span, input, panel, toggle, run };
 }
 
 test('toggling the message opens and focuses the box, and a kept draft reads Edit message', t => {

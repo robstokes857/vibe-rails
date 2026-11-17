@@ -20,7 +20,7 @@ Stdio MCP has no such probe, so an unconfirmed end is reported as unknown, not e
 
 Primary files (reorg'd into subdirectories):
 - `Services/Terminal/Pty/Terminal.cs`, `KeyTranslator.cs`, `ShellCommandBuilder.cs`
-- `Services/Terminal/Core/TerminalRunner.cs`, `TerminalSessionService.cs`, `TerminalStateService.cs`, `TerminalTabHostService.cs`, `ChildParentWatchdogService.cs`, `NativeConsoleGeometry.cs`
+- `Services/Terminal/Core/TerminalRunner.cs`, `TerminalSessionService.cs`, `TerminalStateService.cs`, `TerminalTabHostService.cs`, `ChildParentWatchdogService.cs`, `NativeConsoleGeometry.cs`, `MacConsoleInput.cs`
 - `Services/Terminal/Protocol/TerminalIoRouter.cs`, `CodexWindowsInputRewriter.cs`, `TerminalControlProtocol.cs`, `TerminalGridSerializer.cs`, `TerminalTextSanitizer.cs`, `TerminalTextWithControlPart.cs`
 - `Services/Terminal/Remote/RemoteTerminalConnection.cs`
 - `Services/Terminal/Consumers/*.cs`
@@ -72,7 +72,9 @@ Ordinary exits keep their tabs. Native Workers record the footer without closing
 Automation workflow. Tests: `CompletedTerminalOutputTests`, `SessionOutputWriterTests`,
 `AutomationTabCapacityTests`, `terminal-automation-menu.test.mjs`.
 
-Prompt-bearing launch presets also close after two minutes without PTY output.
+Prompt-bearing launch presets also close after two minutes without PTY output, except
+manual terminal-picker launches (`LaunchSnapshot.IsInteractiveTerminal`). Those use
+ordinary interactive tabs and stay open while idle, like base CLI and Quick Launch tabs.
 `AgentIdleConsumer` attaches in `TerminalRunner.CreateSessionAsync` for both tab and native
 launches, after startup output and before the read loop. Every nonempty output chunk resets
 the deadline; Quick Launches, plain CLI sessions and Actions have no such monitor. The timer
@@ -320,7 +322,8 @@ Commands:
 - `__cmd__:{command}[:payload]` — structured command prefix framework (e.g. `__cmd__:replay`)
 - `__cmd__:escape` — physical, unmodified Escape key; no payload (including an empty payload) is accepted. Added 2026-09-14; see the semantic key route below.
 - PIN challenge protocol (sent as plain text, not `__cmd__:`):
-  - `__PIN__:{pin}` — PIN challenge response from the viewer
+  - `__PIN__:{credential}` — password or legacy PIN challenge response from the viewer;
+    the prefix remains unchanged for protocol compatibility, and the exact text is never PTY input
   - `__LOCKED__` / `__UNLOCKED__` — lock-state frames
 
 Validation:
@@ -572,7 +575,22 @@ Notes:
 ### `TerminalIoRouter.cs`
 Single I/O funnel and hook point.
 
-Native `Console.ReadKey` input is translated by `Pty/KeyTranslator.cs`. As of
+Native macOS input uses `Core/MacConsoleInput.cs`: a nonblocking raw `read` of the
+outer TTY forwards bytes through `TerminalIoRouter`, preserving mouse/focus reports,
+bracketed paste, UTF-8 and modified-key sequences. Configure it before starting the
+PTY output loop; restore the original termios on disposal without flushing input.
+Do not use `Console.ReadKey`/`KeyAvailable` on that path: unrecognized CSI mouse reports
+can become a standalone Escape (interrupting the CLI) followed by literal composer text.
+Output processing is preserved; the reader does not own stdin or change the native
+output filter. If the console mode cannot be read or set, `OpenConsole` logs a warning and
+returns null (the `ReadKey` reader) instead of throwing: it runs after the PTY and recorded
+session exist, outside the cleanup that completes them. .NET rewrites termios only after
+it configured the console itself (a `ReadKey`/`KeyAvailable` in this process) or on
+`SIGCONT`, so do not add either to the native macOS process. `MacConsoleInputTests`
+exercises a disposable macOS PTY and runs in `macos-launch-tests.yml`; live native
+Agent verification on macOS is still needed for the reported incident (VB-RXHKP-417).
+
+Other platforms' native `Console.ReadKey` input is translated by `Pty/KeyTranslator.cs`. As of
 2026-09-14, Shift-only Tab emits `ESC[Z` (backtab), matching xterm's physical
 Shift+Tab. Plain Tab remains `\t`; previously the native path discarded Shift.
 `KeyTranslatorTests` and real `ConPtyEscapeKeyTests` cover this before and after

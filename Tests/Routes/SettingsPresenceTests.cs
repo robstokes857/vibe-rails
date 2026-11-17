@@ -19,18 +19,21 @@ public sealed class SettingsPresenceTests
         Assert.False(service.Verify(challenge.Code, settings));
     }
 
-    [Fact]
-    public void ConfiguredPinCannotBeReplacedByAConfirmationCodeAndGuessingIsThrottled()
+    [Theory]
+    [InlineData("1357")]
+    [InlineData("123456")]
+    [InlineData("  Secret7  ")]
+    public void ConfiguredCredentialCannotBeReplacedByAConfirmationCodeAndGuessingIsThrottled(string credential)
     {
         var service = new SettingsPresenceService();
         var code = service.Challenge(false).Code;
-        var (salt, hash) = Hasher.Hash("1357");
+        var (salt, hash) = Hasher.Hash(credential);
         var settings = new Settings { PinSalt = salt, PinHash = hash };
         Assert.Null(service.Challenge(true).Code);
         Assert.False(service.Verify(code, settings));
-        Assert.True(service.Verify("1357", settings));
+        Assert.True(service.Verify(credential, settings));
         for (var i = 0; i < 5; i++) Assert.False(service.Verify("0000", settings));
         service.Challenge(true);
-        Assert.False(service.Verify("1357", settings));
+        Assert.False(service.Verify(credential, settings));
     }
 }

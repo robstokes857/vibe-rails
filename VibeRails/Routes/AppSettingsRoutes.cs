@@ -53,7 +53,7 @@ public static class AppSettingsRoutes
             try { ValidateGatewayCredentials(settingsDto, settings); }
             catch (ArgumentException ex) { return Results.BadRequest(new ErrorResponse(ex.Message)); }
             if (RequiresPresence(settingsDto, settings) && !presence.Verify(settingsDto.PresenceProof, settings))
-                return Results.Json(new ErrorResponse("Confirm this change with your current PIN or a fresh dashboard code."), statusCode: 403);
+                return Results.Json(new ErrorResponse("Confirm this change with your current password or PIN, or a fresh dashboard code."), statusCode: 403);
             var result = UpdateSettings(settingsDto, Config.Store, app.Services.GetService<IRemoteHttpRelayClient>());
             if (settings.ApiKey != Config.LoadFresh().ApiKey)
             {

@@ -112,7 +112,7 @@ the existing local-user project resolver.
 | `POST /presets/{id}/retire`, `POST /actions/{id}/retire` | `{expectedRevision}`; retains history and attachments |
 | `GET /trigger-bindings` | Current-project bindings; optional `definitionId` |
 | `POST /trigger-bindings`, `PUT /trigger-bindings/{id}` | `SaveBindingRequest`; `enabled:false` disables |
-| `POST /runs` | `{definitionId,definitionType,occurrenceId?,nativeTerminal?}`; queues latest revision; presets always use native terminals outside Board; Actions retain the requested presentation (default false) |
+| `POST /runs` | `{definitionId,definitionType,occurrenceId?,nativeTerminal?,terminalTab?}`; queues latest revision; presets use native terminals outside Board unless the terminal picker requests an ordinary interactive tab; Actions retain the requested presentation (default false) |
 | `GET /runs` | Optional `definitionId`, `before` and `limit` (1–100); `{runs,nextCursor}` |
 | `GET /runs/{id}` | Project-scoped immutable inputs and current process state |
 | `POST /runs/{id}/resolve` | `{confirmedStopped:true}` after inspecting an uncertain launch and stopping surviving descendants; rejects live/unverifiable recorded owners, ends as interrupted, never retries |
@@ -138,11 +138,18 @@ and become ineligible. Existing queued Agent snapshots retain their own prompt.
 The picker key for a preset is `preset:<stable-id>:<cli>`; `base:<cli>` remains
 available. Start saved definitions through `/runs`; observe the run's `tabId`
 and `sessionId` to navigate to its terminal. A successful enqueue is not a
-successful process. Native runs have no tab ID. All non-Board preset launches, including
-the catalog, Quick actions, terminal picker, VS Code, Quality/Rules fixes, schedules and
-Git events, use native terminals. UI callers leave the current view open and poll for
-startup or failure. `LaunchService` enforces the destination even for callers that request
-`nativeTerminal:false`. Board managers, card runs (including the manual trigger) and lane
+successful process. Native runs have no tab ID. The terminal picker sends `terminalTab:true`
+for a saved Agent or Quick Launch. This additive snapshot field applies only to manual
+non-Board presets, including retries. It opens a normal tab outside the robot menu, retains
+the saved prompt/options and run history, and exempts interactive sessions from agent idle
+cleanup. The UI remembers its preset selection and name and focuses the tab after its
+session starts without opening the definition editor. Leaving the terminal cancels only
+the UI's launch polling, not an already queued run.
+Other non-Board preset launches, including the catalog, Quick actions, VS Code,
+Quality/Rules fixes, schedules and Git events, use native terminals. UI callers leave the
+current view open and poll for startup or failure. `LaunchService` enforces this default
+even for callers that request `nativeTerminal:false` alone. Board managers, card runs
+(including the manual trigger) and lane
 agents use in-app terminals, even if a caller requests native presentation. Scripts and
 checks retain their existing presentation; signed library scripts use their private window.
 Synchronous Board launches return a conflict and cancel
@@ -285,7 +292,8 @@ cancellation before handoff also release the owned claim, using cleanup independ
 of the cancelled request. Once handed off, the execution owner retains responsibility
 for termination and capacity release. CLI deadlines are watched by
 the owning child; script deadlines use the script runner. Prompt-bearing Agent presets
-also finish after two minutes without PTY output, for native and in-app runs. This closes
+also finish after two minutes without PTY output, for native and Board runs. Interactive
+terminal-picker runs stay open while idle. Automatic idle completion closes
 the specific CLI process tree, finalizes its recording and removes its agent tab; Quick
 Launches and ordinary interactive terminals remain open. Every nonempty PTY chunk restarts
 the idle window. Inactivity is recorded distinctly from an explicit `end_agent_session`
