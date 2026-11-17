@@ -541,6 +541,6 @@ export function mountContextEditor(app, root, { boardId = null, toastTitle = 'Bo
 }
 
 // Automatic account sync status and an immediate retry.
-export function mountLaneAutomation(app, element, columnId, onSaved) {
-    return element ? mountLaunchLane(app, element, columnId, onSaved) : () => {};
+export function mountLaneAutomation(app, element, columnId, onSaved, options) {
+    return element ? mountLaunchLane(app, element, columnId, onSaved, options) : () => {};
 }

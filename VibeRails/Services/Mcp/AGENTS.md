@@ -12,7 +12,11 @@ unconfirmed session end as unknown: stdio MCP deliberately has no root-local liv
 the shared base-CLI capabilities. `create_board_card` / `update_board_card` accept `assignee`
 and `baseLlmOptions` (`model`, `effort`, `mode`, `yolo`, `speed`); update also accepts
 `clearBaseLlmOptions`. Options replace the whole object, while omission preserves them for
-an unchanged assignee. Saved environments reject base overrides. For Astra use
+an unchanged assignee. New base assignments, including the creator's automatic assignment, copy
+the CLI's saved **Make Default For LLM** settings when options are omitted. Changing the worker
+or card manager does the same; explicit options (even `{}`) and clear flags take precedence.
+This happens in `BoardService` with the existing preferences read through `IBoardStore`, including
+stdio without a root backend. Saved environments reject base overrides. For Astra use
 `assignee="base:codex"`, `baseLlmOptions={"model":"gpt-6-astra","effort":"xhigh","speed":"ultrafast"}`.
 Card reads and assignment receipts show saved settings, not the effective settings of a
 running session. Default speed inherits the CLI configuration.

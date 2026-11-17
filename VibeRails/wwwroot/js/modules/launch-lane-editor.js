@@ -130,7 +130,7 @@ export function laneManageGroups(items) {
 const choiceLogo = item => LANE_CHECKS[item.kind] ? boardBrandLogo(null, '') : launchPresentation(item).logoHtml;
 
 /** Ordered definitions, shared by lane settings and the lane popup. */
-export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
+export function mountLaunchLane(app, host, columnId, onSaved = () => {}, { beforeSave, saveRoot = host } = {}) {
     const api = new LaunchApi(app),
         abort = new AbortController();
     let selections = [],
@@ -480,8 +480,11 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                 return;
             }
             if (button.hasAttribute('data-lane-save')) {
-                const unlock = lock();
+                const unlock = lock(saveRoot);
                 try {
+                    // The full lane dialog also owns the name, colour and default destination.
+                    // Save those before reporting success from this shared settings action.
+                    if (await beforeSave?.() === false) return;
                     const saved = await api.call(
                         `board/columns/${encodeURIComponent(columnId)}/launches`,
                         'PUT',
@@ -522,9 +525,9 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
     void load();
     return dispose;
 
-    function lock() {
+    function lock(root = host) {
         busy = true;
-        const controls = [...host.querySelectorAll('input,select,button')].map(node => [node, node.disabled]);
+        const controls = [...root.querySelectorAll('input,select,button')].map(node => [node, node.disabled]);
         controls.forEach(([node]) => { node.disabled = true; });
         picker?.disable();
         return () => {

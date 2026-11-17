@@ -126,7 +126,12 @@ No daemon, automatic restart or deterministic moves: when its tab is gone the ch
 MCP create/update accepts the UI's `assignee` and typed `baseLlmOptions`, including explicit
 Codex `speed="ultrafast"` with `model="gpt-6-astra"`. Shared normalization and launch builders
 remain authoritative. Options replace the object; omitted options stay intact when the
-assignee is unchanged. Base overrides on saved environments are rejected. Card reads show
+assignee is unchanged. Creating or changing a base assignment with omitted options snapshots
+that CLI's saved **Make Default For LLM** settings, for both the worker and card manager.
+Explicit objects (including empty ones) and clear flags win; unchanged assignments never reload
+defaults. `IBoardStore.GetLaunchDefaultsJsonAsync` reads the existing state.db preference without
+root-only services or schema changes, so stdio MCP and REST agree. Saved Agents and environments
+keep their own settings. Base overrides on saved environments are rejected. Card reads show
 saved launch settings and must not imply a running agent was reconfigured.
 `list_board_agent_options` reads the root's ordinary picker; `start_board_agent` launches the
 saved assignment through the existing project-scoped root route and returns a session to poll.
@@ -256,7 +261,9 @@ auto-attach a session, and explicit session attachments remain within the curren
 
 Lane settings' **Newly created cards land here** switch (`#board-lane-default`, the shared
 `card-editor-switch`, first in the dialog since VIBE-334) saves with **Save lane** (or
-**Create lane**). One lane per local board can be selected; choosing another replaces it.
+**Create lane**). The dialog's **Save lane settings** action also saves its name, colour and
+default destination before saving the run order; a failed lane write keeps the draft and
+stops the run-order write. One lane per local board can be selected; choosing another replaces it.
 The card editor and card creation through the service/MCP use that lane when no lane is
 explicitly chosen, even when it is collapsed. Existing cards and explicit lane choices stay
 where directed. Clearing the choice or deleting its lane restores the first-lane fallback.

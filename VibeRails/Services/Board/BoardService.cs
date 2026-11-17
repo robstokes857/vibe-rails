@@ -386,19 +386,23 @@ public sealed partial class BoardService(
         var workflowMode = NormalizeWorkflowMode(request.WorkflowMode);
         var managerSelection = NormalizeAssignee(request.ManagerSelection);
         ValidateManager(workflowMode, managerSelection);
-        var managerOptions = NormalizeManagerOptions(managerSelection, request.ManagerBaseLlmOptions);
+        var managerOptions = NormalizeManagerOptions(managerSelection,
+            await WithLaunchDefaultsAsync(managerSelection, request.ManagerBaseLlmOptions, cancellationToken));
+        var assignee = NormalizeAssignee(request.Assignee);
+        var options = NormalizeBaseOptions(assignee,
+            await WithLaunchDefaultsAsync(assignee, request.BaseLlmOptions, cancellationToken));
         // A brand-new project's first card may arrive over MCP before anything listed the lanes.
         await EnsureDefaultBoardAsync(projectPath, cancellationToken);
         var card = await store.CreateCardAsync(projectPath, new NewBoardCard(
             request.ColumnId,
             title,
             NormalizeDescription(request.Description),
-            NormalizeAssignee(request.Assignee),
+            assignee,
             NormalizePriority(request.Priority) ?? BoardPriorities.Default,
             NormalizePoints(request.Points),
             NormalizeTags(request.Tags) ?? [],
             request.Blocked ?? false,
-            NormalizeBaseOptions(NormalizeAssignee(request.Assignee), request.BaseLlmOptions),
+            options,
             Type: NormalizeCardType(request.Type) ?? BoardCardTypes.Default,
             BoardId: NormalizeBoardId(request.BoardId), Flagged: request.Flagged ?? false,
             DisplayId: request.DisplayId is null ? null : BoardDisplayIds.Normalize(request.DisplayId), LinkedCardIds: request.LinkedCardIds,
@@ -447,7 +451,10 @@ public sealed partial class BoardService(
         var assignee = clearAssignee ? null : NormalizeAssignee(request.Assignee);
         var finalAssignee = clearAssignee ? null : assignee ?? existing.Assignee;
         var assigneeChanged = !string.Equals(finalAssignee, existing.Assignee, StringComparison.Ordinal);
-        var options = request.ClearBaseLlmOptions || request.BaseLlmOptions is null ? null : NormalizeBaseOptions(finalAssignee, request.BaseLlmOptions);
+        var requestedOptions = assigneeChanged && !request.ClearBaseLlmOptions
+            ? await WithLaunchDefaultsAsync(finalAssignee, request.BaseLlmOptions, cancellationToken)
+            : request.BaseLlmOptions;
+        var options = request.ClearBaseLlmOptions ? null : NormalizeBaseOptions(finalAssignee, requestedOptions);
         var clearOptions = request.ClearBaseLlmOptions || assigneeChanged
             || (request.BaseLlmOptions is not null && options is null);
         if (options is not null) clearOptions = false;
@@ -459,7 +466,10 @@ public sealed partial class BoardService(
         var finalManager = clearManager ? null : managerSelection ?? existing.ManagerSelection;
         ValidateManager(workflowMode, finalManager);
         var managerChanged = !string.Equals(finalManager, existing.ManagerSelection, StringComparison.Ordinal);
-        var managerOptions = NormalizeManagerOptions(finalManager, request.ManagerBaseLlmOptions);
+        var requestedManagerOptions = managerChanged && !request.ClearManagerBaseLlmOptions
+            ? await WithLaunchDefaultsAsync(finalManager, request.ManagerBaseLlmOptions, cancellationToken)
+            : request.ManagerBaseLlmOptions;
+        var managerOptions = NormalizeManagerOptions(finalManager, requestedManagerOptions);
         var clearManagerOptions = request.ClearManagerBaseLlmOptions || managerChanged
             || (request.ManagerBaseLlmOptions is not null && managerOptions is null);
         if (managerOptions is not null) clearManagerOptions = false;
@@ -1071,6 +1081,17 @@ public sealed partial class BoardService(
             return null;
         try { return BaseLlmOptionsBuilder.Normalize(parsed.Llm, options); }
         catch (ArgumentException ex) { throw new BoardValidationException(ex.Message); }
+    }
+
+    private async Task<BaseLlmOptions?> WithLaunchDefaultsAsync(string? selection, BaseLlmOptions? options,
+        CancellationToken cancellationToken)
+    {
+        // An explicit object (including empty) wins. Snapshot preferences only on assignment;
+        // ordinary edits and launches must not silently change a card's saved configuration.
+        if (options is not null || !BoardSelection.TryParse(selection, out var parsed) || parsed is null
+            || parsed.IsEnvironment || parsed.IsPreset) return options;
+        var json = await store.GetLaunchDefaultsJsonAsync(parsed.Llm, cancellationToken);
+        return LlmPickerPreferenceService.ParseLaunchDefaults(parsed.Llm, json);
     }
 
     internal static IReadOnlyList<string>? NormalizeTags(List<string>? tags)

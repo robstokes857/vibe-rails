@@ -802,7 +802,10 @@ The environment session ID is local process context, not a cryptographic identit
 An assignee is `base:<cli>` or `env:<id>:<cli>`, not a person. Saved environments are resolved by
 ID and checked against provider and project visibility at launch. Base provider options are
 typed model/effort/start-mode/YOLO/speed records; YOLO defaults off and becomes a provider-native launch
-flag without changing configuration. Changing assignee clears incompatible options. Board-launched
+flag without changing configuration. A new or changed base assignment snapshots that CLI's saved
+launch defaults when options are omitted; explicit options and clear flags win. Unchanged
+assignments preserve their snapshot, and saved Agents/environments use their own options. The
+shared service reads preferences through `IBoardStore` for both REST and stdio MCP. Board-launched
 terminals are real PTY CLI sessions, not a separate chat service.
 
 Codex speed is an optional field in the existing options JSON: Default inherits CLI settings;

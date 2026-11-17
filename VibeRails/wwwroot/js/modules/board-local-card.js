@@ -9,6 +9,7 @@ import { boardTracker, cardTracker, trackerLabel } from './board-brand.js';
 import { bindBoardSpelling } from './board-spelling.js';
 
 const TYPES = [['task', 'Task'], ['bug', 'Bug'], ['feature', 'Feature'], ['research-spike', 'Research spike'], ['chore', 'Chore / tech debt']];
+const PRIORITIES = [['critical', 'Critical'], ['high', 'High'], ['medium', 'Medium'], ['low', 'Low']];
 const options = (items, selected) => items.map(([id, name]) => `<option value="${escapeHtml(id)}"${id === selected ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('');
 
 export function localCardEditorHtml({ card, projectPath, boardName, columns, shared = false }) {
@@ -29,6 +30,8 @@ export function localCardEditorHtml({ card, projectPath, boardName, columns, sha
                     <select id="local-card-assignee" class="form-select" name="assignee"></select></div>
                 <div class="col-sm-6"><label class="form-label" for="local-card-type">Type</label>
                     <select id="local-card-type" class="form-select" name="type">${options(TYPES, card.type || 'task')}</select></div>
+                <div class="col-sm-6"><label class="form-label" for="local-card-priority">Priority</label>
+                    <select id="local-card-priority" class="form-select" name="priority">${options(PRIORITIES, card.priority || 'medium')}</select></div>
             </div>
             <div class="d-flex gap-3 flex-wrap my-3">
                 <label class="form-check"><input class="form-check-input" type="checkbox" name="blocked"${card.blocked ? ' checked' : ''}> Blocked</label>
@@ -54,7 +57,7 @@ export function readLocalCardForm(form) {
     return {
         title: field('title').value.trim(), description: field('description').value,
         columnId: field('columnId').value, assignee: field('assignee').value,
-        type: field('type').value,
+        type: field('type').value, priority: field('priority').value,
         blocked: field('blocked').checked, flagged: field('flagged').checked
     };
 }

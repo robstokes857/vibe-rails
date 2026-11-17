@@ -3598,7 +3598,8 @@ export class BoardController {
         if (!editor) return;
         editor._boardDefaultLaneBaseline = column?.isDefaultForNewCards === true;
         if (column) this.boardSettingsDispose = mountLaneAutomation(this.app, editor.querySelector('[data-lane-automation]'), column.id,
-            settings => this.laneAgents.updateColumnCount(column.id, settings));
+            settings => this.laneAgents.updateColumnCount(column.id, settings),
+            { beforeSave: () => this.saveLane(editor, { close: false }), saveRoot: editor });
 
         const colorInput = editor.querySelector('#board-lane-color');
         const selectColor = color => {
@@ -3623,12 +3624,12 @@ export class BoardController {
         editor.querySelector('#board-lane-name')?.focus();
     }
 
-    async saveLane(editor) {
+    async saveLane(editor, { close = true } = {}) {
         const name = editor.querySelector('#board-lane-name')?.value.trim();
         if (!name) {
             this.app.showToast('Board', 'A lane needs a name.', 'warning');
             editor.querySelector('#board-lane-name')?.focus();
-            return;
+            return false;
         }
         const color = this.state.editingColumnColor;
         const isDefaultForNewCards = editor.querySelector('#board-lane-default')?.checked === true;
@@ -3639,15 +3640,20 @@ export class BoardController {
         try {
             if (this.state.editingColumnId) {
                 await BoardApi.updateBoardColumnAsync(this.state.editingColumnId, changes);
-                this.app.showToast('Board', 'Lane saved.', 'success');
+                if (close) this.app.showToast('Board', 'Lane saved.', 'success');
             } else {
                 await BoardApi.createBoardColumnAsync({ ...changes, boardId: this.state.boardId });
                 this.app.showToast('Board', 'Lane added.', 'success');
             }
-            this.app.closeModal();
+            // A run-order save keeps the dialog open, including when its later write fails.
+            // Retain the accepted baseline so a retry or a subsequent uncheck saves correctly.
+            editor._boardDefaultLaneBaseline = isDefaultForNewCards;
+            if (close) this.app.closeModal();
             await this.refresh();
+            return true;
         } catch (error) {
             this.app.showToast('Board', error?.message || 'Failed to save the lane.', 'error');
+            return false;
         }
     }
 

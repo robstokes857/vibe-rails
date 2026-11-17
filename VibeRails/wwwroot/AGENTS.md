@@ -454,6 +454,8 @@ cards use `board-local-card.js` through explicit authenticated `local-cards` rou
 resolved on the server: fields, lane, comments and links can be edited without changing the open
 repository. It never sends a project path or invokes that repository's launch/file/session APIs.
 Both editors preserve drafts during discussion/link activity and send only edited card fields.
+Both expose **Priority** with Low, Medium, High and Critical choices, preserve a saved priority,
+and use Medium when no priority is supplied. New cards default to Medium.
 
 The saved card's sidebar begins with Display ID, permanent ID and the agent-maker/session block.
 A compact outline **Recheck code** button with a refresh icon appears on its own line only while
@@ -1837,8 +1839,9 @@ positions and editor drafts survive. The activity endpoint still batches loaded 
 and session lifecycle events update badges promptly. The open editor refreshes sessions and
 Comments with their attachment/commit metadata, rejecting reads made stale by local rail changes
 and deferring updates during uploads/saves. Fields, pending uploads and composer drafts survive. Unload disposes subscriptions, timers and requests.
-The editor no longer shows the YOLO warning text or Priority, Points and Tags fields. Saves omit
-those retired fields so stored values survive; YOLO remains an explicit checkbox.
+The editor no longer shows the YOLO warning text; YOLO remains an explicit checkbox.
+Priority and Points sit beside Type, with Tags under Advanced. Saves send only changed fields
+so existing values survive unrelated edits.
 
 Card labels use `displayId || key` through `board-card-label.js`; `key` remains the immutable
 identity. Board settings edit `displayPrefix` for future cards (only a changed value is sent; an

@@ -868,6 +868,12 @@ editors share a **Make Default For LLM** action for model, speed, effort, mode a
 CLI (`ui.llm-launch-defaults.v1.<cli>`, normal `state.db`); root-only GET/PUT
 `/api/v1/llm-picker/defaults/{cli}` reads live data with no schema or CLI-config changes.
 Explicit saved options and in-progress edits win over presets; saving/launching waits for a pending preset load.
+`BoardService` also snapshots these defaults when creating or changing a base worker or card-manager
+assignment with omitted options. `IBoardStore.GetLaunchDefaultsJsonAsync` reads the same existing
+state.db row, so REST and stdio MCP behave consistently without constructing `Repository` in the
+child. The picker and Board share cache keys and normalization. Explicit options (including `{}`)
+and clear flags win; unchanged assignments preserve their saved options. Saved Agents and
+environments retain their own settings. Existing cards are not backfilled.
 
 `board-lane-agents.js` handles assignment/removal, descriptions, reviewer selection and setup state.
 Its Add form can create a repository script Automation using the existing Jobs approval path.

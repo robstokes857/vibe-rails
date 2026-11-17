@@ -1,4 +1,5 @@
 using System.Text.Json;
+using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.LlmClis;
 
@@ -6,13 +7,16 @@ namespace VibeRails.Services;
 
 public sealed partial class LlmPickerPreferenceService
 {
-    private const string LaunchDefaultsPrefix = "ui.llm-launch-defaults.v1.";
-
     /// <inheritdoc />
     public async Task<BaseLlmOptions> GetLaunchDefaultsAsync(string cli, CancellationToken cancellationToken = default)
     {
         var llm = ParseDefaultsCli(cli);
-        var json = await _repository.GetGlobalCacheValueAsync(DefaultsKey(llm), cancellationToken);
+        var json = await _repository.GetGlobalCacheValueAsync(LlmLaunchDefaults.CacheKey(llm), cancellationToken);
+        return ParseLaunchDefaults(llm, json);
+    }
+
+    internal static BaseLlmOptions ParseLaunchDefaults(LLM llm, string? json)
+    {
         if (string.IsNullOrEmpty(json)) return new();
         try
         {
@@ -32,7 +36,7 @@ public sealed partial class LlmPickerPreferenceService
         var llm = ParseDefaultsCli(cli);
         var normalized = BaseLlmOptionsBuilder.Normalize(llm, options) ?? new();
         // One existing GlobalCache row per CLI: unrelated LLM saves cannot overwrite each other.
-        await _repository.SetGlobalCacheValueAsync(DefaultsKey(llm),
+        await _repository.SetGlobalCacheValueAsync(LlmLaunchDefaults.CacheKey(llm),
             JsonSerializer.Serialize(normalized, AppJsonSerializerContext.Default.BaseLlmOptions), cancellationToken);
         return normalized;
     }
@@ -44,6 +48,4 @@ public sealed partial class LlmPickerPreferenceService
             throw new ArgumentException("Choose a base LLM to save launch defaults.");
         return llm;
     }
-
-    private static string DefaultsKey(LLM llm) => LaunchDefaultsPrefix + LlmParser.ToWireName(llm).ToLowerInvariant();
 }

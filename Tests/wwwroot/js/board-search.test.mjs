@@ -185,7 +185,7 @@ test('local card navigation resolves target ownership, and a late foreign read c
 
 function formHarness() {
     const fields = Object.fromEntries(Object.entries({ title: 'Original', description: 'Original description', columnId: 'foreign-lane',
-        assignee: '', type: 'task' }).map(([name, value]) => [name, { value, focus() {} }]));
+        assignee: '', type: 'task', priority: 'low' }).map(([name, value]) => [name, { value, focus() {} }]));
     fields.blocked = { checked: false };
     fields.flagged = { checked: false };
     const handlers = {};
@@ -217,7 +217,7 @@ test('foreign editor saves only changed fields and preserves drafts after commen
         }
     };
     BoardApi.attach(app);
-    const detail = { card: { id: 'foreign', title: 'Original', jiraIssueKey: 'OLD-1',
+    const detail = { card: { id: 'foreign', title: 'Original', jiraIssueKey: 'OLD-1', priority: 'low', points: 8, tags: ['imported'],
         comments: [{ id: 'internal', body: 'Internal note', syncToJira: false }] }, columns: [], isJiraBoard: false };
     const dispose = openLocalCardEditor(app, detail, { openCard() {}, onChanged() {} });
     assert.doesNotMatch(comments.innerHTML, /Not sent to Jira/, 'a retained issue key on a local board does not show Jira status');
@@ -245,13 +245,23 @@ test('foreign editor saves only changed fields and preserves drafts after commen
     const count = calls.length;
     await form.handlers.submit(submit);
     assert.equal(calls.length, count, 'saved baseline must not resend stale fields');
+    form.fields.priority.value = 'high';
+    await form.handlers.submit(submit);
+    assert.deepEqual(calls.at(-1), { url: '/api/v1/board/local-cards/foreign', method: 'PUT', payload: { priority: 'high' } });
+    assert.equal(detail.card.priority, 'high');
+    assert.equal(detail.card.points, 8);
+    assert.deepEqual(detail.card.tags, ['imported']);
     dispose();
 });
 
-test('foreign form does not write retired priority, point or tag fields', () => {
+test('foreign form saves changed priority and leaves untouched priority, points and tags alone', () => {
     const form = formHarness();
     const baseline = readLocalCardForm(form);
+    assert.equal(baseline.priority, 'low');
     form.fields.title.value = 'Edited';
     assert.deepEqual(localCardChanges(baseline, readLocalCardForm(form)), { title: 'Edited' });
-    for (const field of ['priority', 'points', 'tags']) assert.equal(Object.hasOwn(baseline, field), false);
+    form.fields.title.value = 'Original';
+    form.fields.priority.value = 'critical';
+    assert.deepEqual(localCardChanges(baseline, readLocalCardForm(form)), { priority: 'critical' });
+    for (const field of ['points', 'tags']) assert.equal(Object.hasOwn(baseline, field), false);
 });

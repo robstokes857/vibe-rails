@@ -2245,6 +2245,57 @@ for (const width of [1440, 390]) {
         await expect(page.locator('#board-card-lane')).toHaveValue('col_ready');
     });
 
+    test(`Save lane settings retains the default location at ${width}px`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 950 });
+        const columns = [
+            { id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' },
+            { id: 'col_refine', name: 'Needs refinement', position: 1, color: '#64748b', boardId: 'brd_main' }
+        ];
+        await openBoard(page, { columns });
+        const launches = await installLaunchFixture(page);
+        let rejectSave = false;
+        const writes = [];
+        await page.route('**/api/v1/board/columns/col_refine', route => {
+            const body = route.request().postDataJSON();
+            writes.push(body);
+            if (rejectSave) return route.fulfill({ status: 400, json: { error: 'Try saving the lane again.' } });
+            Object.assign(columns[1], body);
+            return route.fulfill({ json: columns[1] });
+        });
+        const editor = page.locator('[data-board-lane-editor]');
+        const checkbox = editor.getByRole('switch', { name: 'Newly created cards land here' });
+        const save = editor.getByRole('button', { name: 'Save lane settings', exact: true });
+        await page.getByRole('button', { name: 'Settings for Needs refinement', exact: true }).click();
+        await checkbox.check();
+        await save.click();
+        await expect.poll(() => writes.length).toBe(1);
+        expect(writes[0].isDefaultForNewCards).toBe(true);
+        await expect.poll(() => launches.writes.length).toBe(1);
+        await expect(save).toBeEnabled();
+        await page.keyboard.press('Escape');
+        await page.goto('/?view=board', { waitUntil: 'domcontentloaded' });
+        await page.getByRole('button', { name: 'Settings for Needs refinement', exact: true }).click();
+        await expect(checkbox).toBeChecked();
+
+        // A failed lane write must keep the draft and must not save the run order.
+        rejectSave = true;
+        await checkbox.uncheck();
+        await save.click();
+        await expect(page.getByText('Try saving the lane again.', { exact: true })).toBeVisible();
+        await expect(checkbox).not.toBeChecked();
+        expect(launches.writes).toHaveLength(1);
+        rejectSave = false;
+        await save.click();
+        await expect.poll(() => launches.writes.length).toBe(2);
+        await expect(save).toBeEnabled();
+        await page.keyboard.press('Escape');
+        await page.getByRole('button', { name: 'Settings for Needs refinement', exact: true }).click();
+        await expect(checkbox).not.toBeChecked();
+        await page.keyboard.press('Escape');
+        await page.locator('[data-board-action="new-card"]').click();
+        await expect(page.locator('#board-card-lane')).toHaveValue('col_ready');
+    });
+
     test(`lane colours save custom selections and stay in sync with presets at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 900 });
         const columns = [{ id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' }];
@@ -4006,6 +4057,26 @@ test('Automation recordings have their own rail and live robot without overwriti
 });
 
 for (const width of [1440, 390]) {
+    test(`new card priority defaults to Medium and survives save and reopen at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        const requests = await openBoard(page);
+        await page.getByRole('button', { name: 'Create card', exact: true }).click();
+        const editor = page.locator('[data-board-card-editor]');
+        const priority = editor.getByLabel('Priority', { exact: true });
+        await expect(priority).toHaveValue('medium');
+        await expect(priority.locator('option:checked')).toHaveText('Medium');
+        await expect(priority.locator('option')).toHaveText(['Critical', 'High', 'Medium', 'Low']);
+        await editor.getByLabel('Card title', { exact: true }).fill('Medium priority card');
+        await priority.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`new-card-medium-priority-${width}.png`) });
+        await editor.locator('[data-board-save-card]').click();
+        await expect(editor).toHaveCount(0);
+        expect(requests.find(request => request.method === 'POST' && request.path === '/api/v1/board/cards').body)
+            .toMatchObject({ title: 'Medium priority card', priority: 'medium' });
+        await page.getByText('Medium priority card', { exact: true }).click();
+        await expect(editor.getByLabel('Priority', { exact: true })).toHaveValue('medium');
+    });
+
     test(`priority, points and tags are editable and only a changed one is saved at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         const requests = await openBoard(page, { onCard(card) { card.priority = 'low'; card.points = 4; card.tags = ['imported']; } });
@@ -4319,7 +4390,8 @@ for (const width of [1440, 390]) {
         const local = { ...current, boardName: 'Main', columnName: 'Ready', isCurrentProject: true, projectPath: 'C:/board-fixture' };
         const foreign = { ...current, id: 'foreign-card', key: 'OTHER-ABCDE-2', title: 'Authentication recovery',
             description: 'Original outside description', boardId: 'outside-board', columnId: 'outside-ready',
-            assignee: 'env:404:codex', comments: [], attachments: [], sessions: [], linkedCards: [] };
+            assignee: 'env:404:codex', priority: 'low', points: 8, tags: ['imported'],
+            comments: [], attachments: [], sessions: [], linkedCards: [] };
         const ownership = { boardName: 'Outside <board>', columnName: 'Ready', projectPath: 'C:/other/<project>', isCurrentProject: false };
         const requests = [];
         await page.route('**/api/v1/board/cards/search?*', route => route.fulfill({ json: { cards: [
@@ -4360,12 +4432,24 @@ for (const width of [1440, 390]) {
         await expect(editor).toContainText("another project's board");
         await expect(editor).toContainText('Outside <board>');
         await expect(editor.locator('#local-card-assignee')).toHaveValue('env:404:codex');
+        const priority = editor.getByLabel('Priority', { exact: true });
+        await expect(priority).toHaveValue('low');
         await page.evaluate(() => window.app.llmPickerController.refreshAll());
         await expect(editor.locator('#local-card-assignee')).toHaveValue('env:404:codex');
         await editor.getByLabel('Title', { exact: true }).fill('Edited outside card');
         await editor.getByRole('button', { name: 'Save card', exact: true }).click();
         await expect(editor.locator('[data-local-card-status]')).toContainText('Saved');
         expect(requests.find(request => request.method === 'PUT').body).toEqual({ title: 'Edited outside card' });
+        await priority.selectOption('high');
+        await editor.getByRole('button', { name: 'Save card', exact: true }).click();
+        await expect.poll(() => requests.filter(request => request.method === 'PUT').length).toBe(2);
+        await expect(priority).toBeEnabled();
+        expect(requests.filter(request => request.method === 'PUT')[1].body).toEqual({ priority: 'high' });
+        expect(foreign.priority).toBe('high');
+        expect(foreign.points).toBe(8);
+        expect(foreign.tags).toEqual(['imported']);
+        await priority.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`foreign-card-priority-${width}.png`) });
         await editor.getByLabel('Description', { exact: true }).fill('Preserve this unsaved description');
         await editor.getByLabel('Add a comment', { exact: true }).fill('Comment saved on outside card');
         await editor.getByRole('button', { name: 'Post comment' }).click();
@@ -4390,6 +4474,33 @@ for (const width of [1440, 390]) {
         await search.fill('');
         await expect(page.locator('[data-board-canvas]')).toBeVisible();
         await expect(page.locator('[data-board-filter-type]')).toBeEnabled();
+    });
+
+    test(`shared foreign card priority stays visible and read-only at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        let current;
+        await openBoard(page, { onCard: card => { current = card; } });
+        const card = { ...current, id: 'shared-foreign-card', key: 'OTHER-ABCDE-3', title: 'Shared priority',
+            boardId: 'shared-board', columnId: 'outside-ready', priority: 'critical', comments: [], linkedCards: [] };
+        const ownership = { boardName: 'Shared outside board', columnName: 'Ready', projectPath: 'C:/other-project',
+            isCurrentProject: false, shared: true };
+        const writes = [];
+        await page.route('**/api/v1/board/cards/search?*', route => route.fulfill({ json: { cards: [{ ...card, ...ownership }] } }));
+        await page.route('**/api/v1/board/local-cards/**', route => {
+            if (route.request().method() !== 'GET') writes.push(route.request().method());
+            return route.fulfill({ json: { card, ...ownership, columns: [{ id: 'outside-ready', name: 'Ready' }] } });
+        });
+        await page.locator('[data-board-search]').fill('Shared priority');
+        await page.locator('[data-board-search-card]').click();
+        const editor = page.locator('[data-local-board-card-editor]');
+        await expect(editor).toContainText('Shared with you (read-only)');
+        const priority = editor.getByLabel('Priority', { exact: true });
+        await expect(priority).toHaveValue('critical');
+        await expect(priority).toBeDisabled();
+        await expect(editor.getByRole('button', { name: 'Save card', exact: true })).toBeDisabled();
+        await priority.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`shared-foreign-card-priority-${width}.png`) });
+        expect(writes).toEqual([]);
     });
 }
 
