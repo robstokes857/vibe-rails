@@ -74,8 +74,8 @@ public sealed class BoardContextEstimator(
             ?? throw new BoardValidationException("The card was deleted while its context was being measured.");
         // The card read shows the levels the prompt carried. A nudged prompt always carries the App level, even empty.
         var nudgeEnabled = prompt.ContextLevels.Any(level => level.Key == ContextLevels.AppKey);
-        var render = await BoardTool.RenderCardAsync(service, store, projectPath, detail, BoardTool.CardReadOptions.Default, cancellationToken, nudgeEnabled);
-        var lanes = await BoardTool.RenderLanesAsync(service, store, projectPath, prompt.BoardId, prompt.BoardName, cancellationToken);
+        var render = await BoardTool.RenderCardAsync(service, store, projectPath, detail, BoardTool.CardReadOptions.Default, cancellationToken, nudgeEnabled, launches);
+        var lanes = await BoardTool.RenderLanesAsync(service, store, projectPath, prompt.BoardId, prompt.BoardName, cancellationToken, launches);
         var promptParts = BoardPromptComposer.Measure(prompt.Prompt, card, prompt.EnvironmentPrompt, prompt.ContextLevels, prompt.Intent);
         var stats = render.Stats;
 

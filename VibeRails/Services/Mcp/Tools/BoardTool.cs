@@ -18,7 +18,8 @@ namespace VibeRails.Services.Mcp.Tools;
 /// root backend, and the stdio <c>vb mcp</c> host) and backed by the board store directly, so they
 /// work from any terminal — no VibeRails tab needs to be involved.
 ///
-/// Read / append / move / link only: there is deliberately no delete tool, and the only process
+/// Cards are read / append / move / link only, and lanes and boards can be created and edited
+/// (BoardTool.Structure.cs): there is deliberately no delete tool, and the only process
 /// these tools spawn is <c>git</c> with a validated sha (see BoardCommitService). Failures come
 /// back as readable <c>FAIL:</c> sentences (house style); exception detail goes to the file log.
 ///
@@ -168,6 +169,18 @@ public sealed partial class BoardTool(
             : entry with { Name = BoardPromptComposer.SanitizeLine(name, 120), Summary = $"{entry.Summary}; id {id}" };
     }
 
+    /// <summary>The same naming for a lane's whole list: the one-line lane labels and the move report read it.</summary>
+    private static async Task<IReadOnlyList<BoardLaneAutomationInfo>> NameLaneEntriesAsync(IReadOnlyList<BoardLaneAutomationInfo> entries, VibeRails.Launches.ILaunchStore? launches, CancellationToken cancellationToken)
+    {
+        if (launches is null || entries.Count == 0) return entries;
+        var named = new List<BoardLaneAutomationInfo>(entries.Count);
+        foreach (var entry in entries) named.Add(await NameLaneEntryAsync(entry, launches, cancellationToken));
+        return named;
+    }
+
+    private static async Task<BoardLaneEntryReport> NameLaneEntryReportAsync(BoardLaneEntryReport report, VibeRails.Launches.ILaunchStore? launches, CancellationToken cancellationToken) =>
+        report with { Automations = await NameLaneEntriesAsync(report.Automations, launches, cancellationToken) };
+
     [McpServerTool, Description("List cards on a local VibeRails board: permanent key, lane, type, priority, title, assignee, workflow, pin, comments, ghost and open session. Select any local board with board=<id> from list_boards. Optional filters by lane, assignee, type, priority, flagged, blocked and ghost. " + GhostGuidance)]
     public async Task<string> ListBoardCards(
         [Description("Only cards in this lane (name or id). Optional.")] string? column = null,
@@ -308,7 +321,7 @@ public sealed partial class BoardTool(
             var nudgeEnabled = linked is not null && await store.FindSessionLaunchedEnvironmentAsync(linked.Id, cancellationToken) is { } savedEnvironment
                 ? ContextLevels.NudgeEnabled(settings, savedEnvironment)
                 : ContextLevels.NudgeEnabledFor(settings, linked?.Selection ?? (detail.WorkflowMode == "agent" ? detail.ManagerSelection : detail.Assignee));
-            var render = await RenderCardAsync(service, store, target.Project, detail, new CardReadOptions(sinceUtc, beforeUtc, allActivity, beforeId, descriptionOffset), cancellationToken, nudgeEnabled);
+            var render = await RenderCardAsync(service, store, target.Project, detail, new CardReadOptions(sinceUtc, beforeUtc, allActivity, beforeId, descriptionOffset), cancellationToken, nudgeEnabled, launches);
             return render.Text;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -337,7 +350,7 @@ public sealed partial class BoardTool(
     /// block includes App and Board context only when <paramref name="nudgeEnabled"/> (VIBE-229).
     /// </summary>
     internal static async Task<CardRender> RenderCardAsync(IBoardService service, IBoardStore store, string project, BoardCardResponse detail, CardReadOptions options,
-        CancellationToken cancellationToken, bool nudgeEnabled = false)
+        CancellationToken cancellationToken, bool nudgeEnabled = false, VibeRails.Launches.ILaunchStore? launches = null)
     {
         var lanes = (await service.GetColumnsAsync(project, cancellationToken, BoardService.NormalizeBoardId(detail.BoardId))).Columns.OrderBy(c => c.Position).ToList();
         var lane = lanes.FirstOrDefault(c => c.Id == detail.ColumnId);
@@ -354,11 +367,18 @@ public sealed partial class BoardTool(
         var automations = await service.GetLaneAutomationsByLaneAsync(project, lanes.Select(c => c.Id).ToList(), cancellationToken);
         var entries = await store.GetLaunchEventsAsync(project, detail.Id, cancellationToken);
         var stats = new CardRenderStats();
-        var text = FormatCard(detail, lane?.Name ?? detail.ColumnId, lanes.Select(c => LaneLabel(c.Name, automations[c.Id])).ToList(), outcomes, options, boardName,
+        // Lane entries and lane runs are stored by definition id; the reader gets the Agent's or Action's name.
+        var laneLabels = new List<string>(lanes.Count);
+        foreach (var column in lanes)
+            laneLabels.Add(LaneLabel(column.Name, await NameLaneEntriesAsync(automations[column.Id], launches, cancellationToken)));
+        var runLabels = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var definitionId in entries.Select(e => e.DefinitionId).Distinct(StringComparer.Ordinal))
+            runLabels[definitionId] = await LaneDefinitionLabelAsync(launches, definitionId, cancellationToken);
+        var text = FormatCard(detail, lane?.Name ?? detail.ColumnId, laneLabels, outcomes, options, boardName,
             [], stats);
         text += $"\nProject: {project}\nCard ID: {detail.Id}";
         text += "\n\nLane runs: " + (entries.Count == 0 ? "None." : string.Join("\n", entries.Select(e =>
-            $"{e.Id}: {e.DefinitionId} · {e.ProcessStatus} · verdict {e.Verdict ?? "not reported"} · run {e.RunId ?? "pending"}"
+            $"{e.Id}: {runLabels[e.DefinitionId]} · {e.ProcessStatus} · verdict {e.Verdict ?? "not reported"} · run {e.RunId ?? "pending"}"
             + (e.SkippedByAgent is null ? "" : $" · {BoardPromptComposer.SanitizeLine(e.Summary ?? "", 600)} ({BoardPromptComposer.SanitizeLine(e.SkippedByAgent, 60)})"))));
         var checks = await store.GetLatestChecksAsync(project, detail.Id, cancellationToken);
         text += "\n\n" + CheckSummary(checks);
@@ -642,7 +662,7 @@ public sealed partial class BoardTool(
                     return $"FAIL: card not found: {card}";
                 var currentLane = await service.FindColumnAsync(target.Project, current.ColumnId, cancellationToken);
                 return $"Preview: {current.Key} stays in {currentLane?.Name ?? current.ColumnId}; moving it to {report.LaneName} would do the following.\n"
-                    + FormatLaneEntry(report, current.Key, preview: true);
+                    + FormatLaneEntry(await NameLaneEntryReportAsync(report, launches, cancellationToken), current.Key, preview: true);
             }
             if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
                 return UnnamedClientHint;
@@ -655,7 +675,7 @@ public sealed partial class BoardTool(
             await AutoLinkSessionAsync(target.Project, moved.Id, cancellationToken);
             await TrackDesktopActivityAsync(server, target.Project, moved.Id, author.Label, cancellationToken);
             return $"Moved {moved.Key} to {lane?.Name ?? moved.ColumnId} (position {moved.Position}).\n"
-                + FormatLaneEntry(result.LaneEntry, moved.Key, preview: false);
+                + FormatLaneEntry(await NameLaneEntryReportAsync(result.LaneEntry, launches, cancellationToken), moved.Key, preview: false);
         }
         catch (BoardValidationException ex) { return "FAIL: " + ex.Message; }
         catch (BoardConflictException ex) { return "FAIL: " + ex.Message; }

@@ -100,7 +100,7 @@ public sealed partial class BoardTool
                 foreach (var entry in entries.Skip(Math.Max(0, entries.Count - entryLimit)))
                 {
                     // report_automation_step and skip_lane_step ask for "eventKey": it is this id, so it is labelled.
-                    text.Append("- Lane entry · eventKey ").Append(entry.Id).Append(" · ").Append(await LaneDefinitionLabelAsync(entry.DefinitionId, cancellationToken))
+                    text.Append("- Lane entry · eventKey ").Append(entry.Id).Append(" · ").Append(await LaneDefinitionLabelAsync(launches, entry.DefinitionId, cancellationToken))
                         .Append(" · current: ").Append(entry.Current).Append(" · process: ").Append(entry.ProcessStatus)
                         .Append(" · verdict: ").Append(entry.Verdict ?? "awaiting explicit result").Append(" · run: ").AppendLine(entry.RunId ?? "not queued");
                     // VIBE-338: an agent's skip carries its reason, so the reviewer and the owner see why.
@@ -123,7 +123,7 @@ public sealed partial class BoardTool
     }
 
     /// <summary>The Agent's or Action's name with its id, or the id alone when the definition no longer resolves.</summary>
-    private async Task<string> LaneDefinitionLabelAsync(string definitionId, CancellationToken cancellationToken)
+    private static async Task<string> LaneDefinitionLabelAsync(VibeRails.Launches.ILaunchStore? launches, string definitionId, CancellationToken cancellationToken)
     {
         if (launches is null || string.IsNullOrEmpty(definitionId)) return definitionId;
         var name = (await launches.GetPresetAsync(definitionId, cancellationToken))?.Name ?? (await launches.GetActionAsync(definitionId, cancellationToken))?.Name;

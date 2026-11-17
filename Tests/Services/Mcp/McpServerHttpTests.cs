@@ -49,6 +49,8 @@ public class McpServerHttpTests : IAsyncLifetime
         "request_review",
         "add_jira_comment",
         "add_ado_comment",
+        // Lane and board structure (VIBE-342): listed, never pre-approved for a Board launch.
+        "create_board_column", "update_board_column", "create_board", "update_board",
         "list_launch_catalog", "list_launch_projects", "get_launch_definition", "save_launch_preset", "save_launch_action",
         "retire_launch_definition", "list_launch_bindings", "save_launch_binding", "run_launch",
         "get_launch_run", "list_launch_runs", "cancel_launch_run", "retry_launch_run", "resolve_uncertain_launch_run",

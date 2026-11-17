@@ -724,6 +724,20 @@ queues through `BoardLaunchWorkflow.EnqueueCardAsync`, the call behind the card 
 the same shared admission, project scope, script approval and immutable snapshot as a run without
 a card, plus that card's context. The launch tools stay outside the Board auto-grants.
 
+`create_board_column`, `update_board_column`, `create_board` and `update_board` (VIBE-342, both
+transports) do what the dashboard's lane and board settings do: add a lane, rename, recolour or
+reorder one, choose the default lane for new cards, create a board, rename it or change its
+display ID prefix. They call the `IBoardService` methods behind `/api/v1/board/columns` and
+`/api/v1/board/boards`, so validation and the read-only refusal for shared copies are the
+dashboard's; they add no route, listener or storage. There is still no delete tool, and no tool
+sets a lane's on-entry Agents and Actions, so these four cannot schedule a script or an agent.
+They are not in `BoardMcpAuthorization.ToolNames`: a Board launch does not pre-approve them and
+the client's own approval applies. Codex's server-wide default described below covers them as it
+covers every VibeRails tool. A client that names no agent is refused before anything is written,
+and each change is written to the file log with the caller's label, because the store records
+no author for lane or board structure. A rename, a new lane or a reorder can change which lane
+the Board treats as finished or last; the reply says so when it does.
+
 Board Start work and Board-triggered Workers use the exact per-tool grants in
 [BoardMcpAuthorization](VibeRails/Services/Terminal/Commands/BoardMcpAuthorization.cs).
 These explicit Board grants default off on other launches; card text/environment names cannot

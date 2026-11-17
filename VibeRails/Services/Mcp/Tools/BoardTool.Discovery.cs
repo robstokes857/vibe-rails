@@ -25,7 +25,13 @@ public sealed partial class BoardTool
                 .Append(count).Append(" card").Append(count == 1 ? "" : "s");
             var lanes = columns.Where(c => c.BoardId == board.Id).OrderBy(c => c.Position).ToList();
             if (lanes.Count > 0)
-                builder.Append("; lanes: ").Append(string.Join(" → ", lanes.Select(c => LaneLabel(c.Name, automations[c.Id]))));
+            {
+                // A lane's Agents and Actions read by name here, as in list_board_columns.
+                var labels = new List<string>(lanes.Count);
+                foreach (var lane in lanes)
+                    labels.Add(LaneLabel(lane.Name, await NameLaneEntriesAsync(automations[lane.Id], launches, cancellationToken)));
+                builder.Append("; lanes: ").Append(string.Join(" → ", labels));
+            }
             // A dedicated tracker board names its provider; a board without one is local.
             if (providers.TryGetValue(board.Id, out var provider))
                 builder.Append("; provider: ").Append(TrackerBoards.DisplayName(provider));

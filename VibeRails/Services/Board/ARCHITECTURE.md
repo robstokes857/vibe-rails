@@ -928,7 +928,9 @@ argument. Description replacement through that tool is unconditional; prefer app
 adding context, and add a revision argument when implementing concurrent replacement safety.
 MCP cannot currently clear points or change assignee/base options through its update signature.
 
-There are no Board MCP delete, launch, board-management, or related-card mutation tools. MCP
+There are no Board MCP delete or related-card mutation tools. Lanes and boards can be created
+and edited over MCP, never deleted (VIBE-342: `create_board_column`, `update_board_column`,
+`create_board`, `update_board`; see the [MCP guide](../Mcp/AGENTS.md)). MCP
 returns human-readable text and `FAIL: ...` strings, not REST status codes or structured error
 results. Cancellation propagates; busy database errors tell the caller to retry. Read-style
 calls are not universally side-effect-free: initial listing can seed a board and full card reads
