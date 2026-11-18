@@ -44,6 +44,8 @@ Older running clients may still recreate removed remote copies; update those cli
 
 ## VIBE-26: remote Start work
 
+A failed desktop launch optionally reports a portable `reason` such as `no_assignee` or `missing_agent`. The hosted board translates known codes into guidance. Earlier hosts still receive the ordinary `failed` status.
+
 The hosted card's **Start work** button saves edits and asks an open desktop for that project
 to launch the saved assignee. One desktop is selected automatically; multiple desktops require
 a choice. Only the Board owner can request execution, and only a key belonging to that owner

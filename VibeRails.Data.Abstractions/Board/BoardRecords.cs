@@ -3,7 +3,11 @@ using VibeRails.DTOs;
 namespace VibeRails.Services.Board;
 
 /// <summary>A user-facing board rule violation (empty title, last column, bad sha). Maps to 400.</summary>
-public class BoardValidationException(string message) : Exception(message);
+public class BoardValidationException(string message) : Exception(message)
+{
+    /// <summary>A portable failure code for remote launches. Local diagnostic text stays on the desktop.</summary>
+    public string? RemoteLaunchReason { get; init; }
+}
 
 /// <summary>A conflicting board operation (deleting the last lane, duplicate link). Maps to 409.</summary>
 public sealed class BoardConflictException(string message, string? sessionId = null) : Exception(message)

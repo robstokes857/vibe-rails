@@ -141,11 +141,11 @@ public sealed class BoardLaunchService(
         if (isManager && string.IsNullOrWhiteSpace(selectionOverride) && string.IsNullOrWhiteSpace(card.ManagerSelection))
         {
             if (!await store.GetBoardManagerEnabledAsync(cancellationToken))
-                throw new BoardValidationException("This card uses the board manager, and the AI board manager is off. Turn it on in Settings > AI board manager, or pick a manager agent for this card.");
+                throw new BoardValidationException("This card uses the board manager, and the AI board manager is off. Turn it on in Settings > AI board manager, or pick a manager agent for this card.") { RemoteLaunchReason = "manager_off" };
             var board = string.IsNullOrEmpty(card.BoardId) ? null : await store.GetBoardAsync(projectPath, card.BoardId, cancellationToken);
             var settings = board is null ? null : (await store.GetBoardManagerAsync(projectPath, board.Id, cancellationToken))?.Settings;
             if (settings?.IsConfigured != true)
-                throw new BoardValidationException("Pick a manager agent for this card first, or set up this board's manager in Board settings > Manager.");
+                throw new BoardValidationException("Pick a manager agent for this card first, or set up this board's manager in Board settings > Manager.") { RemoteLaunchReason = "no_manager" };
             var manager = await LaunchBoardManagerReservedAsync(projectPath, board!, cancellationToken);
             if (manager.SessionId is not null)
                 await LinkManagerToCardAsync(projectPath, card, manager.SessionId, manager.TabId, manager.Selection, manager.Cli ?? "", cancellationToken);
@@ -167,15 +167,15 @@ public sealed class BoardLaunchService(
         var savedSelection = isManager ? card.ManagerSelection : card.Assignee;
         var selectionText = string.IsNullOrWhiteSpace(selectionOverride) ? savedSelection : selectionOverride;
         if (string.IsNullOrWhiteSpace(selectionText))
-            throw new BoardValidationException(isManager ? "Pick a manager agent for this card first." : "Assign an LLM to this card first, or pick one to start with.");
+            throw new BoardValidationException(isManager ? "Pick a manager agent for this card first." : "Assign an LLM to this card first, or pick one to start with.") { RemoteLaunchReason = isManager ? "no_manager" : "no_assignee" };
         if (!BoardSelection.TryParse(selectionText, out var parsed) || parsed is null)
-            throw new BoardValidationException("That assignee is not a launchable LLM selection.");
+            throw new BoardValidationException("That assignee is not a launchable LLM selection.") { RemoteLaunchReason = "bad_assignee" };
 
         if (parsed.IsEnvironment)
-            throw new BoardValidationException("Custom environments are retired. Replace this saved selection with an Agent.");
+            throw new BoardValidationException("Custom environments are retired. Replace this saved selection with an Agent.") { RemoteLaunchReason = "retired_agent" };
         var preset = await ResolvePresetAsync(parsed, cancellationToken);
         if (isManager && preset?.Purpose == "code_review")
-            throw new BoardValidationException("Choose a work Agent as manager; a review Agent is a worker.");
+            throw new BoardValidationException("Choose a work Agent as manager; a review Agent is a worker.") { RemoteLaunchReason = "manager_type" };
         if (intent != "chat" && preset?.Purpose == "code_review") intent = "code_review";
         var isReview = intent == "code_review";
         var assigneeLabel = preset is not null ? $"{preset.Name} ({parsed.Cli})" : parsed.Cli;
@@ -268,7 +268,7 @@ public sealed class BoardLaunchService(
                 // LaunchDispatcher already linked this session exactly once, with this card title
                 // and origin from the run snapshot (VIBE-296). Re-linking only raised a conflict.
                 if ((await store.GetAgentSessionsAsync(projectPath, card.Id, session.SessionId!, cancellationToken)).Count == 0)
-                    throw new BoardValidationException("The card was deleted while its agent was starting. The terminal has been closed.");
+                    throw new BoardValidationException("The card was deleted while its agent was starting. The terminal has been closed.") { RemoteLaunchReason = "card_deleted" };
             }
             else if (!string.IsNullOrWhiteSpace(session.SessionId))
             {
@@ -280,7 +280,7 @@ public sealed class BoardLaunchService(
                     var linked = await store.LinkSessionAsync(projectPath, card.Id, session.SessionId!, tab.TabId, parsed.Key, parsed.Cli,
                         title, origin, cancellationToken);
                     if (linked is null)
-                        throw new BoardValidationException("The card was deleted while its agent was starting. The terminal has been closed.");
+                        throw new BoardValidationException("The card was deleted while its agent was starting. The terminal has been closed.") { RemoteLaunchReason = "card_deleted" };
                 }
                 catch (BoardConflictException ex)
                 {
@@ -503,13 +503,13 @@ public sealed class BoardLaunchService(
         await BoardAccess.RequireWritableAsync(store, projectPath, board.Id, cancellationToken);
         var settings = (await store.GetBoardManagerAsync(projectPath, board.Id, cancellationToken))?.Settings;
         if (settings?.IsConfigured != true)
-            throw new BoardValidationException("Set up this board's manager in Board settings > Manager first.");
+            throw new BoardValidationException("Set up this board's manager in Board settings > Manager first.") { RemoteLaunchReason = "no_manager" };
         if (!BoardSelection.TryParse(settings.Selection, out var parsed) || parsed is null)
-            throw new BoardValidationException("The board manager is not a launchable LLM selection.");
+            throw new BoardValidationException("The board manager is not a launchable LLM selection.") { RemoteLaunchReason = "bad_manager" };
         if (parsed.IsEnvironment)
-            throw new BoardValidationException("Custom environments are retired. Replace the board manager with an Agent.");
+            throw new BoardValidationException("Custom environments are retired. Replace the board manager with an Agent.") { RemoteLaunchReason = "retired_agent" };
         var preset = await ResolvePresetAsync(parsed, cancellationToken);
-        if (preset?.Purpose == "code_review") throw new BoardValidationException("Choose a work Agent as board manager.");
+        if (preset?.Purpose == "code_review") throw new BoardValidationException("Choose a work Agent as board manager.") { RemoteLaunchReason = "manager_type" };
 
         var tabs = await tabHost.ListTabsAsync(cancellationToken);
         var managerSessions = await store.GetBoardManagerSessionsAsync(projectPath, board.Id, 10, cancellationToken);
@@ -674,15 +674,15 @@ public sealed class BoardLaunchService(
         if (!selection.IsPreset) return null;
         var preset = launchStore is null ? null : await launchStore.GetPresetAsync(selection.PresetId!, ct);
         if (preset is null || !preset.Enabled || preset.RetiredUtc is not null || preset.Cli != selection.Llm)
-            throw new BoardValidationException("This saved Agent is unavailable. Replace the selection.");
-        if (preset.Kind != "agent") throw new BoardValidationException("A Quick Launch cannot run as a Board Agent. Add an initial prompt first.");
+            throw new BoardValidationException("This saved Agent is unavailable. Replace the selection.") { RemoteLaunchReason = "missing_agent" };
+        if (preset.Kind != "agent") throw new BoardValidationException("A Quick Launch cannot run as a Board Agent. Add an initial prompt first.") { RemoteLaunchReason = "quick_launch" };
         return LaunchOptionBuilder.Normalize(preset);
     }
 
     private async Task<LaunchRun> LaunchPresetAsync(LaunchPreset preset, string project, string? boardId, string? cardId,
         string prompt, string origin, string selection, string title, CancellationToken ct)
     {
-        if (launchService is null || launchDispatcher is null) throw new BoardValidationException("The launch service is unavailable.");
+        if (launchService is null || launchDispatcher is null) throw new BoardValidationException("The launch service is unavailable.") { RemoteLaunchReason = "service_offline" };
         var run = await launchService.EnqueueAsync("preset", preset.Id,
             new(project, project, "board", "board:" + Guid.NewGuid().ToString("N"), BoardId: boardId, CardId: cardId,
                 AuthorizeBoardTools: true, ContextIncluded: true, ComposedPrompt: prompt, SessionOrigin: origin, Selection: selection,

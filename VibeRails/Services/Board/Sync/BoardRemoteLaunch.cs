@@ -9,7 +9,7 @@ public sealed record BoardLaunchCommand(Guid Id, Guid BoardId, string CardId, lo
 /// <summary>A poll can consume at most one launch command.</summary>
 public sealed record BoardLaunchPollResult(BoardLaunchCommand? Command);
 /// <summary>The outcome returned by the exact desktop instance that received the command.</summary>
-public sealed record BoardLaunchResult(Guid InstanceId, string Status, string? SessionId);
+public sealed record BoardLaunchResult(Guid InstanceId, string Status, string? SessionId, string? Reason = null);
 /// <summary>The hosted service's acknowledgement of a launch outcome.</summary>
 public sealed record BoardLaunchResultAck(bool Saved);
 
@@ -61,7 +61,7 @@ public sealed class BoardRemoteLaunchService(IBoardStore store, IBoardSyncClient
         }
         // VIBE-104: the web offers "Go to agent" for the agent already running instead of a second launch.
         catch (BoardConflictException ex) { return Result("busy", ex.SessionId); }
-        catch (BoardValidationException) { return Result("failed"); }
+        catch (BoardValidationException ex) { return new(instance, "failed", null, ex.RemoteLaunchReason ?? "invalid_launch"); }
     }
 }
 
@@ -122,7 +122,7 @@ public sealed class BoardRemoteLaunchHostedService(IServiceScopeFactory scopes, 
         catch (Exception ex)
         {
             Log.Warning(ex, "[BoardRemoteLaunch] Card launch failed");
-            result = new(instance, "failed", null);
+            result = new(instance, "failed", null, "desktop_error");
         }
         // Only the acknowledgement is retried. Never replay a command whose result was lost.
         for (var attempt = 0; ; attempt++)

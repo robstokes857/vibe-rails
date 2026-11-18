@@ -50,6 +50,18 @@ public sealed class BoardRemoteLaunchTests
         launch.VerifyNoOtherCalls();
     }
 
+    [Theory]
+    [InlineData("no_assignee", "no_assignee")]
+    [InlineData(null, "invalid_launch")]
+    public async Task ValidationFailureReportsOnlyItsPortableReason(string? reason, string expected)
+    {
+        Setup();
+        launch.Setup(x => x.LaunchAsync(Project, "card", null, Ct, "work"))
+            .ThrowsAsync(new BoardValidationException("Local diagnostic") { RemoteLaunchReason = reason });
+        var result = await Run();
+        Assert.Equal(("failed", expected), (result.Status, result.Reason));
+    }
+
     [Fact]
     public async Task ReportsExistingAgentConflict()
     {

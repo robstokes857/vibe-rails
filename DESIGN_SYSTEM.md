@@ -373,6 +373,12 @@ Use 32px desktop buttons, 4px gaps and one short hint; keep 44px touch targets.
 Put longer variable and worktree explanations in a collapsed help disclosure.
 Clicking or keyboard-activating a variable inserts it at the cursor (replacing any
 selection) and returns focus to the prompt. The buttons wrap on narrow screens.
+On a hosted board, owners can set the assignee and launch options before creation or save changes
+on an existing card. Beside the description, **Rewrite with ChatGPT** opens a modal with a plain-text
+preview, optional revision instructions and **Try again**. The owner can use the draft as the
+description, attach it as Markdown, or select both. **Apply draft** stages those choices in the
+editor until **Create card** or **Save changes**. Closing the preview keeps the original text.
+
 Agents reuse the Board provider and launch-options controls. Actions use their
 script/check fields. Automatic runs name the execution project. Mobile stacks these same
 slots without moving Save into the scroller.
