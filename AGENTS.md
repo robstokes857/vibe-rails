@@ -16,6 +16,12 @@ baseline, not files in this repository. Map the standards to this app's shared
 components and follow [the frontend guide](VibeRails/wwwroot/AGENTS.md) and
 [the UI test guide](UITests/AGENTS.md) for its behavior and validation workflow.
 
+## Board changes
+
+Start every Board change in the front-end repository. Before calling it complete,
+apply any corresponding change here and verify that shared Board behavior matches
+in both projects. Keep private source and implementation details in the front-end repository.
+
 ## Runbooks and diagnostic helpers
 
 Runbooks, investigation notes, and diagnostic Python helpers live in the private
