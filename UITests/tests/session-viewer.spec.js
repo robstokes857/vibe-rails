@@ -17,15 +17,127 @@ async function shell(page, csp = '', headers = {}) {
     await page.route('**/fixture', route => route.fulfill({ headers, contentType:'text/html',body:`<!doctype html><html><head>${csp}</head><body style="margin:0"><div id="host" style="height:950px"></div><div id="second" style="height:850px"></div></body></html>` }));
     await page.goto('/fixture');
 }
-async function mount(page, options = {}) {
+async function mount(page, options = {}, recording = envelope) {
     await page.evaluate(async ({envelope,options}) => {
         const {mountSessionViewer} = await import('/session-replay/viewer.mjs');
         const {createEnvelopeSource} = await import('/session-replay/envelope.mjs');
         window.viewer = mountSessionViewer(document.getElementById('host'), {request:createEnvelopeSource(envelope),sessionId:'fixture',...options});
         await viewer.ready;
-    }, {envelope,options});
+    }, {envelope:recording,options});
     return page.frameLocator('#host iframe');
 }
+async function stubReplayClipboard(page, { reject = false, allowFallback = false } = {}) {
+    const inner = page.frames().find(frame => frame.url() === 'about:srcdoc');
+    await inner.evaluate(({reject, allowFallback}) => {
+        window.clipboardWrites = [];
+        Object.defineProperty(navigator, 'clipboard', { value: { async writeText(value) {
+            if (reject) throw new DOMException('Clipboard write denied', 'NotAllowedError');
+            window.clipboardWrites.push(value);
+        } } });
+        document.execCommand = command => {
+            const field = document.activeElement;
+            if (!allowFallback || command !== 'copy' || field.tagName !== 'TEXTAREA') return false;
+            window.clipboardWrites.push(field.value.slice(field.selectionStart, field.selectionEnd));
+            return true;
+        };
+    }, {reject, allowFallback});
+    return inner;
+}
+
+test('desktop copies the screen or the selected terminal text with the button and shortcuts', async ({page}) => {
+    await shell(page);
+    const frame = await mount(page);
+    const inner = await stubReplayClipboard(page);
+    const copy = frame.locator('#copy-terminal');
+    const clipboard = () => inner.evaluate(() => window.clipboardWrites);
+    await copy.click();
+    await expect(copy).toHaveText('Copied');
+    await expect.poll(clipboard).toEqual(['First screen']);
+    await expect(copy).toHaveText('Copy screen');
+
+    const screen = frame.locator('#terminal .xterm-screen');
+    await screen.dblclick({position:{x:10,y:6}});
+    await expect(copy).toHaveText('Copy selection');
+    await copy.click();
+    await expect.poll(clipboard).toEqual(['First screen', 'First']);
+
+    await screen.dblclick({position:{x:10,y:6}});
+    await page.keyboard.press('ControlOrMeta+c');
+    await expect.poll(clipboard).toEqual(['First screen', 'First', 'First']);
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('ControlOrMeta+Shift+c');
+    await expect.poll(clipboard).toEqual(['First screen', 'First', 'First', expect.stringContaining('First screen')]);
+    expect(await page.evaluate(() => viewer.getState().position)).toBe(started);
+});
+
+test('Copy screen follows xterm scrollback and preserves logical line breaks', async ({page}) => {
+    const wrappedLine = '  ' + 'x'.repeat(124);
+    const lines = [wrappedLine, '', ...Array.from({length:30}, (_, index) => `Line ${index + 1}`)];
+    const recording = {...envelope, sessionLogs:[{
+        ...envelope.sessionLogs[0], rawBytes:Buffer.from(`\x1b[32m${lines.join('\r\n')}\x1b[0m`).toString('base64')
+    }]};
+    await shell(page);
+    const frame = await mount(page, {}, recording);
+    const inner = await stubReplayClipboard(page);
+    const copy = frame.getByRole('button', {name:'Copy screen'});
+    await copy.click();
+    await expect.poll(() => inner.evaluate(() => window.clipboardWrites[0])).toBe(lines.slice(2).join('\n'));
+    await frame.locator('#terminal .xterm-screen').hover({position:{x:20,y:20}});
+    await page.mouse.wheel(0, -1000);
+    await expect(frame.locator('#terminal .xterm-rows').first()).toContainText('xxxxxxxxxx');
+    await frame.locator('#copy-terminal').click();
+    await expect.poll(() => inner.evaluate(() => window.clipboardWrites[1])).toBe(lines.slice(0, 29).join('\n'));
+});
+
+test.describe('touch replay', () => {
+    test.use({hasTouch:true, viewport:{width:320,height:740}});
+
+    test('keeps a selection through playback and copies plain text from the readable snapshot', async ({page}) => {
+        await shell(page);
+        const frame = await mount(page);
+        const inner = await stubReplayClipboard(page);
+        const screen = frame.locator('#html-screen');
+        const copy = frame.locator('#copy-terminal');
+        await expect.poll(() => copy.evaluate(button => button.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+        await expect(frame.locator('#html-geometry')).toContainText('120 × 30');
+        await screen.evaluate(element => {
+            const line = element.querySelector('.html-line span').firstChild;
+            getSelection().setBaseAndExtent(line, 0, line, 5);
+        });
+        await expect(copy).toHaveText('Copy selection');
+        await page.evaluate(async () => { await viewer.setSpeed('max'); await viewer.play(); });
+        await expect(frame.locator('#playback-status')).toHaveText('End of recording');
+        await expect(screen).toContainText('First screen');
+        await copy.tap();
+        await expect.poll(() => inner.evaluate(() => window.clipboardWrites)).toEqual(['First']);
+        await screen.evaluate(() => getSelection().removeAllRanges());
+        await expect(screen).toContainText('Next screen');
+        await expect(copy).toHaveText('Copy screen');
+        await copy.press('Enter');
+        await expect.poll(() => inner.evaluate(() => window.clipboardWrites)).toEqual(['First', 'Next screen <img src=x onerror=alert(1)>']);
+    });
+});
+
+test('clipboard denial falls back to copying or presents selected text for manual copy', async ({page}) => {
+    await shell(page);
+    const frame = await mount(page);
+    const inner = await stubReplayClipboard(page, {reject:true, allowFallback:true});
+    const copy = frame.locator('#copy-terminal');
+    await copy.click();
+    await expect(copy).toHaveText('Copied');
+    await expect(copy).toBeFocused();
+    expect(await inner.evaluate(() => window.clipboardWrites)).toEqual(['First screen']);
+
+    await inner.evaluate(() => { document.execCommand = () => false; });
+    await copy.click();
+    const dialog = frame.getByRole('dialog', {name:'Copy terminal text'});
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('pre')).toBeFocused();
+    expect(await inner.evaluate(() => getSelection().toString())).toBe('First screen');
+    await dialog.getByRole('button', {name:'Close details'}).click();
+    await expect(copy).toBeFocused();
+});
+
 test('independent instances, patch/events, playback, rewind and complete disposal', async ({page}) => {
     const errors=[]; page.on('pageerror',error=>errors.push(error.message));
     await shell(page);
@@ -104,7 +216,7 @@ test('compact replay fits desktop hosts and keeps both inspector tabs and their 
                 && main.scrollHeight <= main.clientHeight + 1
                 && bounds.bottom <= innerHeight && bounds.height >= innerHeight * .5;
         })).toBe(true);
-        for (const selector of ['#copy-id','#reload','#browse','#skip-idle','.legend','.tool-strip','#capture-notes','.terminal-footer']) {
+        for (const selector of ['#copy-id','#reload','#browse','#skip-idle','.legend','.tool-strip','#capture-notes','#copy-terminal','.terminal-footer']) {
             await expect(frame.locator(selector)).toBeInViewport();
         }
         for (const tab of ['code','events']) {

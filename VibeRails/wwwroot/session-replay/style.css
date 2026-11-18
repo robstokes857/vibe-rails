@@ -7,6 +7,7 @@
   --color-primary:#8b5cf6;--color-primary-dark:#7c3aed;--color-accent:#14b8a6;
   --color-text:#f8fafc;--color-text-muted:#94a3b8;
   --color-success:#10b981;--color-warning:#F66210;--color-danger:#ef4444;--color-border:#2d2d3f;
+  --focus-ring:var(--color-accent);--tone-success-fg:#6ee7b7;--tone-success-bg:#102c25;
   --radius-control:4px;--border-radius:var(--radius-control);--control-radius:6px;
   --nav-bg:#16161c;
   --link:color-mix(in srgb,var(--color-primary) 65%,var(--color-text));
@@ -124,6 +125,14 @@ main{max-width:2000px;width:100%;margin:0 auto;padding:8px 12px 4px;display:flex
 .panel-heading h2{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:600;margin:0}
 .panel-heading>div{display:flex;align-items:center;gap:12px}
 .terminal-icon{font-family:var(--font-mono);font-size:15px;color:var(--color-accent)}
+.terminal-heading{min-height:40px}
+#copy-terminal{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-width:9rem;min-height:32px;padding:4px 8px;border:1px solid transparent;border-radius:var(--radius-control);background:transparent;color:var(--color-text-muted);font-size:14px;font-weight:600;white-space:nowrap}
+#copy-terminal:hover:not(:disabled,[data-copied]){background:var(--color-bg-surface-hover);color:var(--color-text)}
+#copy-terminal:active:not(:disabled,[data-copied]){background:var(--color-bg-base)}
+#copy-terminal:focus-visible{outline-color:var(--focus-ring);outline-offset:0}
+#copy-terminal[data-copied]{background:var(--tone-success-bg);color:var(--tone-success-fg)}
+#copy-terminal:disabled{cursor:not-allowed}
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .code-icon{color:var(--event-change);font-size:15px}
 .panel-tag{font-size:8px;font-weight:600;letter-spacing:1px;color:var(--color-text-muted)}
 .count{background:var(--color-bg-surface-hover);color:var(--color-text-muted);padding:2px 6px;font-size:9px;border-radius:999px}
@@ -335,6 +344,7 @@ dialog::backdrop{background:#000000a6}
   .tool-toast:not(:last-child){display:none}
   .workspace{display:flex;flex-direction:column;flex:none;min-height:0}
   .terminal-panel{position:relative;height:480px}
+  #geometry{display:none}
   .inspector-panel{height:650px}
   .inspector-panel.expanded{inset:2vh 2vw;height:auto}
   .inspector-tabs [role=tab]{padding:0 10px}
@@ -358,5 +368,9 @@ dialog::backdrop{background:#000000a6}
   .html-screen-heading,.html-screen-footer,.html-toolbar,.terminal-footer,.panel-heading{flex-shrink:0}
   .html-prompt{padding:8px}
   .transport{position:sticky;top:0;z-index:5;background:var(--color-bg-base)}
+}
+@media(max-width:720px),(pointer:coarse){
+  #copy-terminal{min-height:44px}
+  .terminal-heading{min-height:48px}
 }
 @media(prefers-reduced-motion:reduce){.tool-toast{animation:none}}

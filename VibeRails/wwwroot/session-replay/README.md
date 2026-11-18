@@ -157,6 +157,14 @@ Screen lines preserves spacing and scrolls horizontally. ANSI parsing still happ
 the replay-only xterm instance. This is a best-effort current screen, not a transcript.
 There is no separate Session v2 panel or live-terminal replacement.
 
+## Copying terminal output
+
+**Copy screen** copies the current xterm viewport, including a scrolled-back view, or the
+readable snapshot on mobile. Selecting text changes the action to **Copy selection**. With the
+desktop terminal focused, Ctrl+A or Cmd+A selects its buffer, and Ctrl+C, Cmd+C or Ctrl+Shift+C
+copies a selection. Playback waits to refresh the readable snapshot while its text is selected.
+If clipboard access is unavailable, the viewer opens the text with the selection ready to copy.
+
 ## Sharing and checks
 
 This directory is canonical. Check recipient diffs before syncing: the website currently

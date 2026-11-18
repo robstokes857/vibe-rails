@@ -17,15 +17,130 @@ let toastTimers = [], tickHandle = null;
 let selectedEvent = null, eventRequest = 0;
 let filePage = 0, eventPage = null;
 const filePageSize = 100, eventPageSize = 60;
+const readableLayout = matchMedia('(max-width: 720px)');
+let copyFeedbackTimer = null, screenSamplePending = false;
 const screenPreview = new ScreenPreview({ content: $('html-screen'), status: $('html-status'), time: $('html-time'),
     geometry: $('html-geometry'), refresh: $('html-refresh'), modeButtons: [...document.querySelectorAll('[data-screen-mode]')],
     phone: $('html-phone'), shell: $('html-shell') });
 screenPreview.reset('Choose a recording to preview its screen.');
-function sampleScreen(force = false) {
+function sampleScreen(force = false, preserveSelection = true) {
     if (!ready || !term) return;
+    if (preserveSelection && readableLayout.matches && readableSelection()) {
+        screenSamplePending = true;
+        return;
+    }
+    force ||= screenSamplePending;
+    screenSamplePending = false;
     screenPreview.sample(term, { force, label: durationLabel(position - manifest.session.started), playing, hasFrames: frames.length > 0 });
 }
-$('html-refresh').addEventListener('click', () => { if (!busy) sampleScreen(true); });
+$('html-refresh').addEventListener('click', () => { if (!busy) sampleScreen(true, false); });
+
+function readableSelection() {
+    const selection = getSelection(), screen = $('html-screen');
+    return selection && !selection.isCollapsed && screen.contains(selection.anchorNode) && screen.contains(selection.focusNode)
+        && screen.querySelector('.html-line') ? selection : null;
+}
+
+function updateCopyAction() {
+    const button = $('copy-terminal');
+    const selected = readableLayout.matches ? readableSelection() : term?.hasSelection();
+    const label = selected ? 'Copy selection' : 'Copy screen';
+    button.disabled = !ready || busy || frameIndex === 0;
+    button.title = !ready || frameIndex === 0 ? 'No terminal output to copy yet' : label;
+    if (copyFeedbackTimer === null && $('terminal-copy-label').textContent !== label) text('terminal-copy-label', label);
+}
+
+function clearCopyFeedback() {
+    clearTimeout(copyFeedbackTimer); copyFeedbackTimer = null;
+    $('copy-terminal').removeAttribute('data-copied');
+    $('terminal-copy-icon').removeAttribute('hidden');
+    $('terminal-copied-icon').setAttribute('hidden', '');
+    text('terminal-copy-status', '');
+    updateCopyAction();
+}
+
+function showCopyFeedback(label, message, copied = false) {
+    clearTimeout(copyFeedbackTimer);
+    $('copy-terminal').toggleAttribute('data-copied', copied);
+    $('terminal-copy-icon').toggleAttribute('hidden', copied);
+    $('terminal-copied-icon').toggleAttribute('hidden', !copied);
+    text('terminal-copy-label', label);
+    text('terminal-copy-status', message);
+    copyFeedbackTimer = setTimeout(clearCopyFeedback, 1600);
+}
+
+function terminalScreenText() {
+    const buffer = term.buffer.active, lines = [];
+    for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row++) {
+        const line = buffer.getLine(row);
+        const value = line?.translateToString(true) ?? '';
+        if (line?.isWrapped && lines.length) lines[lines.length - 1] += value;
+        else lines.push(value);
+    }
+    while (lines.length && !lines.at(-1)) lines.pop();
+    return lines.join('\n');
+}
+
+async function writeClipboard(value) {
+    if (navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(value);
+            return true;
+        } catch { /* Embedded browsers can expose the API without granting access. */ }
+    }
+    if (disposed) return false;
+    const focus = document.activeElement, selection = readableSelection();
+    const range = selection?.getRangeAt(0).cloneRange();
+    const area = node('textarea');
+    area.value = value; area.readOnly = true; area.tabIndex = -1;
+    area.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+    document.body.append(area);
+    try {
+        area.focus({ preventScroll: true }); area.select();
+        return document.execCommand('copy');
+    } catch { return false; }
+    finally {
+        area.remove(); focus?.focus({ preventScroll: true });
+        if (range) { selection.removeAllRanges(); selection.addRange(range); }
+    }
+}
+
+async function copyTerminal(value) {
+    if (!value) {
+        showCopyFeedback('No text to copy', 'There’s no terminal text to copy here.');
+        return;
+    }
+    const run = version, copied = await writeClipboard(value);
+    if (disposed || run !== version) return;
+    if (copied) showCopyFeedback('Copied', 'Terminal text copied to the clipboard.', true);
+    else {
+        clearCopyFeedback();
+        showDetail('Terminal', 'Copy terminal text', 'Use your device’s Copy command to copy the selected text.', value);
+        const body = $('detail-body'), range = document.createRange(), selection = getSelection();
+        body.focus(); range.selectNodeContents(body);
+        selection.removeAllRanges(); selection.addRange(range);
+    }
+}
+
+// Keep the HTML selection when the user clicks its toolbar action.
+$('copy-terminal').addEventListener('mousedown', event => {
+    if (event.button === 0 && readableLayout.matches && readableSelection()) event.preventDefault();
+});
+$('copy-terminal').addEventListener('click', () => {
+    if (readableLayout.matches) {
+        const screen = $('html-screen');
+        void copyTerminal(readableSelection()?.toString() ?? (screen.querySelector('.html-line') ? screen.innerText.trimEnd() : ''));
+    } else void copyTerminal(term.hasSelection() ? term.getSelection() : terminalScreenText());
+});
+document.addEventListener('selectionchange', () => {
+    if (!readableLayout.matches) return;
+    if (screenSamplePending && !busy && !readableSelection()) sampleScreen(true);
+    updateCopyAction();
+});
+readableLayout.addEventListener('change', () => {
+    if (!busy) sampleScreen(true);
+    updateCopyAction();
+}, { signal: lifetime.signal });
 
 // Keep the native selects as the source of values; Tom Select owns their UI.
 const selects = {};
@@ -95,6 +210,7 @@ function enableControls() {
     $('reload').disabled = !manifest || busy;
     $('html-refresh').disabled = !ready || busy;
     $('html-shell').setAttribute('aria-busy', String(busy));
+    updateCopyAction();
     emitState();
 }
 function pause() {
@@ -139,6 +255,16 @@ function createTerminal() {
         scrollback: 8000, fontSize: 12, fontFamily: 'Menlo, Monaco, Consolas, "Cascadia Mono", "Liberation Mono", "Courier New", monospace',
         lineHeight: 1.14, theme: terminalTheme() });
     term.open($('terminal')); fitTerminal();
+    term.onSelectionChange(updateCopyAction);
+    term.attachCustomKeyEventHandler(event => {
+        if (event.type !== 'keydown' || !(event.ctrlKey || event.metaKey) || event.altKey) return true;
+        const key = event.key.toLowerCase();
+        if (key === 'a' && !event.shiftKey) term.selectAll();
+        else if (key === 'c' && term.hasSelection()) void copyTerminal(term.getSelection());
+        else return true;
+        event.preventDefault();
+        return false;
+    });
 }
 const terminalObserver = new ResizeObserver(fitTerminal);
 terminalObserver.observe($('terminal-viewport'));
@@ -147,7 +273,8 @@ async function loadSession(id) {
     if (disposed) return;
     const run = ++version;
     loadController?.abort(); loadController = new AbortController(); const signal = loadController.signal;
-    pause(); clearToasts(); ready = false; busy = true; enableControls(); notice();
+    pause(); clearToasts(); ready = false; busy = true;
+    clearCopyFeedback(); screenSamplePending = false; enableControls(); notice();
     screenPreview.reset('Loading the recording’s screen…');
     $('sessions-dialog').close(); $('terminal-empty').hidden = true;
     term?.dispose(); term = null; $('terminal').replaceChildren();
@@ -374,7 +501,7 @@ function renderPosition(force) {
     text('position', durationLabel(position - manifest.session.started)); $('scrubber').value = position - manifest.session.started;
     text('frame-count', `${frameIndex.toLocaleString()} / ${frames.length.toLocaleString()} frames`);
     updatePlaybackStatus();
-    sampleScreen(force || !playing);
+    sampleScreen(force || !playing, !force);
     updateModel(); renderActivity(force);
     const reached = manifest.changes.filter(change => change.at <= position).at(-1);
     if (reached?.id !== lastFollowId) {
@@ -639,6 +766,7 @@ function dispose() {
     playing = false; ready = false;
     lifetime.abort(); loadController?.abort(); cancelAnimationFrame(tickHandle);
     clearTimeout(searchTimer); clearToasts(); terminalObserver.disconnect();
+    clearTimeout(copyFeedbackTimer);
     term?.dispose(); term = null; editor?.dispose(); editorModel?.dispose();
     Object.values(selects).forEach(select => select.destroy());
     host = null; frames = []; events = []; exchanges = []; manifest = null;
