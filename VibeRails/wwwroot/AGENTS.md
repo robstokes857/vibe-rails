@@ -24,7 +24,11 @@ startup/failure from the run status; enqueue alone is not successful execution.
 The terminal picker (including **Manage quick launches**) requests `terminalTab:true` for saved Agents and Quick Launches:
 they open and focus ordinary tabs with normal controls, outside the robot menu, and
 remain open while idle. This explicit mode preserves the saved prompt/options and
-run history; it does not open the definition editor. Other non-Board preset launches,
+run history; it does not open the definition editor. `openLaunchTerminal` adopts the tab
+only once `/terminal/tabs/{tabId}/status` reports the run's own session as active (or the run
+has ended): the run records `sessionId` in `BeforeSpawnAsync`, before the child spawns and
+publishes it, and a tab adopted in that window had no session, showed "Select a LLM to
+continue" and never connected. Other non-Board preset launches,
 including VS Code and Quality/Rules, use native terminals. Legacy `focusTerminal:true`
 and `nativeTerminal:false` alone do not change that default. Board launches stay in-app;
 script/check presentation and signed library script windows retain their existing flow.
@@ -188,6 +192,15 @@ local; an enabled board syncs while a root backend and account are available.
 These rules supersede the older separate-notes and no-cross-board-transfer descriptions below.
 
 Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
+
+**Vendored xterm addon patch (2026-11-18).** `assets/xterm/addon-webgl.js` and `addon-canvas.js`
+are patched so no canvas font string starts with whitespace: upstream builds
+`${italic} ${weight} …`, which is `" normal 26px Menlo, …"` for upright text. Chromium 156
+(Electron 45, VS Code webviews) rejects that and keeps 10px sans-serif, so glyphs were drawn tiny
+inside full-size cells; browsers on older Chromium still accepted it (xterm.js #6297, fix PR
+#6312). Reapply the same four edits when re-vendoring until upstream ships the fix.
+`Tests/wwwroot/js/xterm-canvas-font.test.mjs` fails on an unpatched bundle, and
+`terminal-automations.spec.js` emulates the strict parser for both renderers.
 
 Dashboard inline scripts use `{{VIBERAILS_CSP_NONCE}}`, replaced per response by the backend
 and by the VS Code HTML builder. Keep `window.__viberails_NONCE__` available to script loaders

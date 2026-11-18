@@ -5,12 +5,18 @@ import { LaunchApi } from '../../../VibeRails/wwwroot/js/modules/launch-api.js';
 import { TerminalManager } from '../../../VibeRails/wwwroot/js/modules/terminal-multitab.js';
 import { LlmPickerController } from '../../../VibeRails/wwwroot/js/modules/llm-picker-controller.js';
 
-function fixture({ prompt = 'Review the changes.', status = 'running' } = {}) {
-    const requests = [], adopted = [], toasts = [], remembered = [];
+function fixture({ prompt = 'Review the changes.', status = 'running', tabStatuses = [] } = {}) {
+    const requests = [], adopted = [], toasts = [], remembered = [], statusReads = [];
     const app = {
         data: {}, showToast: (...args) => toasts.push(args),
         async apiCall(path, method, body) {
             if (path === '/api/v1/presets/agent') return { name: 'Reviewer', cli: 1, initialPrompt: prompt, revision: 7 };
+            if (path === '/api/v1/terminal/tabs/tab/status') {
+                statusReads.push(adopted.length);
+                // Scripted host replies first, then the run's session is live.
+                return tabStatuses.length ? tabStatuses.shift() : { hasActiveSession: true, sessionId: 'session' };
+            }
+            if (path === '/api/v1/runs/run') return { id: 'run', status: 'running', tabId: 'tab', sessionId: 'session' };
             assert.equal(path, '/api/v1/runs');
             assert.equal(method, 'POST');
             requests.push(body);
@@ -30,8 +36,23 @@ function fixture({ prompt = 'Review the changes.', status = 'running' } = {}) {
         app, getActiveTab: () => ({ state: { hasActiveSession: true } }),
         getSelectionMeta: () => ({ cli: 'codex' })
     });
-    return { controller, manager, requests, adopted, toasts, remembered };
+    return { controller, manager, requests, adopted, toasts, remembered, statusReads };
 }
+
+test('a picker launch waits until its tab host reports the run session before adopting the tab', async () => {
+    // The run row gets its session before the CLI is spawned and published (BeforeSpawnAsync).
+    // Adopting then added a tab with no session: it showed "Select a LLM to continue" and
+    // never connected. Each early reply below must hold the adoption back.
+    const f = fixture({ tabStatuses: [
+        { hasActiveSession: false, sessionId: null },
+        { hasActiveSession: true, sessionId: 'an-earlier-session' }
+    ] });
+    await f.manager.startFromSelection('preset:agent:codex');
+    assert.deepEqual(f.statusReads, [0, 0, 0], 'adopted only after the third status read');
+    assert.deepEqual(f.adopted, ['tab']);
+    assert.equal(f.remembered.length, 1);
+    assert.equal(f.toasts.some(t => t[2] === 'warning'), false);
+});
 
 test('terminal picker opens Agents and Quick Launches as normal tabs with saved prompt and revision', async () => {
     for (const prompt of ['Review the changes.', '']) {

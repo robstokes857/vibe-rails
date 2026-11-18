@@ -142,7 +142,10 @@ menu, finished-agent removal, retained output through Board links and reload, la
 and narrow-window keyboard access. Does not launch a CLI or touch application state.
 Terminal-picker cases launch a saved Agent through the real picker and run API client,
 then check the regular tab strip, focus, controls, reload, close/undo grace period and
-separation from the Board Automation robot menu at desktop and phone widths.
+separation from the Board Automation robot menu at desktop and phone widths. The launched
+host first reports no session, as a real child does while the CLI spawns, and one case starts
+from a blank "+" placeholder tab. The renderer font cases emulate Chromium 156's strict canvas
+font parser (VS Code webviews) for WebGL and Canvas, failing on any glyph font it would drop.
 Snapshot fixtures are generated from current backend capture/serialization code by
 `Tests/headless/TerminalSnapshots`. The headless xterm tests check every history/screen row,
 repeat attach, cursor position and live input modes; browser tests use those same bytes and

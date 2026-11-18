@@ -48,7 +48,12 @@ test('closing the owner stops native startup polling without another request', a
 test('queued tab is not adopted before its session starts', async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const adopted = [];
-    const app = { terminalController: { async adoptLaunchedTab(id) { adopted.push(id); return true; } } };
+    const statusReads = [];
+    const app = {
+        terminalController: { async adoptLaunchedTab(id) { adopted.push(id); return true; } },
+        // The tab host's own report; terminal-preset-launch.test.mjs covers a host still starting.
+        async apiCall(path) { statusReads.push(path); return { hasActiveSession: true, sessionId: 'session' }; }
+    };
     let reads = 0;
     const api = { async call() { reads++; return { id: 'run', tabId: 'tab', sessionId: 'session', status: 'running' }; } };
     const opening = openLaunchTerminal(app, api, { id: 'run', tabId: 'tab', status: 'claimed' });
@@ -57,6 +62,7 @@ test('queued tab is not adopted before its session starts', async t => {
     assert.equal(await opening, true);
     assert.deepEqual(adopted, ['tab']);
     assert.equal(reads, 1);
+    assert.deepEqual(statusReads, ['/api/v1/terminal/tabs/tab/status']);
 });
 
 test('closing the owner cancels terminal follow-up without another request', async () => {

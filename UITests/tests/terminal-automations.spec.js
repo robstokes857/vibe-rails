@@ -175,13 +175,22 @@ async function openFixture(page, total = 35, presets = []) {
         if (path === '/api/v1/runs' && route.request().method() === 'POST') {
             const body = route.request().postDataJSON();
             launches.push(body);
+            // The run records its session before the tab host publishes it (BeforeSpawnAsync), so
+            // the host first reports no session, as the real child does while the CLI spawns.
             const tab = { tabId: 'picker-agent', sessionId: 'picker-session', cli: 'codex',
-                hasActiveSession: true, createdUTC: new Date().toISOString(), workingDirectory: 'C:/fixture' };
+                hasActiveSession: false, startingReads: 1, createdUTC: new Date().toISOString(), workingDirectory: 'C:/fixture' };
             tabs.set(tab.tabId, tab);
             return route.fulfill({ json: { id: 'picker-run', status: 'queued' } });
         }
         if (path === '/api/v1/runs/picker-run')
             return route.fulfill({ json: { id: 'picker-run', status: 'running', tabId: 'picker-agent', sessionId: 'picker-session' } });
+        if (path === '/api/v1/terminal/tabs' && route.request().method() === 'POST') {
+            // "+" opens a backend host with no session: the blank "Select a LLM" placeholder.
+            const tab = { tabId: `placeholder-${tabs.size}`, sessionId: null, cli: null,
+                hasActiveSession: false, createdUTC: new Date().toISOString(), workingDirectory: 'C:/fixture' };
+            tabs.set(tab.tabId, tab);
+            return route.fulfill({ json: tab });
+        }
         const snapshotMatch = path.match(/^\/api\/v1\/agent-tools\/terminal\/([^/]+)\/snapshot$/);
         if (snapshotMatch) {
             const tab = tabs.get(snapshotMatch[1]);
@@ -197,10 +206,12 @@ async function openFixture(page, total = 35, presets = []) {
                 return route.fulfill({ json: { success: true } });
             }
             const tab = tabs.get(match[1]);
-            return route.fulfill({ status: tab ? 200 : 404, json: tab ? {
+            const json = tab ? {
                 hasActiveSession: tab.hasActiveSession, sessionId: tab.hasActiveSession ? tab.sessionId : null,
                 cli: tab.cli, workingDirectory: tab.workingDirectory
-            } : {} });
+            } : {};
+            if (tab?.startingReads > 0 && --tab.startingReads === 0) tab.hasActiveSession = true;
+            return route.fulfill({ status: tab ? 200 : 404, json });
         }
         if (path.startsWith('/api/v1/session-replay/sessions/')) {
             if (path.endsWith('/frames')) return route.fulfill({json:{items:[{id:1,at:0,cols:80,rows:24,data:Buffer.from('Completed workflow output\r\n').toString('base64')}],next:1,done:true}});
@@ -267,6 +278,57 @@ for (const width of [1280, 390]) test(`terminal picker opens a regular Agent tab
     await page.evaluate(() => window.app.terminalController.manager.closeTab('picker-agent'));
     await expect(page.locator(normalTabs)).toHaveCount(1);
     expect(fixture.deleted).not.toContain('picker-agent'); // Normal tabs retain the close/undo grace period.
+});
+
+test('terminal picker launched from a blank placeholder tab shows the new Agent tab', async ({ page }) => {
+    const fixture = await openFixture(page, 1, [{ id: 'reviewer', name: 'Code review', cli: 'codex',
+        initialPrompt: 'Review the changes.', revision: 4 }]);
+    await page.locator('#vb-terminal-tab-add-btn').click();
+    await expect(page.locator(normalTabs)).toHaveCount(2);
+    await expect(page.getByText('Select a LLM to continue')).toBeVisible();
+    await page.locator('#terminal-header-select-ts-control').click();
+    await page.locator('.ts-dropdown .option[data-value="preset:reviewer:codex"]').click();
+    await page.locator('#terminal-start-btn').click();
+    await expect.poll(() => fixture.launches.length).toBe(1);
+    await expect.poll(() => page.evaluate(() => window.app.terminalController.manager.activeTabId)).toBe('picker-agent');
+    await expect(page.locator(normalTabs).filter({ hasText: 'Code review' })).toBeVisible();
+    await expect(page.getByText('Select a LLM to continue')).toBeHidden();
+    expect(fixture.connections).toContain('picker-agent');
+});
+
+for (const renderer of ['webgl', 'canvas']) test(`${renderer} renderer fonts survive the strict canvas font parser in VS Code webviews`, async ({ page }) => {
+    // Chromium 156 (Electron 45, VS Code's webview) ignores a canvas font with surrounding
+    // whitespace and keeps the 10px sans-serif default. The vendored xterm addons built
+    // " normal 26px Menlo, …" for upright text, so every glyph was drawn tiny inside a
+    // full-size cell (xterm.js #6297). Playwright's Chromium still accepts the space, so
+    // emulate the strict parser and fail on any font it would have dropped.
+    await page.addInitScript((preferWebgl) => {
+        localStorage.setItem('viberails_terminal_webgl', String(preferWebgl));
+        window.__canvasFonts = [];
+        window.__droppedCanvasFonts = [];
+        for (const proto of [globalThis.CanvasRenderingContext2D?.prototype,
+            globalThis.OffscreenCanvasRenderingContext2D?.prototype]) {
+            const font = proto && Object.getOwnPropertyDescriptor(proto, 'font');
+            if (!font?.set) continue;
+            Object.defineProperty(proto, 'font', { ...font, set(value) {
+                const text = String(value);
+                window.__canvasFonts.push(text);
+                if (text !== text.trim()) window.__droppedCanvasFonts.push(text);
+                else font.set.call(this, value);
+            } });
+        }
+    }, renderer === 'webgl');
+    await openFixture(page, 1);
+    await page.evaluate(() => window.app.terminalController.manager.getActiveTab().instance.vibeTerminal.terminal
+        .write('plain \x1b[1mbold\x1b[0m \x1b[3mitalic\x1b[0m \x1b[1;3mboth\x1b[0m\r\n'));
+    await expect.poll(() => page.evaluate(() =>
+        window.app.terminalController.manager.getActiveTab().instance.vibeTerminal.getActiveRenderer())).toBe(renderer);
+    // Glyphs rasterize on the next frames; wait until the renderer drew upright and italic text.
+    await expect.poll(() => page.evaluate(() => {
+        const drawn = window.__canvasFonts.filter(font => /\dpx /.test(font) && /Menlo/.test(font));
+        return [drawn.some(font => !/italic/.test(font)), drawn.some(font => /italic/.test(font))];
+    })).toEqual([true, true]);
+    expect(await page.evaluate(() => window.__droppedCanvasFonts)).toEqual([]);
 });
 
 test('finished workflows leave the robot menu even with an active wrapper shell', async ({ page }) => {
