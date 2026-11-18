@@ -1,4 +1,32 @@
 {
+  "gpt-6.2-astra": {
+    "speeds": [
+      "fast",
+      "ultrafast"
+    ],
+    "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ]
+  },
+  "gpt-6.2-sol": {
+    "speeds": [
+      "fast",
+      "ultrafast"
+    ],
+    "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ]
+  },
   "gpt-6-astra": {
     "speeds": [
       "fast",

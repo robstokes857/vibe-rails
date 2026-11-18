@@ -100,7 +100,7 @@ public sealed class BoardAgentOptionsTool
             .Append("start_board_agent(card=...) without intent=worker starts the saved manager on an Agent card, not a delegated worker.\n")
             .Append("\nSaved-assignment setup: baseLlmOptions fields: model, effort, mode, yolo, speed. Omitted/default options inherit CLI configuration. ")
             .Append("For other selectable models use the provider's model ID; fixed-model agents do not accept a different model. ")
-            .Append("YOLO is optional and defaults to false. Speed is Codex-only; ultrafast requires gpt-6-astra or gpt-6.1-sol.\n")
+            .Append("YOLO is optional and defaults to false. For Codex speed options, use the tiers listed for each model above.\n")
             .Append("Example: update_board_card(card=..., assignee=\"base:codex\", baseLlmOptions={\"model\":\"gpt-6-astra\",\"effort\":\"xhigh\",\"speed\":\"ultrafast\"}). ")
             .Append("On a Manual card, start_board_agent(card=...) starts the saved Assignee with its saved choices. ")
             .Append("Agent cards keep separate managerSelection and managerBaseLlmOptions for their manager. Passing baseLlmOptions replaces the whole options object; ")

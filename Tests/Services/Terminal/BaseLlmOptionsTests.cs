@@ -8,6 +8,10 @@ namespace Tests.Services.Terminal;
 public sealed class BaseLlmOptionsTests
 {
     [Theory]
+    [InlineData("gpt-6.2-astra", "fast")]
+    [InlineData("gpt-6.2-astra", "ultrafast")]
+    [InlineData("gpt-6.2-sol", "fast")]
+    [InlineData("gpt-6.2-sol", "ultrafast")]
     [InlineData("gpt-6-astra", "fast")]
     [InlineData("gpt-6-astra", "ultrafast")]
     [InlineData("gpt-6.1-sol", "fast")]

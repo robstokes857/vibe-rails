@@ -3568,7 +3568,7 @@ test('Start work preserves the board and stores base launch options including YO
     const requests = await openBoard(page, { assignee: 'base:codex' });
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.locator('.board-card-modal-dialog .modal-title')).toHaveText('VB-1 · Description images');
-    await page.locator('[data-board-launch-model]').selectOption('gpt-6.1-sol');
+    await page.locator('[data-board-launch-model]').selectOption('gpt-6.2-astra');
     await page.locator('[data-board-launch-speed]').selectOption('ultrafast');
     await page.locator('[data-board-launch-effort]').selectOption('high');
     await expect(page.locator('[data-board-launch-yolo]')).not.toBeChecked();
@@ -3579,7 +3579,7 @@ test('Start work preserves the board and stores base launch options including YO
     await expect(page.locator('[data-board-card-editor]')).toHaveCount(0);
     await expect(page.locator('#app-content [data-view="board"]')).toBeVisible();
     expect(requests.find(request => request.method === 'PUT' && request.path.endsWith('/card_test')).body.baseLlmOptions)
-        .toEqual({ model: 'gpt-6.1-sol', effort: 'high', mode: '', yolo: true, speed: 'ultrafast' });
+        .toEqual({ model: 'gpt-6.2-astra', effort: 'high', mode: '', yolo: true, speed: 'ultrafast' });
     expect(requests.filter(request => request.path.endsWith('/launch'))).toHaveLength(1);
     await page.getByText('Description images', { exact: true }).click();
     await expect(page.locator('[data-board-launch-effort]')).toHaveValue('high');
@@ -3596,8 +3596,8 @@ for (const width of [1440, 390]) {
         const speed = page.getByRole('combobox', { name: 'Speed', exact: true });
         await expect(speed.locator('option[value="fast"]')).toBeDisabled();
         expect(await model.locator('option').evaluateAll(options => options.map(option => option.value)))
-            .toEqual(['', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
-        await model.selectOption('gpt-6.1-sol');
+            .toEqual(['', 'gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+        await model.selectOption('gpt-6.2-sol');
         for (const tier of ['ultrafast', 'fast', '']) {
             await speed.selectOption(tier);
             await page.locator('[data-board-save-card]').click();
@@ -3609,7 +3609,7 @@ for (const width of [1440, 390]) {
         await speed.selectOption('ultrafast');
         await speed.scrollIntoViewIfNeeded();
         await page.screenshot({ path: testInfo.outputPath(`board-codex-speed-${width}.png`) });
-        await model.selectOption('gpt-6-astra');
+        await model.selectOption('gpt-6.2-astra');
         await expect(speed).toHaveValue('ultrafast');
         await expect(speed.locator('option[value="ultrafast"]')).toBeEnabled();
         await page.locator('[data-board-launch-effort]').selectOption('ultra');

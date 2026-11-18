@@ -475,6 +475,8 @@ model = ""gpt-5.6-terra""
     }
 
     [Theory]
+    [InlineData("gpt-6.2-astra", false, "ultrafast")]
+    [InlineData("gpt-6.2-sol", false, "ultrafast")]
     [InlineData("gpt-6-astra", false, "ultrafast")]
     [InlineData("gpt-6-astra", true, "ultrafast")]
     [InlineData("gpt-6.1-sol", false, "ultrafast")]

@@ -555,6 +555,9 @@ for (const width of [320, 375, 768, 1024]) {
 
 test('shared editor creates an Agent, keeps provider drafts and uses native typed variables',async({page},testInfo)=>{
     const state=await setup(page);
+    await page.route('**/api/v1/llm-picker/models', route => route.fulfill({ json: {
+        version: 1, revision: 9, models: [{ cli: 'codex', value: 'gpt-6.2-astra', label: 'GPT-6.2 Astra' }]
+    } }));
     await page.locator('.vb-page-actions').getByRole('button',{name:'Create agent',exact:true}).click();
     const editor=page.locator('[data-launch-editor]');
     await editor.getByLabel('Name',{exact:true}).fill('Reviewer');
@@ -565,16 +568,24 @@ test('shared editor creates an Agent, keeps provider drafts and uses native type
     await expect(prompt).toHaveValue('Review {{git_branch}} ');
     await expect(editor.locator('[data-board-composer-live]')).toHaveCount(0);
     await page.screenshot({path:testInfo.outputPath('agent-prompt-without-preview.png')});
-    await expect(editor.locator('[data-board-launch-model]')).toBeVisible();
+    const model = editor.locator('[data-board-launch-model]');
+    const speed = editor.locator('[data-board-launch-speed]');
+    await model.selectOption({ label: 'GPT-6.2 Astra' });
+    await speed.selectOption('ultrafast');
     await editor.locator('[data-board-launch-effort]').selectOption('high');
     await editor.locator('[data-launch-provider]').selectOption('base:claude');
     await editor.locator('[data-launch-provider]').selectOption('base:codex');
     await expect(editor.locator('[data-board-launch-effort]')).toHaveValue('high');
+    await expect(speed).toHaveValue('ultrafast');
     await expect(prompt).toHaveValue('Review {{git_branch}} ');
     await editor.getByRole('button',{name:'Create agent',exact:true}).click();
     await expect.poll(()=>state.presets.length).toBe(1);
-    expect(state.presets[0]).toMatchObject({name:'Reviewer',initialPrompt:'Review {{git_branch}} ',options:{base:{effort:'high'}},expectedRevision:0});
+    expect(state.presets[0]).toMatchObject({name:'Reviewer',initialPrompt:'Review {{git_branch}} ',options:{base:{model:'gpt-6.2-astra',effort:'high',speed:'ultrafast'}},expectedRevision:0});
     expect(state.requests.filter(r=>/environments|\/jobs|\/automations/.test(r.path))).toEqual([]);
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    await page.getByRole('button', { name: 'Reviewer', exact: true }).click();
+    await expect(model).toHaveValue('gpt-6.2-astra');
+    await expect(speed).toHaveValue('ultrafast');
 });
 
 test('prompt help inserts every supported variable and saves literal placeholders', async ({ page }) => {
@@ -1313,6 +1324,16 @@ test('terminal picker manages Agents and Quick Launches in the shared editor', a
     await quick.locator('[data-llm-picker-edit]').click();
     await expect(page.locator('[data-launch-editor]').getByLabel('Name', { exact: true })).toHaveValue('Fast terminal');
     await expect(page.locator('[data-launch-kind]')).toContainText('Quick Launch');
+    const model = page.locator('[data-board-launch-model]');
+    const speed = page.locator('[data-board-launch-speed]');
+    await model.selectOption('gpt-6.2-sol');
+    await speed.selectOption('ultrafast');
+    await page.locator('[data-launch-save]').click();
+    await expect.poll(() => state.presets[0].options?.base?.speed).toBe('ultrafast');
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    await page.getByRole('button', { name: 'Fast terminal', exact: true }).click();
+    await expect(model).toHaveValue('gpt-6.2-sol');
+    await expect(speed).toHaveValue('ultrafast');
 });
 
 test('a refused replacement keeps the open editor references and polling alive', async ({ page }) => {

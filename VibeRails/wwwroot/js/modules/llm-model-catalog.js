@@ -39,6 +39,8 @@ export function normalizeCodexModelEffort(model, effort) {
 export let LLM_MODEL_OPTIONS = Object.freeze({
     'codex': [
         ['', 'Default (Codex recommended)'],
+        ['gpt-6.2-astra', 'gpt-6.2-astra'],
+        ['gpt-6.2-sol', 'gpt-6.2-sol'],
         ['gpt-6-astra', 'gpt-6-astra'],
         ['gpt-6.1-sol', 'gpt-6.1-sol'],
         ['gpt-6.1-terra', 'gpt-6.1-terra'],

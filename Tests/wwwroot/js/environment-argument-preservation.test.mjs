@@ -62,7 +62,7 @@ test('Codex flags that have controls are not duplicated into Additional Argument
 
 test('Codex Ultrafast round-trips every supported config argument spelling without duplicate tiers', () => {
     const controller = createController();
-    for (const model of ['gpt-6-astra', 'gpt-6.1-sol']) {
+    for (const model of ['gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6-astra', 'gpt-6.1-sol']) {
         for (const flag of ['-c service_tier=ultrafast', '--config service_tier=ultrafast',
             '--config=service_tier=ultrafast', '-c=service_tier=ultrafast', '-c \'service_tier="ultrafast"\'']) {
             const settings = controller.mergeCodexSettingsFromCustomArgs({ fastMode: true },

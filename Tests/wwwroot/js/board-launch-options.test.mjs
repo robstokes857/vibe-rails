@@ -42,7 +42,7 @@ test('model lists come from the exact same catalog as the environment editor', (
         assert.equal(controller[method](''), renderLlmModelOptions(cli));
         for (const [model] of LLM_MODEL_OPTIONS[cli]) assert.ok(renderBoardLaunchOptions(`base:${cli}`).includes(`value="${model}"`), `${cli}: ${model}`);
     }
-    assert.deepEqual(LLM_MODEL_OPTIONS.codex.map(([model]) => model), ['', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+    assert.deepEqual(LLM_MODEL_OPTIONS.codex.map(([model]) => model), ['', 'gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
 });
 
 test('OpenCode-backed providers display fixed models and omit unsupported effort', () => {
@@ -94,7 +94,7 @@ test('Codex speeds follow model capabilities and round-trip through the form', (
         assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed: 'fast' }).speed, 'fast');
         assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed: 'ultrafast' }).speed, '');
     }
-    for (const model of ['gpt-6-astra', 'gpt-6.1-sol']) {
+    for (const model of ['gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6-astra', 'gpt-6.1-sol']) {
         assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed: 'fast' }).speed, 'fast');
         assert.equal(normalizeBoardLaunchOptions('base:codex', { model, speed: 'ultrafast' }).speed, 'ultrafast');
     }
