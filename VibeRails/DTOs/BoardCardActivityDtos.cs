@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace VibeRails.DTOs;
 
 public sealed record SkipBoardCardAutomationRequest(long JobId, string EventKey);
@@ -10,6 +12,7 @@ public sealed record BoardCardActivityResponse(string Id, string? ActiveSessionI
     public bool HasActiveDesktopAgent { get; init; }
 
     /// <summary>The desktop app recorded on the card, including after its activity ends.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DesktopAppName { get; init; }
 
     /// <summary>

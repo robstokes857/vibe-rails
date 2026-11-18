@@ -422,6 +422,18 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         Assert.Matches("^[0-9a-f]{16}$", json.RootElement.GetProperty("changeToken").GetString());
         Assert.Equal(7, activity.EnumerateObject().Count());
         Assert.True(json.RootElement.GetRawText().Length < 300);
+        Assert.False(activity.TryGetProperty("desktopAppName", out _));
+        Assert.True(await boards.StartDesktopActivityAsync(_project, card.Id, "desktop", "ChatGPT", DateTime.UtcNow.AddMinutes(1), ct));
+        await boards.EndDesktopActivityAsync("desktop", card.Id, ct);
+        using var completedResponse = await PostJsonAsync(path, new { boardId, cardIds = new[] { card.Id } });
+        completedResponse.EnsureSuccessStatusCode();
+        using var completedJson = await ReadJsonAsync(completedResponse);
+        var completed = Assert.Single(completedJson.RootElement.GetProperty("cards").EnumerateArray());
+        Assert.False(completed.GetProperty("hasActiveDesktopAgent").GetBoolean());
+        Assert.Equal("ChatGPT", completed.GetProperty("desktopAppName").GetString());
+        Assert.Equal(8, completed.EnumerateObject().Count());
+        Assert.False(completed.TryGetProperty("title", out _));
+        Assert.False(completed.TryGetProperty("description", out _));
         using var oversized = await PostJsonAsync(path, new { boardId, cardIds = Enumerable.Repeat(card.Id, 101) });
         Assert.Equal(HttpStatusCode.BadRequest, oversized.StatusCode);
         using var invalid = await PostJsonAsync(path, new { boardId, cardIds = new string?[] { null } });

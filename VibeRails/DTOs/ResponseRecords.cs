@@ -370,6 +370,7 @@ namespace VibeRails.DTOs
         public bool HasActiveDesktopAgent { get; init; }
 
         /// <summary>The desktop app recorded on the card, including after its activity ends.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? DesktopAppName { get; init; }
         /// <summary>The card was first received through hosted sync.</summary>
         public bool RemoteCreated { get; init; }
@@ -451,6 +452,7 @@ namespace VibeRails.DTOs
         public bool HasActiveDesktopAgent { get; init; }
 
         /// <summary>The desktop app recorded on the card, including after its activity ends.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? DesktopAppName { get; init; }
         /// <summary>The card was first received through hosted sync.</summary>
         public bool RemoteCreated { get; init; }
