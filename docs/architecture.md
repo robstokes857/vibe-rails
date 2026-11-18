@@ -949,7 +949,8 @@ Desktop MCP work is independent of terminal sessions: `DesktopMcpActivityTracker
 uses recent successful same-project writes or explicit attachment. Stateful completion
 ends only its own mark; stateless app-name aggregates expire naturally. Card closure ends
 leases and retains their rows. Board responses/polling project `hasActiveDesktopAgent`
-for the purple border/desktop icon, alongside real CLI/Automation indicators. Activity
+for the live purple border and `desktopAppName` for the lasting desktop icon and app label.
+Creating a card through desktop MCP records the app in the same transaction. Activity
 creates no terminal navigation, session replay or hosted sync. See the
 [desktop lifecycle contract](../VibeRails/Services/Mcp/AGENTS.md#desktop-client-activity).
 VIBE-6 adds `BoardSearchService` for dashboard search, link candidates, `search_board_cards` and

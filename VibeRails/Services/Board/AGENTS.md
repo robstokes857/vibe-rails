@@ -180,10 +180,10 @@ once, on that row; a live recording keeps its own row because it opens the runni
 Desktop activity is independent of terminal activity: `HasActiveDesktopAgent` is projected
 onto list, page, detail and activity responses from leases behind `IBoardStore`. Never use
 a fake tab or session to make the indicator appear, block Start work, or create a public replay.
-Same-project MCP writes and explicit `attach_board_session` mark desktop work; ordinary reads
-do not. The UI uses a purple marching border and desktop icon; real terminals retain cyan/green.
-Closing a card (a lane containing done, complete, ship or closed), deleting it, or explicitly
-completing owned desktop work ends its lease. No automatic lane movement is introduced.
+Same-project MCP writes and explicit `attach_board_session` mark desktop work. A fresh lease
+drives the purple marching border. `DesktopAppName` supplies the desktop icon and the label
+shown when a card has no configured worker. The app name and icon stay visible after completion,
+disconnect, lease expiry and closing the card. Deleting the card removes its desktop attribution.
 See the [MCP lifetime contract](../Mcp/AGENTS.md#desktop-client-activity).
 
 ## Local Board search (VIBE-6)

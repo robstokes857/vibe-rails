@@ -34,24 +34,43 @@ test('simultaneous CLI and desktop activity preserves the CLI border and dot alo
     assert.doesNotMatch(controller.renderCard(card()), /is-live|is-desktop-live|board-desktop-active/);
 });
 
+test('the card retains the app name and monitor after completion and after a CLI takes the assignment', t => {
+    const originalWindow = globalThis.window;
+    globalThis.window = {};
+    t.after(() => { globalThis.window = originalWindow; });
+    const controller = new BoardController({});
+    const appCard = card({ desktopAppName: 'ChatGPT <Review>' });
+    const html = controller.renderCard(appCard);
+    assert.match(html, /aria-label="ChatGPT &lt;Review&gt; worked on this card"/);
+    assert.match(html, /board-assignee-name">ChatGPT &lt;Review&gt;<\/span>/);
+    assert.doesNotMatch(html, /ChatGPT <Review>|board-card is-live|Go to agent/);
+    assert.equal(appCard.assignee, undefined);
+
+    const reassigned = controller.renderCard({ ...appCard, assignee: 'base:codex' });
+    assert.match(reassigned, /board-assignee-name">Codex<\/span>/);
+    assert.match(reassigned, /aria-label="ChatGPT &lt;Review&gt; worked on this card"/);
+    assert.doesNotMatch(reassigned, /board-card is-live/);
+});
+
 test('activity polling adds and removes desktop styling while preserving CLI activity and card content', async t => {
     const originalDocument = globalThis.document;
     globalThis.document = { querySelector: () => null };
     t.after(() => { globalThis.document = originalDocument; });
     const requests = [];
     const classes = new Set();
-    const indicators = new Set();
+    const indicators = new Map();
+    const chip = { classList: { toggle() {} }, setAttribute(name, value) { this[name] = value; } };
     const aside = {
         querySelector(selector) { return indicators.has(selector) ? { remove: () => indicators.delete(selector) } : null; },
         insertAdjacentHTML(_, html) {
             for (const name of ['board-live-dot', 'board-desktop-active'])
-                if (html.includes(name)) indicators.add(`.${name}`);
+                if (html.includes(name)) indicators.set(`.${name}`, html);
         }
     };
     const tile = {
         dataset: { cardId: 'card' },
         classList: { toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); } },
-        querySelector: selector => selector === '.board-card-aside' ? aside : null
+        querySelector: selector => selector === '.board-card-aside' ? aside : selector === '.board-assignee-chip' ? chip : null
     };
     const controller = new BoardController({ currentView: 'board',
         isUiHidden: () => false,
@@ -65,23 +84,26 @@ test('activity polling adds and removes desktop styling while preserving CLI act
         await pending;
     };
 
-    await refresh({ hasActiveDesktopAgent: true });
+    await refresh({ hasActiveDesktopAgent: true, desktopAppName: 'ChatGPT' });
     assert.equal(controller.state.cards[0].hasActiveDesktopAgent, true);
     assert.deepEqual([...classes], ['is-live', 'is-desktop-live']);
-    assert.deepEqual([...indicators], ['.board-desktop-active']);
+    assert.match(indicators.get('.board-desktop-active'), /ChatGPT is working on this card/);
+    assert.match(chip.innerHTML, /board-assignee-name">ChatGPT<\/span>/);
+    assert.equal(chip['aria-label'], 'Assign VB-1, desktop app ChatGPT');
 
-    await refresh({ activeTabId: 'tab', activeSessionId: 'session', hasActiveDesktopAgent: true });
+    await refresh({ activeTabId: 'tab', activeSessionId: 'session', hasActiveDesktopAgent: true, desktopAppName: 'ChatGPT' });
     assert.deepEqual([...classes], ['is-live']);
     assert.ok(indicators.has('.board-live-dot'));
     assert.ok(indicators.has('.board-desktop-active'));
 
-    await refresh({ activeTabId: 'tab', activeSessionId: 'session', hasActiveDesktopAgent: false });
+    await refresh({ activeTabId: 'tab', activeSessionId: 'session', hasActiveDesktopAgent: false, desktopAppName: 'ChatGPT' });
     assert.deepEqual([...classes], ['is-live']);
-    assert.deepEqual([...indicators], ['.board-live-dot']);
+    assert.ok(indicators.has('.board-live-dot'));
+    assert.match(indicators.get('.board-desktop-active'), /ChatGPT worked on this card/);
 
-    await refresh({ hasActiveDesktopAgent: false });
+    await refresh({ hasActiveDesktopAgent: false, desktopAppName: 'ChatGPT' });
     assert.equal(classes.size, 0);
-    assert.equal(indicators.size, 0);
+    assert.deepEqual([...indicators.keys()], ['.board-desktop-active']);
     assert.equal(controller.state.cards[0].title, 'Work');
 });
 

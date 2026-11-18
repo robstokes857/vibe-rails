@@ -368,6 +368,9 @@ namespace VibeRails.DTOs
     {
         /// <summary>A desktop MCP client has a current activity lease; this does not identify a terminal tab.</summary>
         public bool HasActiveDesktopAgent { get; init; }
+
+        /// <summary>The desktop app recorded on the card, including after its activity ends.</summary>
+        public string? DesktopAppName { get; init; }
         /// <summary>The card was first received through hosted sync.</summary>
         public bool RemoteCreated { get; init; }
         /// <summary>The tracker this card is linked to ("jira" or "ado"), or null. JiraIssueKey stays for older clients.</summary>
@@ -446,6 +449,9 @@ namespace VibeRails.DTOs
     {
         /// <summary>A desktop MCP client has a current activity lease, independently of terminal activity.</summary>
         public bool HasActiveDesktopAgent { get; init; }
+
+        /// <summary>The desktop app recorded on the card, including after its activity ends.</summary>
+        public string? DesktopAppName { get; init; }
         /// <summary>The card was first received through hosted sync.</summary>
         public bool RemoteCreated { get; init; }
         public string? JiraIssueUrl { get; init; }

@@ -182,9 +182,11 @@ mode; older writers continue to omit and preserve the new columns.
 from terminal sessions. Client identity comes from the MCP host. Starts validate current
 project/card membership; renewal never revives expired or ended rows. Closing/deleting a card
 or renaming its lane to a completed/closed lane ends activity through additive triggers, so
-older writers also stop the indicator. Reopening requires an explicit new start. Queries only
-return requested, live, open cards with fresh leases. Ended rows remain stored; no backfill or
-legacy Board/session changes occur.
+older writers also end live activity. Reopening requires an explicit new start. The tile and
+editor read the app label from retained rows on requested, undeleted cards. A fresh lease on
+an open card takes precedence, then the most recently renewed row. A declared name persists
+across ordinary refreshes. Desktop creation writes an already-ended creator row in the card's
+own transaction, including for cards created in a closed lane or another local project.
 
 `board-lane-workflow/1` adds per-entry ordered workflow snapshots and append-only step reports.
 All current lane dispatch is sequential per card; the existing per-Job overlap guard remains.

@@ -11,7 +11,7 @@ public sealed partial class BoardTool
 {
     private const string UnnamedClientHint =
         "FAIL: this MCP client did not say which agent it is, so nothing was written. Board writes are recorded under the agent's name, "
-        + "taken from the VibeRails session that launched it or from the client's MCP handshake (clientInfo.name, e.g. claude-code or codex-mcp-client).";
+        + "taken from the VibeRails session that launched it or the client's MCP handshake (clientInfo.name). Desktop apps can also pass agentName on create_board_card or attach_board_session.";
 
     private const int MaxClientLabelLength = 60;
 
@@ -36,7 +36,7 @@ public sealed partial class BoardTool
     /// refuse it with <see cref="UnnamedClientHint"/>. Without a server the tool was called
     /// in-process rather than over MCP, and the generic agent label stands.
     /// </summary>
-    private async Task<BoardAuthor?> ResolveAuthorAsync(McpServer? server, CancellationToken cancellationToken)
+    private async Task<BoardAuthor?> ResolveAuthorAsync(McpServer? server, CancellationToken cancellationToken, string? desktopName = null)
     {
         // Desktop clients can inherit correlation metadata without owning that terminal.
         // Attribute their writes to the MCP client, with no terminal recording/replay link.
@@ -46,7 +46,11 @@ public sealed partial class BoardTool
             var author = await store.FindSessionAuthorAsync(sessionId, cancellationToken);
             if (author is not null) return author;
         }
-        return server is null ? BoardAuthor.Agent("Agent", null, sessionId) : ClientAuthor(server.ClientInfo, sessionId);
+        if (server is null) return BoardAuthor.Agent("Agent", null, sessionId);
+        var client = ClientAuthor(server.ClientInfo, sessionId);
+        if (client is not null || desktopActivity?.IsDesktop != true) return client;
+        var name = desktopName ?? await desktopActivity.GetDeclaredNameAsync(server, cancellationToken);
+        return name is null ? null : BoardAuthor.Agent(name, null, null);
     }
 
     /// <summary>

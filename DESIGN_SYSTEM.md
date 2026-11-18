@@ -473,6 +473,8 @@ Cards group a meaningful object or task. Use a quiet border, one heading and a s
 
 Board task tiles put the assignee (including **Unassigned**) and **Start work** / **Go to agent** / **Go to manager** on one row: the assignee chip flush left, the action flush right, vertically centred on each other, with at least 8px between them. That row never wraps or stacks, at any lane width, so the two controls sit at the same height in every card. When a lane is too narrow for both, the assignee's name ellipsizes (its tooltip keeps the full name); the action label is never clipped. A manager label, when present, sits on its own line above that row. The desktop app uses a compact lane minimum of `max(288px, 18rem)` to reduce horizontal scrolling and grow with text scaling; controls must stay inside the card.
 
+A desktop app that works on a Board card leaves a monitor icon on the tile for the life of the card. While the app is active, the icon’s accessible name says which app is working. Afterward it says which app worked on the card. The live border follows current activity. Show the app’s display name in the assignee chip when the card has no saved launch assignment.
+
 | Part | Value |
 | --- | --- |
 | Card | `--color-bg-surface` (`--portal-surface` on signed-in pages), `--color-border`, `--radius-surface`, 16–24px padding |

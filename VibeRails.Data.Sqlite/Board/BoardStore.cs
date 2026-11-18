@@ -652,6 +652,21 @@ public sealed partial class BoardStore : IBoardStore
             insert.Parameters.AddWithValue("$updated", ToDb(now));
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
+        if (card.DesktopAppName is { } appName)
+        {
+            // Creation is durable even in a closed lane or on a board in another project.
+            // Only the MCP host's separately scoped lease can mark the card active.
+            await using var maker = connection.CreateCommand();
+            maker.Transaction = transaction;
+            maker.CommandText = """
+                INSERT INTO BoardDesktopActivity (CardId, ClientId, ClientLabel, ExpiresUTC, EndedUTC)
+                VALUES ($card, 'creator', $name, $now, $now);
+                """;
+            maker.Parameters.AddWithValue("$card", id);
+            maker.Parameters.AddWithValue("$name", appName);
+            maker.Parameters.AddWithValue("$now", ToDb(now));
+            await maker.ExecuteNonQueryAsync(cancellationToken);
+        }
         await PromoteCardAsync(connection, transaction, id, cancellationToken, isNewCard: true);
         await WriteBaseLlmOptionsAsync(connection, transaction, id, card.BaseLlmOptions, cancellationToken);
 

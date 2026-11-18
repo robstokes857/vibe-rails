@@ -24,8 +24,9 @@ running session. Default speed inherits the CLI configuration.
 Since VIBE-185, `create_board_card` without `assignee` assigns the card to the creating VibeRails
 terminal's LLM: the Board launch's picker key, else the terminal's CLI and offered saved
 environment (Workers and hidden environments fall back to `base:<cli>`). The reply says so.
-Desktop clients and CLIs VibeRails did not launch stay unassigned. `assignee: ""` creates the card
-unassigned. A bare provider name such as `claude` is shorthand for `base:claude` on create and
+Desktop apps can pass `agentName` on creation or attachment. The Board shows the app’s name when
+the card has no selected CLI. A supplied `assignee` selects a CLI for future launches and
+`assignee: ""` clears that selection. A bare provider name such as `claude` is shorthand for `base:claude` on create and
 update. `get_board_card` prints a `Ghost:` line when post-processing marked the finished card.
 Tool descriptions and replies explain missing/unlanded code to clients in any project.
 `list_board_cards(ghost=true|false)` filters the saved marker; `recheck_board_ghost` checks one
@@ -65,6 +66,10 @@ a session recording. Real terminal attachment/completion remains unchanged. Desk
 pass the card explicitly; `complete_board_agent` records their result and ends their owned mark.
 Desktop completion rejects an omitted/blank card, and desktop write attribution never uses
 an inherited terminal correlation ID as its author/session recording.
+Pass `agentName` to `create_board_card` or `attach_board_session` to name the app. Otherwise
+the Board uses its MCP handshake. The card keeps its app name and monitor icon after activity
+ends. Follow-up writes using the same app preserve its declared name. A nameless stateful
+connection can reuse its declaration from a successful tracked write on later calls.
 Presence failures must not turn an already-committed card write into a reported write failure.
 
 The in-process stdio host renews a 90-second lease every 20 seconds while its MCP connection
@@ -80,7 +85,8 @@ stateless HTTP reliably detects app closure or an individual client's completion
 The additive `board-desktop-activity/1` table is local-only behind `IBoardStore`; closed/deleted
 cards end leases, renewals cannot resurrect ended/expired work, and an explicit new action
 can start fresh on an open card. This is presence, not proof of thinking, review approval,
-terminal ownership, or an Automation run. The public DTO is only `hasActiveDesktopAgent`.
+terminal ownership, or an Automation run. `desktopAppName` supplies the lasting display name
+and `hasActiveDesktopAgent` reports current activity.
 
 ## Self-registering for code review
 
@@ -255,7 +261,7 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `get_board_notes` | `BoardTool.GetBoardNotes` | The card's whole discussion (comments and retained legacy notes), oldest first, with no budget (`get_board_card` previews older entries once a card outgrows its activity budget); optional `since`. |
 | `add_board_attachment` | `BoardTool.AddBoardAttachment` | Attach an agent-written `*.md` / `*.txt` file (UTF-8 text, ≤ 500,000 characters). |
 | `link_board_commit` | `BoardTool.LinkBoardCommit` | Capture a commit once from the terminal's checkout and atomically link its snapshot to the target and every card attached to the calling session in the project. Repeat session calls preserve existing links/snapshots. Without a session, links only the target. |
-| `attach_board_session` | `BoardTool.AttachBoardSession` | Explicitly attach the current VibeRails session to another card in the same project. Idempotent; preserves the original default. Future commit-link calls share with all attachments. No session-id argument or card move. |
+| `attach_board_session` | `BoardTool.AttachBoardSession` | Attach the current VibeRails terminal to a card in the same project. Future commit-link calls share with its attached cards. Desktop apps use optional `agentName` to show their name and monitor on this card. |
 | `complete_board_agent` | `BoardTool.CompleteBoardAgent` | Current linked agent's first final report: required summary (≤ 4,000 characters), outcome `succeeded` / `failed` / `cancelled`, optional card. Does not stop its process or complete remaining workflow actions. |
 | `end_agent_session` | `AgentSessionTool.EndAgentSession` | Available to every managed terminal when that session should end; ordinary task/report completion does not require it. When used, it is the last call after required work/reports/handoff/moves and `complete_board_agent`: closes the calling PTY after 30 seconds. No target parameter; exact current session is rechecked at execution. Repeat calls keep the first deadline, recordings remain, and normal workflow continuation does not imply review approval. |
 | `get_board_agent_status` | `BoardTool.GetBoardAgentStatus` | Poll a card's ten newest agents or a specific linked session, completion reports, latest updates, recorded exits and the card's twenty newest lane entries, each labelled `eventKey <id>` (the value `report_automation_step` and `skip_lane_step` take) with the Agent's or Action's name. Unknown liveness is explicit. |

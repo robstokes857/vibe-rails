@@ -41,6 +41,28 @@ public sealed class BoardDesktopActivityTests : IDisposable
     }
 
     [Fact]
+    public async Task DeclaredAppSurvivesRefreshExpiryAndRestart_WhileAnActiveClientTakesPrecedence()
+    {
+        var card = await CardAsync();
+        var expiry = DateTime.UtcNow.AddMinutes(5);
+        Assert.True(await _store.StartDesktopActivityAsync(_project, card.Id, "first", "Desktop", expiry, Ct, "ChatGPT"));
+        Assert.True(await _store.StartDesktopActivityAsync(_project, card.Id, "first", "Desktop", expiry.AddMinutes(1), Ct));
+        Assert.True(await _store.StartDesktopActivityAsync(_project, card.Id, "second", "Claude", expiry, Ct));
+        var reopened = new BoardStore(_connectionString, _connectionString);
+        var marks = await reopened.GetDesktopActivityAsync(_project, [card.Id], DateTime.UtcNow, Ct);
+        Assert.Equal(new BoardDesktopActivity("ChatGPT", true), marks[card.Id]);
+
+        await reopened.EndDesktopActivityAsync("first", card.Id, Ct);
+        marks = await reopened.GetDesktopActivityAsync(_project, [card.Id], DateTime.UtcNow, Ct);
+        Assert.Equal(new BoardDesktopActivity("Claude", true), marks[card.Id]);
+        marks = await reopened.GetDesktopActivityAsync(_project, [card.Id], expiry.AddMinutes(2), Ct);
+        Assert.Equal(new BoardDesktopActivity("ChatGPT", false), marks[card.Id]);
+        Assert.Empty(await reopened.GetDesktopActivityAsync(_otherProject, [card.Id], DateTime.UtcNow, Ct));
+        await reopened.DeleteCardAsync(_project, card.Id, Ct);
+        Assert.Empty(await reopened.GetDesktopActivityAsync(_project, [card.Id], DateTime.UtcNow, Ct));
+    }
+
+    [Fact]
     public async Task ScopedReadsAndStarts_ExcludeOtherProjects_UnrequestedAndDeletedCards()
     {
         var local = await CardAsync();
@@ -79,11 +101,13 @@ public sealed class BoardDesktopActivityTests : IDisposable
         await _store.StartDesktopActivityAsync(_project, card.Id, "client", "Codex", expiry, Ct);
         await _store.MoveCardAsync(_project, card.Id, closed.Id, null, Ct);
         Assert.Empty(await ActiveAsync(card));
+        var closedMark = await _store.GetDesktopActivityAsync(_project, [card.Id], DateTime.UtcNow, Ct);
+        Assert.Equal(new BoardDesktopActivity("Codex", false), closedMark[card.Id]);
         Assert.False(await _store.StartDesktopActivityAsync(_project, card.Id, "client", "Codex", expiry, Ct));
         await _store.MoveCardAsync(_project, card.Id, card.ColumnId, null, Ct);
         await _store.RenewDesktopActivityAsync("client", expiry, Ct);
         Assert.Empty(await ActiveAsync(card));
-        Assert.True(await _store.StartDesktopActivityAsync(_project, card.Id, "client", "Codex Desktop", expiry, Ct));
+        Assert.True(await _store.StartDesktopActivityAsync(_project, card.Id, "client", "Codex", expiry, Ct, "Codex Desktop"));
         Assert.Equal(card.Id, Assert.Single(await ActiveAsync(card)));
         Assert.Equal("Codex Desktop", await ScalarAsync("SELECT ClientLabel FROM BoardDesktopActivity WHERE CardId = $card", card.Id));
     }

@@ -198,7 +198,48 @@ public sealed partial class BoardToolClientAuthorTests : IAsyncDisposable
         }
     }
 
-    private async Task<McpClient> ConnectAsync(string clientName)
+    [Theory]
+    [InlineData("ChatGPT", null, "ChatGPT")]
+    [InlineData("ChatGPT", "ChatGPT\nResearch\u202E", "ChatGPT Research")]
+    [InlineData("Agent", "ChatGPT Research", "ChatGPT Research")]
+    public async Task DesktopAppKeepsItsNameAfterCompletion(string handshake, string? agentName, string expectedName)
+    {
+        var client = await ConnectAsync(handshake, desktop: true);
+        var args = new Dictionary<string, object?> { ["title"] = "App work" };
+        if (agentName is not null) args["agentName"] = agentName;
+        Assert.StartsWith("Created ", await CallAsync(client, "create_board_card", args));
+        var created = Assert.Single(await _store.GetCardsAsync(_project, Ct));
+        Assert.Null(created.Assignee);
+        Assert.Equal(expectedName, created.AgentMadeBy);
+        var activity = (await _service.GetCardAsync(_project, created.Id, Ct))!;
+        Assert.True(activity.HasActiveDesktopAgent);
+        Assert.Equal(expectedName, activity.DesktopAppName);
+        Assert.DoesNotContain("FAIL:", await CallAsync(client, "add_board_comment", new() { ["card"] = created.Key, ["body"] = "Progress", ["syncToJira"] = false }));
+        Assert.Contains("activity ended", await CallAsync(client, "complete_board_agent", new() { ["card"] = created.Key, ["summary"] = "Finished" }));
+        var detail = await CallAsync(client, "get_board_card", new() { ["card"] = created.Key });
+        Assert.Contains("Assignee: " + expectedName, detail);
+        Assert.Contains("Desktop app activity: inactive.", detail);
+        Assert.Empty((await _store.GetCardDetailAsync(_project, created.Id, Ct))!.Sessions);
+    }
+
+    [Fact]
+    public async Task DesktopAppCanNameItselfWhenAttachingToAnExistingCard()
+    {
+        var created = await _service.CreateCardAsync(_project, new(Title: "Support ticket", Assignee: "base:codex"), Ct, BoardAuthor.User());
+        var client = await ConnectAsync("Agent", desktop: true);
+        Assert.StartsWith("FAIL: this MCP client did not say which agent it is",
+            await CallAsync(client, "attach_board_session", new() { ["card"] = created.Key, ["agentName"] = "\u200b" }));
+        Assert.Contains("Linked desktop activity", await CallAsync(client, "attach_board_session",
+            new() { ["card"] = created.Key, ["agentName"] = "ChatGPT Planner" }));
+        Assert.Contains("activity ended", await CallAsync(client, "complete_board_agent", new() { ["card"] = created.Key, ["summary"] = "Reviewed" }));
+        var detail = (await _service.GetCardAsync(_project, created.Id, Ct))!;
+        Assert.False(detail.HasActiveDesktopAgent);
+        Assert.Equal("ChatGPT Planner", detail.DesktopAppName);
+        Assert.Equal("base:codex", detail.Assignee);
+        Assert.False(detail.AgentMade);
+    }
+
+    private async Task<McpClient> ConnectAsync(string clientName, bool desktop = false)
     {
         var toServer = new Pipe();
         var toClient = new Pipe();
@@ -207,6 +248,7 @@ public sealed partial class BoardToolClientAuthorTests : IAsyncDisposable
         services.AddSingleton<IBoardService>(_service);
         services.AddSingleton<IBoardProjectResolver>(_resolver);
         services.AddSingleton<IBoardStore>(_store);
+        if (desktop) services.AddSingleton(_ => new DesktopMcpActivityTracker(_store, true, _ => null, TimeProvider.System));
         services.AddScoped<BoardTool>();
         services.AddScoped<BoardReviewService>();
         services.AddScoped<BoardWorkflowService>();

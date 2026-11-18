@@ -796,8 +796,8 @@ public sealed partial class BoardToolTests : IDisposable
             .Returns<string, string, CancellationToken>((project, id, ct) => _store.GetCardDetailAsync(project, id, ct));
         racing.Setup(s => s.GetLaunchEventsAsync(_project, null, It.IsAny<CancellationToken>()))
             .Returns<string?, string?, CancellationToken>((project, card, ct) => _store.GetLaunchEventsAsync(project, card, ct));
-        racing.Setup(s => s.GetDesktopActiveCardIdsAsync(_project, It.IsAny<IReadOnlyList<string>>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .Returns<string, IReadOnlyList<string>, DateTime, CancellationToken>((project, ids, now, ct) => _store.GetDesktopActiveCardIdsAsync(project, ids, now, ct));
+        racing.Setup(s => s.GetDesktopActivityAsync(_project, It.IsAny<IReadOnlyList<string>>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns<string, IReadOnlyList<string>, DateTime, CancellationToken>((project, ids, now, ct) => _store.GetDesktopActivityAsync(project, ids, now, ct));
         racing.Setup(s => s.GetOpenAgentSkipsAsync(_project, It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .Returns<string, IReadOnlyList<string>, CancellationToken>((project, ids, ct) => _store.GetOpenAgentSkipsAsync(project, ids, ct));
         var service = new BoardService(racing.Object, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());

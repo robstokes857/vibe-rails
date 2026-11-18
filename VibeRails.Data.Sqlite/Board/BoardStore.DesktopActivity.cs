@@ -45,7 +45,7 @@ public sealed partial class BoardStore
 
     /// <inheritdoc />
     public async Task<bool> StartDesktopActivityAsync(string projectPath, string cardId, string clientId,
-        string clientLabel, DateTime expiresUtc, CancellationToken cancellationToken = default)
+        string clientLabel, DateTime expiresUtc, CancellationToken cancellationToken = default, string? agentName = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(clientId);
         var now = DateTime.UtcNow;
@@ -57,15 +57,16 @@ public sealed partial class BoardStore
         // when another process closes or deletes the card at the same time.
         command.CommandText = $"""
             INSERT INTO BoardDesktopActivity (CardId, ClientId, ClientLabel, ExpiresUTC, EndedUTC)
-            SELECT c.Id, $client, $label, $expires, NULL
+            SELECT c.Id, $client, COALESCE($name, $label), $expires, NULL
             FROM BoardCards c JOIN BoardColumns lane ON lane.Id = c.ColumnId
             WHERE c.Id = $card AND c.ProjectPath = $project{ProjectPathCollation}
                 AND c.DeletedUTC IS NULL AND NOT {DesktopClosedLaneSql("lane.Name")}
             ON CONFLICT(CardId, ClientId) DO UPDATE SET
-                ClientLabel = excluded.ClientLabel, ExpiresUTC = excluded.ExpiresUTC, EndedUTC = NULL;
+                ClientLabel = COALESCE($name, BoardDesktopActivity.ClientLabel), ExpiresUTC = excluded.ExpiresUTC, EndedUTC = NULL;
             """;
         command.Parameters.AddWithValue("$client", clientId);
         command.Parameters.AddWithValue("$label", clientLabel);
+        command.Parameters.AddWithValue("$name", (object?)agentName ?? DBNull.Value);
         command.Parameters.AddWithValue("$expires", ToDb(expiresUtc));
         command.Parameters.AddWithValue("$card", cardId);
         command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
@@ -115,7 +116,15 @@ public sealed partial class BoardStore
     public async Task<IReadOnlySet<string>> GetDesktopActiveCardIdsAsync(string projectPath,
         IReadOnlyList<string> cardIds, DateTime nowUtc, CancellationToken cancellationToken = default)
     {
-        var result = new HashSet<string>(StringComparer.Ordinal);
+        var activity = await GetDesktopActivityAsync(projectPath, cardIds, nowUtc, cancellationToken);
+        return activity.Where(pair => pair.Value.IsActive).Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, BoardDesktopActivity>> GetDesktopActivityAsync(string projectPath,
+        IReadOnlyList<string> cardIds, DateTime nowUtc, CancellationToken cancellationToken = default)
+    {
+        var result = new Dictionary<string, BoardDesktopActivity>(StringComparer.Ordinal);
         if (cardIds.Count == 0) return result;
         await using var connection = await OpenAsync(cancellationToken);
         foreach (var batch in cardIds.Distinct(StringComparer.Ordinal).Chunk(100))
@@ -123,18 +132,28 @@ public sealed partial class BoardStore
             await using var command = connection.CreateCommand();
             var parameters = string.Join(",", batch.Select((_, i) => $"$card{i}"));
             command.CommandText = $"""
-                SELECT DISTINCT activity.CardId FROM BoardDesktopActivity activity
-                JOIN BoardCards c ON c.Id = activity.CardId
-                JOIN BoardColumns lane ON lane.Id = c.ColumnId
-                WHERE activity.CardId IN ({parameters}) AND activity.EndedUTC IS NULL
-                    AND activity.ExpiresUTC > $now AND c.ProjectPath = $project{ProjectPathCollation}
-                    AND c.DeletedUTC IS NULL AND NOT {DesktopClosedLaneSql("lane.Name")};
+                WITH marks AS (
+                    SELECT activity.CardId, activity.ClientId, activity.ClientLabel, activity.ExpiresUTC,
+                        (activity.EndedUTC IS NULL AND activity.ExpiresUTC > $now
+                            AND NOT {DesktopClosedLaneSql("lane.Name")}) AS Active
+                    FROM BoardDesktopActivity activity
+                    JOIN BoardCards c ON c.Id = activity.CardId
+                    JOIN BoardColumns lane ON lane.Id = c.ColumnId
+                    WHERE activity.CardId IN ({parameters}) AND c.ProjectPath = $project{ProjectPathCollation}
+                        AND c.DeletedUTC IS NULL
+                )
+                SELECT CardId, ClientLabel, Active FROM (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY CardId ORDER BY Active DESC, ExpiresUTC DESC, ClientId
+                    ) AS choice FROM marks
+                ) WHERE choice = 1;
                 """;
             command.Parameters.AddWithValue("$project", NormalizeProjectPath(projectPath));
             command.Parameters.AddWithValue("$now", ToDb(nowUtc));
             for (var i = 0; i < batch.Length; i++) command.Parameters.AddWithValue($"$card{i}", batch[i]);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken)) result.Add(reader.GetString(0));
+            while (await reader.ReadAsync(cancellationToken))
+                result.Add(reader.GetString(0), new BoardDesktopActivity(reader.GetString(1), reader.GetBoolean(2)));
         }
         return result;
     }

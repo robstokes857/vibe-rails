@@ -9,6 +9,9 @@ public sealed record BoardCardActivityResponse(string Id, string? ActiveSessionI
     /// <summary>A desktop MCP client has recently marked this card as active.</summary>
     public bool HasActiveDesktopAgent { get; init; }
 
+    /// <summary>The desktop app recorded on the card, including after its activity ends.</summary>
+    public string? DesktopAppName { get; init; }
+
     /// <summary>
     /// Moves when anything the card editor's refresh shows for this card may have changed: the Board
     /// change stamp, the card's live sessions and tabs, and its running, waiting and desktop state.

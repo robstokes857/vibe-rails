@@ -18,7 +18,8 @@ public sealed class DesktopMcpActivityTracker : BackgroundService
     private readonly Func<string, string?> readEnvironment;
     private readonly TimeProvider clock;
     private readonly string runtimeId = Guid.NewGuid().ToString("N");
-    private readonly Dictionary<string, DateTime> clients = new(StringComparer.Ordinal);
+    private readonly record struct ClientActivity(DateTime ExpiresUtc, string? DeclaredName);
+    private readonly Dictionary<string, ClientActivity> clients = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim gate = new(1, 1);
     private bool stopping;
 
@@ -40,9 +41,18 @@ public sealed class DesktopMcpActivityTracker : BackgroundService
     /// <summary>Returns whether this transport can identify one caller rather than an app-name aggregate.</summary>
     public bool IsAggregate(McpServer? server) => !stdio && string.IsNullOrWhiteSpace(server?.SessionId);
 
+    // Only a connection with its own identity can reuse a declaration as its missing handshake label.
+    internal async Task<string?> GetDeclaredNameAsync(McpServer server, CancellationToken cancellationToken)
+    {
+        if (IsAggregate(server)) return null;
+        await gate.WaitAsync(cancellationToken);
+        try { return clients.GetValueOrDefault(ClientId(server, "")).DeclaredName; }
+        finally { gate.Release(); }
+    }
+
     /// <summary>Best-effort activity after an already-successful Board write; never changes that write's result.</summary>
     public async Task<bool> TrackAsync(McpServer? server, string project, string cardId, string label,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, string? agentName = null)
     {
         if (!IsDesktop) return false;
         try
@@ -54,14 +64,14 @@ public sealed class DesktopMcpActivityTracker : BackgroundService
             {
                 if (stopping) return false;
                 var now = clock.GetUtcNow().UtcDateTime;
-                foreach (var expired in clients.Where(pair => pair.Value <= now).Select(pair => pair.Key).ToArray())
+                foreach (var expired in clients.Where(pair => pair.Value.ExpiresUtc <= now).Select(pair => pair.Key).ToArray())
                     clients.Remove(expired);
                 var id = ClientId(server, label);
-                if (!clients.ContainsKey(id) && clients.Count >= MaximumClients) return false;
+                if (!clients.TryGetValue(id, out var previous) && clients.Count >= MaximumClients) return false;
                 var expiry = now + LeaseDuration;
-                if (!await store.StartDesktopActivityAsync(project, cardId, id,
-                        BoardPromptComposer.SanitizeLine(label, 60), expiry, timeout.Token)) return false;
-                clients[id] = expiry;
+                var appLabel = BoardAuthor.IsGenericAgentLabel(label) ? "Desktop app" : BoardPromptComposer.SanitizeLine(label, 60);
+                if (!await store.StartDesktopActivityAsync(project, cardId, id, appLabel, expiry, timeout.Token, agentName)) return false;
+                clients[id] = new ClientActivity(expiry, IsAggregate(server) ? null : agentName ?? previous.DeclaredName);
                 return true;
             }
             finally { gate.Release(); }
@@ -122,7 +132,7 @@ public sealed class DesktopMcpActivityTracker : BackgroundService
                 foreach (var id in clients.Keys.ToArray())
                 {
                     await store.RenewDesktopActivityAsync(id, expiry, cancellationToken);
-                    clients[id] = expiry;
+                    clients[id] = clients[id] with { ExpiresUtc = expiry };
                 }
             }
             finally { gate.Release(); }

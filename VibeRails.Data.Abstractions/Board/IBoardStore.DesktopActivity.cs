@@ -1,5 +1,8 @@
 namespace VibeRails.Services.Board;
 
+/// <summary>The app displayed on a card and whether a desktop lease is currently live.</summary>
+public sealed record BoardDesktopActivity(string AppName, bool IsActive);
+
 public partial interface IBoardStore
 {
     /// <summary>
@@ -8,7 +11,7 @@ public partial interface IBoardStore
     /// may reactivate a previously ended lease. Returns false for an unavailable or closed card.
     /// </summary>
     Task<bool> StartDesktopActivityAsync(string projectPath, string cardId, string clientId,
-        string clientLabel, DateTime expiresUtc, CancellationToken cancellationToken = default);
+        string clientLabel, DateTime expiresUtc, CancellationToken cancellationToken = default, string? agentName = null);
 
     /// <summary>Renews only this host-generated client's unexpired, non-ended leases.</summary>
     Task RenewDesktopActivityAsync(string clientId, DateTime expiresUtc,
@@ -20,5 +23,9 @@ public partial interface IBoardStore
 
     /// <summary>Returns only requested live, open cards in the project that have an unexpired desktop lease.</summary>
     Task<IReadOnlySet<string>> GetDesktopActiveCardIdsAsync(string projectPath,
+        IReadOnlyList<string> cardIds, DateTime nowUtc, CancellationToken cancellationToken = default);
+
+    /// <summary>Returns the most recently renewed active app, or the last recorded app after activity ends.</summary>
+    Task<IReadOnlyDictionary<string, BoardDesktopActivity>> GetDesktopActivityAsync(string projectPath,
         IReadOnlyList<string> cardIds, DateTime nowUtc, CancellationToken cancellationToken = default);
 }

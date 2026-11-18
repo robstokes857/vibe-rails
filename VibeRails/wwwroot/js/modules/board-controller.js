@@ -473,14 +473,16 @@ export class BoardController {
             for (const card of onBoard ? this.state.cards : []) {
                 const fresh = byId.get(card.id);
                 if (!fresh) continue;
+                const appNameChanged = card.desktopAppName !== fresh.desktopAppName;
                 const changed = card.activeSessionId !== fresh.activeSessionId || card.activeTabId !== fresh.activeTabId || card.hasActiveAutomation !== fresh.hasActiveAutomation
                     || card.hasWaitingAutomation !== fresh.hasWaitingAutomation
-                    || card.hasActiveDesktopAgent !== fresh.hasActiveDesktopAgent;
+                    || card.hasActiveDesktopAgent !== fresh.hasActiveDesktopAgent || appNameChanged;
                 card.activeSessionId = fresh.activeSessionId;
                 card.activeTabId = fresh.activeTabId;
                 card.hasActiveAutomation = fresh.hasActiveAutomation;
                 card.hasWaitingAutomation = fresh.hasWaitingAutomation;
                 card.hasActiveDesktopAgent = fresh.hasActiveDesktopAgent;
+                card.desktopAppName = fresh.desktopAppName;
                 if (!changed) continue;
                 const tile = tiles.get(card.id);
                 if (!tile) continue;
@@ -494,7 +496,15 @@ export class BoardController {
                 aside?.querySelector('.board-desktop-active')?.remove();
                 if (card.hasActiveAutomation) aside?.insertAdjacentHTML('afterbegin', this.automationIndicator());
                 if (card.activeTabId) aside?.insertAdjacentHTML('beforeend', '<span class="board-live-dot" title="A terminal session is working this card" aria-label="Session open"></span>');
-                if (card.hasActiveDesktopAgent) aside?.insertAdjacentHTML('beforeend', this.desktopAgentIndicator());
+                aside?.insertAdjacentHTML('beforeend', this.desktopAgentIndicator(card));
+                const chip = appNameChanged && !card.assignee && tile.querySelector('.board-assignee-chip');
+                if (chip) {
+                    const face = this.assigneeChipFace(card);
+                    chip.classList.toggle('is-empty', face.empty);
+                    chip.title = face.title;
+                    chip.setAttribute('aria-label', face.accessibleName);
+                    chip.innerHTML = face.content;
+                }
                 this.updateStartWorkButton(tile, card);
             }
             // Update only the rails and live controls. Never replace the user's draft fields.
@@ -513,7 +523,7 @@ export class BoardController {
                     || JSON.stringify(card.remoteDeliveries) !== JSON.stringify(detail.remoteDeliveries);
                 Object.assign(card, { sessions: detail.sessions, activeSessionId: detail.activeSessionId,
                     activeTabId: detail.activeTabId, hasActiveAutomation: detail.hasActiveAutomation,
-                    hasActiveDesktopAgent: detail.hasActiveDesktopAgent,
+                    hasActiveDesktopAgent: detail.hasActiveDesktopAgent, desktopAppName: detail.desktopAppName,
                     comments: detail.comments, notes: detail.notes, attachments: detail.attachments, commits: detail.commits, codeLinks: detail.codeLinks,
                     jiraDeliveries: detail.jiraDeliveries, jiraIssueUrl: detail.jiraIssueUrl,
                     remoteDeliveries: detail.remoteDeliveries, remoteIssueUrl: detail.remoteIssueUrl, agentSkip: detail.agentSkip });
@@ -546,8 +556,11 @@ export class BoardController {
         return '<button type="button" class="board-icon-btn board-automation-running" data-board-action="go-to-automation" title="Go to running Automation" aria-label="Go to running Automation"><i class="fa-solid fa-robot" aria-hidden="true"></i></button>';
     }
 
-    desktopAgentIndicator() {
-        return '<span class="board-desktop-active" title="Desktop app is working on this card" role="img" aria-label="Desktop app is working on this card"><i class="fa-solid fa-desktop" aria-hidden="true"></i></span>';
+    desktopAgentIndicator(card) {
+        if (!card.desktopAppName && !card.hasActiveDesktopAgent) return '';
+        const action = card.hasActiveDesktopAgent ? 'is working on this card' : 'worked on this card';
+        const label = escapeHtml(`${card.desktopAppName || 'Desktop app'} ${action}`);
+        return `<span class="board-desktop-active" title="${label}" role="img" aria-label="${label}"><i class="fa-solid fa-desktop" aria-hidden="true"></i></span>`;
     }
 
     // An agent skipped a lane step with a reason (VIBE-338). It stays until a person dismisses it in
@@ -1068,8 +1081,21 @@ export class BoardController {
             + `<p class="board-editor-muted">Uncheck for an internal note. Linked sessions get a public replay link posted to ${label}.</p>`;
     }
 
-    renderCard(card) {
+    // A desktop app's name identifies its work even when no launch target is saved.
+    // Keep the chip itself mounted when a poll changes that name so its menu and focus survive.
+    assigneeChipFace(card) {
         const member = this.assigneeInfo(card.assignee);
+        const id = cardDisplayId(card);
+        const name = member?.label || card.desktopAppName || 'Unassigned';
+        const avatar = member || (card.desktopAppName ? { label: card.desktopAppName, color: 'var(--color-primary)' } : null);
+        const title = member ? name + ' — click to change the assignee' : name + ' — click to assign';
+        const accessibleName = member ? `Change assignee of ${id} (${name})`
+            : card.desktopAppName ? `Assign ${id}, desktop app ${name}` : `Assign ${id}`;
+        return { title, accessibleName, empty: !avatar,
+            content: `${this.avatarHtml(avatar, 18)}<span class="board-assignee-name">${escapeHtml(name)}</span><i class="fa-solid fa-chevron-down board-assign-caret-mark" aria-hidden="true"></i>` };
+    }
+
+    renderCard(card) {
         const manager = card.workflowMode === 'agent' ? this.assigneeInfo(card.managerSelection) : null;
         // VIBE-204: an Agent card without its own manager is run by the board manager.
         const boardManager = !manager && this.isBoardManaged(card) && this.boardManagerAvailable() ? this.assigneeInfo(this.state.boardManager.selection) : null;
@@ -1097,12 +1123,11 @@ export class BoardController {
                 aria-label="${startLabel} on ${id}" ${this._startingCards.has(card.id) ? 'disabled' : ''}>
                 <i class="fa-solid ${running ? 'fa-terminal' : 'fa-play'}" aria-hidden="true"></i>
                 <span data-board-start-work-label>${startLabel}</span></button>`;
-        const assignee = `<button type="button" class="board-assignee-chip${member ? '' : ' is-empty'}" data-board-action="${ASSIGN_ACTION}" tabindex="-1" ${readOnly ? 'disabled' : ''}
+        const face = this.assigneeChipFace(card);
+        const assignee = `<button type="button" class="board-assignee-chip${face.empty ? ' is-empty' : ''}" data-board-action="${ASSIGN_ACTION}" tabindex="-1" ${readOnly ? 'disabled' : ''}
                 aria-haspopup="dialog" aria-expanded="false"
-                ${member
-                    ? `title="${escapeHtml(member.label)} — click to change the assignee" aria-label="Change assignee of ${id} (${escapeHtml(member.label)})"`
-                    : `title="Unassigned — click to assign" aria-label="Assign ${id}"`}
-                >${this.avatarHtml(member, 18)}<span class="board-assignee-name">${member ? escapeHtml(member.label) : 'Unassigned'}</span><i class="fa-solid fa-chevron-down board-assign-caret-mark" aria-hidden="true"></i></button>`;
+                title="${escapeHtml(face.title)}" aria-label="${escapeHtml(face.accessibleName)}"
+                >${face.content}</button>`;
 
         // is-live paints the marching "an agent is on this" border (see the template CSS).
         return `
@@ -1135,7 +1160,7 @@ export class BoardController {
                         <div class="board-card-aside">
                             ${card.hasActiveAutomation ? this.automationIndicator() : ''}
                             ${live}
-                            ${card.hasActiveDesktopAgent ? this.desktopAgentIndicator() : ''}
+                            ${this.desktopAgentIndicator(card)}
                             ${card.blocked ? `<i class="fa-solid fa-triangle-exclamation board-blocked"
                                 title="Blocked" aria-hidden="true"></i>` : ''}
                             ${comments}

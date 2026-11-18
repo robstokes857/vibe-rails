@@ -1964,7 +1964,7 @@ const SUMMARY_FIELDS = ['id', 'key', 'columnId', 'position', 'title', 'descripti
     'tags', 'blocked', 'commentCount', 'activeSessionId', 'activeTabId', 'createdAt', 'updatedAt', 'baseLlmOptions',
     'type', 'boardId', 'flagged', 'hasActiveAutomation', 'displayId', 'agentMade', 'hasWaitingAutomation', 'agentMadeBy',
     'agentMadeSessionId', 'jiraIssueKey', 'workflowMode', 'managerSelection', 'managerBaseLlmOptions',
-    'hasActiveDesktopAgent', 'remoteProvider', 'remoteIssueKey', 'remoteIssueUrl', 'pinned', 'ghostReason', 'remoteCreated', 'agentSkip'];
+    'hasActiveDesktopAgent', 'desktopAppName', 'remoteProvider', 'remoteIssueKey', 'remoteIssueUrl', 'pinned', 'ghostReason', 'remoteCreated', 'agentSkip'];
 const cardSummary = card => Object.fromEntries(SUMMARY_FIELDS.filter(field => field in card).map(field => [field, card[field]]));
 
 async function openBoard(page, { active = false, assignee = null, relatedCards = false, empty = false, inlineImages = true,
@@ -2040,7 +2040,7 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
                 .map(item => ({ id: item.id,
                     activeSessionId: item.activeSessionId, activeTabId: item.activeTabId,
                     hasActiveAutomation: Boolean(item.hasActiveAutomation),
-                    hasActiveDesktopAgent: Boolean(item.hasActiveDesktopAgent) })) } });
+                    hasActiveDesktopAgent: Boolean(item.hasActiveDesktopAgent), desktopAppName: item.desktopAppName })) } });
         }
         if (relatedCard) {
             if (route.request().method() === 'PUT') Object.assign(relatedCard, route.request().postDataJSON());
@@ -3958,6 +3958,7 @@ for (const width of [1440, 390]) {
         const cards = columns.map((column, index) => ({
             ...template, id: `activity_${index}`, key: `VB-${index + 1}`, columnId: column.id,
             title: column.name, hasActiveDesktopAgent: index !== 1,
+            desktopAppName: index !== 1 ? 'ChatGPT' : null, assignee: index === 0 ? null : 'base:codex',
             activeTabId: index === 0 ? null : `tab_${index}`,
             activeSessionId: index === 0 ? null : `session_${index}`
         }));
@@ -3966,13 +3967,15 @@ for (const width of [1440, 390]) {
         await page.evaluate(() => window.app.boardController.refresh());
         const tiles = cards.map(card => page.locator(`.board-card[data-card-id="${card.id}"]`));
         await expect(tiles[0]).toHaveClass(/is-desktop-live/);
-        await expect(tiles[0].getByRole('img', { name: 'Desktop app is working on this card' })).toBeVisible();
+        await expect(tiles[0].getByRole('img', { name: 'ChatGPT is working on this card' })).toBeVisible();
+        await expect(tiles[0].locator('.board-assignee-name')).toHaveText('ChatGPT');
         await expect(tiles[0].locator('.board-live-dot')).toHaveCount(0);
         await expect(tiles[1]).not.toHaveClass(/is-desktop-live/);
         await expect(tiles[1].locator('.board-desktop-active')).toHaveCount(0);
         await expect(tiles[1].locator('.board-live-dot')).toHaveCount(1);
         await expect(tiles[2]).not.toHaveClass(/is-desktop-live/);
         await expect(tiles[2].locator('.board-desktop-active')).toHaveCount(1);
+        await expect(tiles[2].locator('.board-assignee-name')).toHaveText('Codex');
         await expect(tiles[2].locator('.board-live-dot')).toHaveCount(1);
 
         for (const [index, tile] of tiles.entries()) {
@@ -3993,6 +3996,11 @@ for (const width of [1440, 390]) {
         await page.emulateMedia({ reducedMotion: 'reduce' });
         for (const tile of tiles) await expect(tile).toHaveCSS('animation-name', 'none');
         for (const tile of [tiles[1], tiles[2]]) await expect(tile.locator('.board-live-dot')).toHaveCSS('animation-name', 'none');
+        cards[0].hasActiveDesktopAgent = false;
+        await page.evaluate(() => window.app.boardController.refreshSessionActivity());
+        await expect(tiles[0]).not.toHaveClass(/is-live/);
+        await expect(tiles[0].getByRole('img', { name: 'ChatGPT worked on this card' })).toBeVisible();
+        await expect(tiles[0].locator('.board-assignee-name')).toHaveText('ChatGPT');
     });
 }
 

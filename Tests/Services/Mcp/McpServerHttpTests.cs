@@ -390,8 +390,8 @@ public class McpServerHttpTests : IAsyncLifetime
         CreateBoardCardRequest? createRequest = null;
         UpdateBoardCardRequest? updateRequest = null;
         board.Setup(service => service.CreateCardAsync(project, It.IsAny<CreateBoardCardRequest>(),
-                It.IsAny<CancellationToken>(), It.IsAny<BoardAuthor?>()))
-            .Callback<string, CreateBoardCardRequest, CancellationToken, BoardAuthor?>((_, request, _, _) => createRequest = request)
+                It.IsAny<CancellationToken>(), It.IsAny<BoardAuthor?>(), It.IsAny<string?>()))
+            .Callback<string, CreateBoardCardRequest, CancellationToken, BoardAuthor?, string?>((_, request, _, _, _) => createRequest = request)
             .ReturnsAsync(saved);
         board.Setup(service => service.UpdateCardAsync(project, cardId, It.IsAny<UpdateBoardCardRequest>(),
                 It.IsAny<CancellationToken>(), It.IsAny<BoardAuthor?>()))
@@ -544,8 +544,8 @@ public class McpServerHttpTests : IAsyncLifetime
             .ReturnsAsync(new BoardCommentDto("desktop-comment", new BoardAuthorDto("agent", "Codex", "Codex"), "Done", DateTime.UtcNow));
         var store = Mock.Get(_app.Services.GetRequiredService<IBoardStore>());
         var startedIds = new List<string>();
-        store.Setup(s => s.StartDesktopActivityAsync(project, cardId, It.IsAny<string>(), "Codex", It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .Callback<string, string, string, string, DateTime, CancellationToken>((_, _, id, _, _, _) => startedIds.Add(id)).ReturnsAsync(true);
+        store.Setup(s => s.StartDesktopActivityAsync(project, cardId, It.IsAny<string>(), "Codex", It.IsAny<DateTime>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+            .Callback<string, string, string, string, DateTime, CancellationToken, string?>((_, _, id, _, _, _, _) => startedIds.Add(id)).ReturnsAsync(true);
         await using var client = await McpClient.CreateAsync(
             new HttpClientTransport(new HttpClientTransportOptions { Endpoint = _endpoint, TransportMode = HttpTransportMode.StreamableHttp },
                 SharedClient, NullLoggerFactory.Instance, ownsHttpClient: false),

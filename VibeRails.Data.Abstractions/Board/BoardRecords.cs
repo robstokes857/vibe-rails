@@ -255,7 +255,8 @@ public sealed record NewBoardCard(
     string? AgentMadeSessionId = null,
     string WorkflowMode = BoardWorkflowModes.Manual,
     string? ManagerSelection = null,
-    BaseLlmOptions? ManagerBaseLlmOptions = null);
+    BaseLlmOptions? ManagerBaseLlmOptions = null,
+    string? DesktopAppName = null);
 
 /// <summary>Partial update. Null = leave untouched. <see cref="ClearAssignee"/> / <see cref="ClearPoints"/> express "set to null".</summary>
 public sealed record BoardCardPatch(

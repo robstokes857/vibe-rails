@@ -42,7 +42,7 @@ public partial interface IBoardService
     /// <summary>Updates only the local pin marker, preserving the card's current position.</summary>
     Task<BoardCardResponse?> SetCardPinnedAsync(string projectPath, string idOrKey, bool pinned, CancellationToken cancellationToken = default);
     // The author signs the Card Log entry the write appends; null means the local user.
-    Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null);
+    Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null, string? desktopAppName = null);
     Task<BoardCardResponse?> UpdateCardAsync(string projectPath, string idOrKey, UpdateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null);
     Task<bool> DeleteCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default, BoardAuthor? author = null);
     Task<BoardCardResponse?> MoveCardAsync(string projectPath, string idOrKey, string columnIdOrName, int? position, CancellationToken cancellationToken = default, BoardAuthor? author = null);
@@ -281,7 +281,7 @@ public sealed partial class BoardService(
 
     private async Task<BoardCardListResponse> GetCardListResponseAsync(string projectPath, IReadOnlyList<BoardCardRecord> cards, CancellationToken cancellationToken)
     {
-        var desktopCards = await store.GetDesktopActiveCardIdsAsync(projectPath, cards.Select(card => card.Id).ToList(), DateTime.UtcNow, cancellationToken);
+        var desktopCards = await store.GetDesktopActivityAsync(projectPath, cards.Select(card => card.Id).ToList(), DateTime.UtcNow, cancellationToken);
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
         var activeByCard = new Dictionary<string, (string SessionId, string TabId)>(StringComparer.Ordinal);
         var waiting = (await GetWaitingLaunchCardsAsync(projectPath, cards.Select(c => c.Id).ToList(), cancellationToken))
@@ -313,9 +313,10 @@ public sealed partial class BoardService(
         return new BoardCardListResponse(cards.Select(card =>
         {
             activeByCard.TryGetValue(card.Id, out var active);
+            var desktop = desktopCards?.GetValueOrDefault(card.Id);
             return ToSummary(card, active.SessionId, active.TabId) with {
                 HasActiveAutomation = automationCards.Contains(card.Id), HasWaitingAutomation = waiting.Contains(card.Id),
-                HasActiveDesktopAgent = desktopCards?.Contains(card.Id) == true,
+                HasActiveDesktopAgent = desktop?.IsActive == true, DesktopAppName = desktop?.AppName,
                 RemoteIssueUrl = issueUrls.GetValueOrDefault(card.Id), AgentSkip = skips.GetValueOrDefault(card.Id) };
         }).ToList());
     }
@@ -380,7 +381,7 @@ public sealed partial class BoardService(
     public Task<BoardCardRecord?> FindCardAsync(string projectPath, string idOrKey, CancellationToken cancellationToken = default) =>
         store.FindCardAsync(projectPath, idOrKey, cancellationToken);
 
-    public async Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null)
+    public async Task<BoardCardResponse> CreateCardAsync(string projectPath, CreateBoardCardRequest request, CancellationToken cancellationToken = default, BoardAuthor? author = null, string? desktopAppName = null)
     {
         var title = NormalizeTitle(request.Title) ?? throw new BoardValidationException("Title is required.");
         var workflowMode = NormalizeWorkflowMode(request.WorkflowMode);
@@ -411,7 +412,8 @@ public sealed partial class BoardService(
             // The agent's name and session go with the mark; the store drops them without it.
             AgentMade: request.AgentMade == true && author?.Kind == BoardAuthor.AgentKind,
             AgentMadeBy: request.AgentMadeBy, AgentMadeSessionId: request.AgentMadeSessionId,
-            WorkflowMode: workflowMode, ManagerSelection: managerSelection, ManagerBaseLlmOptions: managerOptions), cancellationToken, author);
+            WorkflowMode: workflowMode, ManagerSelection: managerSelection, ManagerBaseLlmOptions: managerOptions,
+            DesktopAppName: desktopAppName), cancellationToken, author);
         return (await GetCardAsync(projectPath, card.Id, cancellationToken))!;
     }
 
@@ -719,7 +721,8 @@ public sealed partial class BoardService(
 
     private async Task<BoardCardResponse> ToDetailAsync(BoardCardDetailRecord detail, CancellationToken cancellationToken)
     {
-        var desktopCards = await store.GetDesktopActiveCardIdsAsync(detail.Card.ProjectPath, [detail.Card.Id], DateTime.UtcNow, cancellationToken);
+        var desktopCards = await store.GetDesktopActivityAsync(detail.Card.ProjectPath, [detail.Card.Id], DateTime.UtcNow, cancellationToken);
+        var desktop = desktopCards?.GetValueOrDefault(detail.Card.Id);
         var live = await liveSessions.GetLiveSessionsAsync(cancellationToken);
         var sessions = await SessionDtosAsync(detail.Card.ProjectPath, detail.Sessions, live, cancellationToken);
         var hasActiveAutomation = sessions.Any(s => s.Active && s.IsAutomation)
@@ -750,7 +753,8 @@ public sealed partial class BoardService(
             summary.AgentMadeBy, summary.AgentMadeSessionId, summary.JiraIssueKey,
             summary.WorkflowMode, summary.ManagerSelection, summary.ManagerBaseLlmOptions)
         {
-            HasActiveDesktopAgent = desktopCards?.Contains(detail.Card.Id) == true,
+            HasActiveDesktopAgent = desktop?.IsActive == true,
+            DesktopAppName = desktop?.AppName,
             RemoteCreated = summary.RemoteCreated,
             JiraIssueUrl = jiraUrl,
             JiraDeliveries = jiraDeliveries,

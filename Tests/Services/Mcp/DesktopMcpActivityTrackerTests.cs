@@ -16,7 +16,7 @@ public sealed class DesktopMcpActivityTrackerTests
     {
         var store = new Mock<IBoardStore>();
         store.Setup(s => s.StartDesktopActivityAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-            It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+            It.IsAny<DateTime>(), It.IsAny<CancellationToken>(), null)).ReturnsAsync(true);
         var tracker = new DesktopMcpActivityTracker(store.Object, true, _ => null, TimeProvider.System);
         var builder = Host.CreateApplicationBuilder();
         builder.Logging.ClearProviders();
@@ -45,8 +45,8 @@ public sealed class DesktopMcpActivityTrackerTests
         var clock = new Clock();
         string? clientId = null;
         var expiry = default(DateTime);
-        store.Setup(s => s.StartDesktopActivityAsync("project", "card", It.IsAny<string>(), "Codex", It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .Callback<string, string, string, string, DateTime, CancellationToken>((_, _, id, _, expires, _) => { clientId = id; expiry = expires; })
+        store.Setup(s => s.StartDesktopActivityAsync("project", "card", It.IsAny<string>(), "Codex", It.IsAny<DateTime>(), It.IsAny<CancellationToken>(), null))
+            .Callback<string, string, string, string, DateTime, CancellationToken, string?>((_, _, id, _, expires, _, _) => { clientId = id; expiry = expires; })
             .ReturnsAsync(true);
         store.Setup(s => s.RenewDesktopActivityAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
         store.Setup(s => s.EndDesktopActivityAsync(It.IsAny<string>(), null, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
@@ -67,8 +67,8 @@ public sealed class DesktopMcpActivityTrackerTests
     {
         var store = new Mock<IBoardStore>(MockBehavior.Strict);
         var ids = new List<string>();
-        store.Setup(s => s.StartDesktopActivityAsync("project", "card", It.IsAny<string>(), "Codex", It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .Callback<string, string, string, string, DateTime, CancellationToken>((_, _, id, _, _, _) => ids.Add(id)).ReturnsAsync(true);
+        store.Setup(s => s.StartDesktopActivityAsync("project", "card", It.IsAny<string>(), "Codex", It.IsAny<DateTime>(), It.IsAny<CancellationToken>(), null))
+            .Callback<string, string, string, string, DateTime, CancellationToken, string?>((_, _, id, _, _, _, _) => ids.Add(id)).ReturnsAsync(true);
         using var tracker = new DesktopMcpActivityTracker(store.Object, false, _ => null, new Clock());
         Assert.True(await tracker.TrackAsync(null, "project", "card", "Codex", TestContext.Current.CancellationToken));
         Assert.True(await tracker.TrackAsync(null, "project", "card", "Codex", TestContext.Current.CancellationToken));
@@ -90,13 +90,13 @@ public sealed class DesktopMcpActivityTrackerTests
     {
         var store = new Mock<IBoardStore>();
         store.Setup(s => s.StartDesktopActivityAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-            It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+            It.IsAny<DateTime>(), It.IsAny<CancellationToken>(), null)).ReturnsAsync(true);
         using var tracker = new DesktopMcpActivityTracker(store.Object, true,
             name => name == LocalToolApiContext.CurrentTabIdVariable ? tabId : "inherited-session-id", new Clock());
         Assert.Equal(desktop, tracker.IsDesktop);
         Assert.Equal(desktop, await tracker.TrackAsync(null, "project", "card", "Codex", TestContext.Current.CancellationToken));
         store.Verify(s => s.StartDesktopActivityAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-            It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), desktop ? Times.Once() : Times.Never());
+            It.IsAny<DateTime>(), It.IsAny<CancellationToken>(), null), desktop ? Times.Once() : Times.Never());
     }
 
     [Fact]
@@ -104,7 +104,7 @@ public sealed class DesktopMcpActivityTrackerTests
     {
         var store = new Mock<IBoardStore>();
         store.Setup(s => s.StartDesktopActivityAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-            It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("busy"));
+            It.IsAny<DateTime>(), It.IsAny<CancellationToken>(), null)).ThrowsAsync(new InvalidOperationException("busy"));
         using var tracker = new DesktopMcpActivityTracker(store.Object, true, _ => null, new Clock());
         Assert.False(await tracker.TrackAsync(null, "project", "card", "Codex", TestContext.Current.CancellationToken));
     }

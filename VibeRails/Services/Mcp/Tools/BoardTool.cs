@@ -242,6 +242,7 @@ public sealed partial class BoardTool(
                     .Append("] [").Append(BoardCardTypes.Label(card.Type)).Append("] (")
                     .Append(card.Priority).Append(") ").Append(card.Title);
                 if (!string.IsNullOrWhiteSpace(card.Assignee)) builder.Append(" — assignee ").Append(card.Assignee);
+                if (card.DesktopAppName is { } app) builder.Append(" — desktop app ").Append(app);
                 // What the tile shows beside the type: an Agent workflow card and who manages it, and the pin.
                 if (card.WorkflowMode == "agent")
                     builder.Append(" — Agent workflow, ").Append(string.IsNullOrWhiteSpace(card.ManagerSelection) ? "board manager" : "manager " + card.ManagerSelection);
@@ -459,14 +460,13 @@ public sealed partial class BoardTool(
         [Description("Comma-separated tags. Optional.")] string? tags = null,
         [Description("task | bug | feature | research-spike | chore. Defaults to task.")] string? type = null,
         [Description(BoardArgumentHelp)] string? board = null,
-        [Description("Your agent and model name as people should see it, e.g. Claude Opus 5.5 or Codex GPT-5. Shown on the card as who made it. "
-            + "Omitted: the CLI or environment name VibeRails knows for this session.")] string? agentName = null,
+        [Description("Your app, agent or model name as people should see it, e.g. ChatGPT or Claude Opus 5.5. Desktop apps keep their name and monitor icon on the card after work ends. Omitted: the MCP client or launching terminal name.")] string? agentName = null,
         [Description("Your VibeRails session id, if you have one: the VIBERAILS_TOOL_CURRENT_SESSION_ID environment variable of a terminal VibeRails launched. "
             + "Do not invent one. Ignored when this MCP server already knows the launching session.")] string? sessionId = null,
         CancellationToken cancellationToken = default,
         McpServer? server = null,
         [Description("LLM picker key from list_board_agent_options, e.g. base:codex or a saved Agent's key, or a bare provider name such as claude or codex. "
-            + "Omitted: a VibeRails terminal assigns the card to its own LLM; other clients leave it unassigned. Pass an empty string to create it unassigned.")] string? assignee = null,
+            + "Omitted: a VibeRails terminal assigns its own LLM. Desktop apps identify themselves with agentName and may leave this launch setting empty.")] string? assignee = null,
         [Description("Base CLI launch settings, matching the Board UI: model, effort, mode, yolo, speed. Omitted: copy the assigned CLI's saved defaults. An explicit object replaces those defaults; {} uses CLI defaults. Only valid with a base assignee; saved Agents use their own settings.")] BaseLlmOptions? baseLlmOptions = null,
         [Description("manual (default) | agent. Agent gives a selected manager responsibility for the card's pipeline.")] string? workflowMode = null,
         [Description("Manager picker key from list_board_agent_options; separate from worker assignee. Required for agent workflow unless the AI board manager is on and the board has a manager (Board settings > Manager): omit it there to hand the card to the board manager.")] string? managerSelection = null,
@@ -490,7 +490,8 @@ public sealed partial class BoardTool(
                     return $"FAIL: lane not found: {column}. Use list_board_columns to see the lanes.";
                 columnId = lane.Id;
             }
-            if (await ResolveAuthorAsync(server, cancellationToken) is not { } author)
+            var declaredName = desktopActivity?.IsDesktop == true ? CleanClientLabel(agentName) : null;
+            if (await ResolveAuthorAsync(server, cancellationToken, declaredName) is not { } author)
                 return UnnamedClientHint;
             var maker = await ResolveCardMakerAsync(author, agentName, sessionId, cancellationToken);
             // Omitted: the agent that made the card is the one working it (VIBE-185). "" keeps it unassigned.
@@ -513,9 +514,10 @@ public sealed partial class BoardTool(
                 AgentMade: author.Kind == BoardAuthor.AgentKind,
                 AgentMadeBy: maker.Name, AgentMadeSessionId: maker.SessionId,
                 WorkflowMode: workflowMode, ManagerSelection: managerSelection, ManagerBaseLlmOptions: managerBaseLlmOptions,
-                Points: points is null or 0 ? default : PointsElement(points.Value), Blocked: blocked), cancellationToken, author);
+                Points: points is null or 0 ? default : PointsElement(points.Value), Blocked: blocked), cancellationToken, author,
+                desktopAppName: desktopActivity?.IsDesktop == true ? maker.Name ?? "Desktop app" : null);
             await AutoLinkSessionAsync(project, created.Id, cancellationToken);
-            await TrackDesktopActivityAsync(server, project, created.Id, author.Label, cancellationToken);
+            await TrackDesktopActivityAsync(server, project, created.Id, author.Label, cancellationToken, declaredName);
             return $"Created {created.Key}: {created.Title}"
                 // Confirms what was recorded to a caller that supplied either; older callers' reply is unchanged.
                 + (created.AgentMade && (agentName is not null || sessionId is not null)
@@ -870,7 +872,8 @@ public sealed partial class BoardTool(
         [Description("Card key like VB-12 (or the card id) to attach the current session to.")] string card,
         CancellationToken cancellationToken = default,
         McpServer? server = null,
-        [Description("True only after the user explicitly authorizes implementation in this discussion. Declares work on this card; false only attaches the session.")] bool work = false)
+        [Description("True only after the user explicitly authorizes implementation in this discussion. Declares work on this card; false only attaches the session.")] bool work = false,
+        [Description("Desktop MCP apps: your display name, e.g. ChatGPT. The Board keeps the app name and icon after activity ends. Omit to use the MCP client name.")] string? agentName = null)
     {
         try
         {
@@ -885,12 +888,14 @@ public sealed partial class BoardTool(
                 return "FAIL: session attachments must stay in the current project. You can read and update other local cards by full permanent key or row ID without attaching this session.";
             if (desktopActivity?.IsDesktop == true)
             {
-                if (await ResolveAuthorAsync(server, cancellationToken) is not { } author) return UnnamedClientHint;
-                return await desktopActivity.TrackAsync(server, target.Project, target.CardId!, author.Label, cancellationToken)
+                var declaredName = CleanClientLabel(agentName);
+                if (await ResolveAuthorAsync(server, cancellationToken, declaredName) is not { } author) return UnnamedClientHint;
+                return await desktopActivity.TrackAsync(server, target.Project, target.CardId!, author.Label, cancellationToken, declaredName)
                     ? $"Linked desktop activity to {target.CardKey}. Pass this card explicitly on later calls. "
                         + (desktopActivity.IsAggregate(server)
-                            ? "This app-name activity mark expires after 90 seconds without a new card update, or when the card closes."
-                            : "The activity mark ends on completion, expiry, or when the card closes.")
+                            ? "Live activity expires after 90 seconds without a new card update, or when the card closes. "
+                            : "Live activity ends on completion, expiry, or when the card closes. ")
+                        + "The card keeps the app name and icon."
                     : "FAIL: Could not mark desktop activity. The card may be closed; check its current state and retry if needed.";
             }
             var tabId = Environment.GetEnvironmentVariable(LocalToolApiContext.CurrentTabIdVariable);
@@ -912,12 +917,13 @@ public sealed partial class BoardTool(
 
     // ------------------------------------------------------------------ helpers
 
-    private async Task TrackDesktopActivityAsync(McpServer? server, string project, string cardId, string label, CancellationToken cancellationToken)
+    private async Task TrackDesktopActivityAsync(McpServer? server, string project, string cardId, string label,
+        CancellationToken cancellationToken, string? agentName = null)
     {
         try
         {
             if (desktopActivity is not null && SameProject(project, await projects.ResolveAsync(cancellationToken)))
-                await desktopActivity.TrackAsync(server, project, cardId, label, cancellationToken);
+                await desktopActivity.TrackAsync(server, project, cardId, label, cancellationToken, agentName);
         }
         catch (Exception) { /* Never turn an already-committed Board write into a failure. */ }
     }
@@ -1155,7 +1161,7 @@ public sealed partial class BoardTool(
         builder.Append("Lane: ").Append(laneName)
             .Append(" · Type: ").Append(BoardCardTypes.Label(card.Type))
             .Append(" · Priority: ").Append(card.Priority)
-            .Append(" · Assignee: ").Append(string.IsNullOrWhiteSpace(card.Assignee) ? "unassigned" : card.Assignee);
+            .Append(" · Assignee: ").Append(card.Assignee ?? card.DesktopAppName ?? "unassigned");
         if (card.Points is int points) builder.Append(" · Points: ").Append(points);
         if (card.Blocked) builder.Append(" · BLOCKED");
         if (card.Flagged) builder.Append(" · FLAGGED: needs your attention");
@@ -1166,8 +1172,12 @@ public sealed partial class BoardTool(
         if (card.AgentMade && card.AgentMadeSessionId is { } madeIn) builder.Append(" in session ").Append(madeIn);
         if (card.Tags.Count > 0) builder.Append(" · Tags: ").Append(string.Join(", ", card.Tags));
         builder.Append('\n');
+        if (card.DesktopAppName is { } desktopApp)
+            builder.Append("Desktop app: ").AppendLine(desktopApp);
         if (card.HasActiveDesktopAgent)
-            builder.AppendLine("Desktop app activity: active or recently active through MCP (separate from terminal sessions).");
+            builder.AppendLine("Desktop app activity: active or recently active through MCP.");
+        else if (card.DesktopAppName is not null)
+            builder.AppendLine("Desktop app activity: inactive.");
         if (card.GhostReason is { } ghost)
             builder.Append("Ghost: agent sessions worked on this finished card, but ")
                 .Append(ghost == BoardGhostReasons.NotLanded

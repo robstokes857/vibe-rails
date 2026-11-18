@@ -436,11 +436,13 @@ Stop, the Manager tab and the Settings switch.
 through authenticated Board routes without replacing card or comment drafts. The input accepts
 GitHub PR/commit URLs; canonical links are separate from the saved local commit/diff rail.
 
-Desktop MCP activity uses `hasActiveDesktopAgent`, independently of `activeTabId`. Render a
-purple marching border plus a desktop icon for desktop-only activity; when a real terminal is
-also active, retain its cyan border/green dot and show the desktop icon too. Refresh the flag
-through the existing activity poll and respect reduced motion. It must not enable terminal
-navigation, manufacture a tab, or alter Automation status.
+Desktop MCP work leaves a monitor icon on the tile for the card’s lifetime. Its tooltip and
+accessible name use `desktopAppName` and say whether the app is working or worked on the card.
+When there is no saved assignee, the chip shows the app’s display name. The assignment menu
+and launch actions continue to use the saved CLI or environment selection. Refresh the name
+and `hasActiveDesktopAgent` through the activity poll. Only current desktop-only activity
+gets the purple marching border. A live terminal keeps its cyan border and green dot alongside
+the monitor icon. Respect reduced motion.
 
 **Local search (VIBE-6).** Typing in Board search switches from lanes to ranked results across
 every local board, including other projects; clearing it restores lanes and their filters.

@@ -59,16 +59,30 @@ public sealed partial class BoardServiceTests : IDisposable
         var page = (await _service.GetCardsPageAsync(_project, new(), Ct, card.BoardId)).Cards.Single(c => c.Id == card.Id);
         var activity = (await _service.GetCardActivityAsync(_project, new(card.BoardId, [card.Id, other.Id]), Ct)).Cards;
         Assert.True(summary.HasActiveDesktopAgent);
+        Assert.Equal("Codex desktop", summary.DesktopAppName);
         Assert.True(detail.HasActiveDesktopAgent);
+        Assert.Equal("Codex desktop", detail.DesktopAppName);
         Assert.True(page.HasActiveDesktopAgent);
+        Assert.Equal("Codex desktop", page.DesktopAppName);
         Assert.True(activity.Single(c => c.Id == card.Id).HasActiveDesktopAgent);
+        Assert.Equal("Codex desktop", activity.Single(c => c.Id == card.Id).DesktopAppName);
         Assert.False(activity.Single(c => c.Id == other.Id).HasActiveDesktopAgent);
+        Assert.Null(activity.Single(c => c.Id == other.Id).DesktopAppName);
         Assert.Null(summary.ActiveTabId);
         Assert.Null(summary.ActiveSessionId);
         Assert.False(summary.HasActiveAutomation);
         Assert.Empty(detail.Sessions);
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(detail, AppJsonSerializerContext.Default.BoardCardResponse));
         Assert.True(json.RootElement.GetProperty("hasActiveDesktopAgent").GetBoolean());
+        Assert.Equal("Codex desktop", json.RootElement.GetProperty("desktopAppName").GetString());
+
+        // Reads can poll between lease updates without the board-wide change token moving.
+        var initialStamp = activity.Single(c => c.Id == card.Id).Stamp;
+        Assert.True(await _store.StartDesktopActivityAsync(_project, card.Id, "desktop-client", "Codex desktop",
+            DateTime.UtcNow.AddSeconds(90), Ct, "ChatGPT"));
+        var renamed = Assert.Single((await _service.GetCardActivityAsync(_project, new(card.BoardId, [card.Id]), Ct)).Cards);
+        Assert.Equal("ChatGPT", renamed.DesktopAppName);
+        Assert.NotEqual(initialStamp, renamed.Stamp);
 
         // A real terminal can independently work on the same card.
         const string session = "77777777-7777-4777-8777-777777777777";
@@ -81,8 +95,25 @@ public sealed partial class BoardServiceTests : IDisposable
         await _store.EndDesktopActivityAsync("desktop-client", card.Id, Ct);
         detail = (await _service.GetCardAsync(_project, card.Id, Ct))!;
         Assert.False(detail.HasActiveDesktopAgent);
+        Assert.Equal("ChatGPT", detail.DesktopAppName);
         Assert.Equal("tab", detail.ActiveTabId);
         Assert.False(Assert.Single((await _service.GetCardActivityAsync(_project, new(card.BoardId, [card.Id]), Ct)).Cards).HasActiveDesktopAgent);
+    }
+
+    [Fact]
+    public async Task DesktopCreationInClosedLaneRecordsTheAppWithoutStartingWork()
+    {
+        await _service.GetColumnsAsync(_project, Ct);
+        var closed = await _service.CreateColumnAsync(_project, new("Closed", "#999999"), Ct);
+        var card = await _service.CreateCardAsync(_project,
+            new(Title: "Finished", ColumnId: closed.Id, Assignee: "base:codex"), Ct,
+            BoardAuthor.Agent("desktop", null, null), desktopAppName: "ChatGPT");
+        Assert.Equal("ChatGPT", card.DesktopAppName);
+        Assert.False(card.HasActiveDesktopAgent);
+        Assert.Equal("base:codex", card.Assignee);
+        var mark = Assert.Single((await _service.GetCardActivityAsync(_project, new(card.BoardId, [card.Id]), Ct)).Cards);
+        Assert.Equal("ChatGPT", mark.DesktopAppName);
+        Assert.False(mark.HasActiveDesktopAgent);
     }
 
     [Theory]
