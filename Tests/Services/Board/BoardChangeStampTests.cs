@@ -92,6 +92,7 @@ public sealed class BoardChangeStampTests : IDisposable
         await _store.EndDesktopActivityAsync("client", card.Id, Ct);
         _ = await _store.GetCardsPageAsync(_project, new(30), Ct);
         _ = await _store.GetCardDetailAsync(_project, card.Id, Ct);
+        await _store.SaveProjectContextSettingsAsync(_project, "Repository instructions", 0, Ct);
         Assert.Equal(before, await _store.GetChangeStampAsync(Ct));
     }
 

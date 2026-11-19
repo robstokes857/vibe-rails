@@ -42,6 +42,8 @@ public sealed partial class BoardStore
         "BoardPendingAutomations", "BoardRecallEmbeddings", "BoardReviewSettings", "BoardSearchEmbeddings",
         "BoardStarterWorkflows", "BoardSyncEntryOrder", "BoardSyncLinks", "BoardSyncRebuilds",
         "BoardSyncRejectedFields", "BoardSyncSkippedEntries", "BoardSessionCommits",
+        // The Context workspace loads repository context independently of Board polling.
+        "ProjectContextSettings",
         // Shown on the tile, but every write also touches the card (BoardStore.SessionCommits.cs).
         "BoardAgentSkips",
     ];
