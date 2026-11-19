@@ -368,7 +368,17 @@ export class TerminalManager {
             this._undoTomSelect = null;
         }
 
-        this.tabs.forEach((tab) => tab.instance.dispose());
+        // Each tab closes its socket before its xterm. If one xterm throws while disposing, the
+        // remaining tabs must still close theirs and navigation must still mount the next view:
+        // a socket left open here outlives the page, and the next viewer of that tab "takes it
+        // over", raising a false takeover warning (VIBE-351).
+        this.tabs.forEach((tab) => {
+            try {
+                tab.instance.dispose();
+            } catch (error) {
+                console.error(`[TerminalTeardown] Tab ${tab.state.id} did not dispose cleanly:`, error);
+            }
+        });
         this.tabs.clear();
         this.tabOrder = [];
         this.activeTabId = null;

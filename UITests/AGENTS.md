@@ -153,6 +153,10 @@ separation from the Board Automation robot menu at desktop and phone widths. The
 host first reports no session, as a real child does while the CLI spawns, and one case starts
 from a blank "+" placeholder tab. The renderer font cases emulate Chromium 156's strict canvas
 font parser (VS Code webviews) for WebGL and Canvas, failing on any glyph font it would drop.
+The two VIBE-351 cases in `terminal-board-card.spec.js` keep two live tabs whose socket fixture
+closes an earlier viewer as "taken over", like the server. Leaving Terminals with the Canvas
+renderer, or with one xterm failing to dispose, must mount the next view, close every socket,
+and reconnect both tabs later without a takeover notice.
 Snapshot fixtures are generated from current backend capture/serialization code by
 `Tests/headless/TerminalSnapshots`. The headless xterm tests check every history/screen row,
 repeat attach, cursor position and live input modes; browser tests use those same bytes and

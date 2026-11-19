@@ -162,3 +162,89 @@ for (const width of [1280, 390]) {
     });
 }
 
+// VIBE-351: two live tabs. Like the server, a second viewer of a tab takes it over from the first,
+// so any socket a navigation leaves open raises a "taken over" warning when Terminals reconnects.
+async function openLiveTabs(page, { renderer = 'webgl' } = {}) {
+    const column = { id: 'ready', boardId: 'board', name: 'Ready', position: 0 };
+    const card = { id: 'story', key: 'SCRI-3KGRF-1', displayId: 'SCRI-1', boardId: 'board', columnId: 'ready',
+        title: 'Split the project', description: '', type: 'task', assignee: 'base:claude', workflowMode: 'manual',
+        attachments: [], comments: [], commits: [], sessions: [] };
+    const tabs = new Map(['one', 'two'].map((tabId, index) => [tabId, { tabId, sessionId: `${tabId}-session`, cli: 'claude',
+        hasActiveSession: true, workingDirectory: 'C:/fixture', createdUTC: `2026-11-19T0${index}:00:00Z`,
+        boardCard: index === 0 ? card : null }]));
+    const viewers = new Map();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+    await page.addInitScript(useWebgl => {
+        sessionStorage.setItem('viberails_tab', 'story-fixture');
+        sessionStorage.setItem('viberails_terminal_active_tab_id', 'one');
+        localStorage.setItem('viberails_terminal_webgl', String(useWebgl));
+    }, renderer === 'webgl');
+    await page.routeWebSocket('**/api/v1/events/ws*', () => {});
+    await page.routeWebSocket('**/api/v1/terminal/tabs/*/ws*', socket => {
+        const tabId = new URL(socket.url()).pathname.split('/')[5];
+        const viewer = { socket, open: true };
+        socket.onClose(() => { viewer.open = false; });
+        const previous = viewers.get(tabId)?.at(-1);
+        if (previous?.open) previous.socket.close({ code: 1000, reason: 'Session taken over' });
+        viewers.set(tabId, [...(viewers.get(tabId) || []), viewer]);
+        socket.send(Buffer.from(`Output of ${tabId}\r\n`));
+    });
+    await page.route('**/api/v1/**', route => {
+        const path = new URL(route.request().url()).pathname;
+        const status = path.match(/^\/api\/v1\/terminal\/tabs\/([^/]+)\/status$/);
+        if (status) return route.fulfill({ json: tabs.get(status[1]) || {} });
+        const responses = {
+            '/api/v1/context': { isInGit: true, rootPath: 'C:/fixture', launchDirectory: 'C:/fixture' },
+            '/api/v1/settings': {}, '/api/v1/environments': { environments: [] },
+            '/api/v1/agents': { agents: [] }, '/api/v1/sandboxes': { sandboxes: [] },
+            '/api/v1/llm-picker/preferences': { items: [] },
+            '/api/v1/terminal/tabs': { tabs: [...tabs.values()], maxTabs: 100 },
+            '/api/v1/board/boards': { boards: [{ id: 'board', name: 'scripts', position: 0, columns: [column] }] },
+            '/api/v1/board/columns': { columns: [column] },
+            '/api/v1/board/cards': { cards: [card] },
+            '/api/v1/board/cards/story': card
+        };
+        return route.fulfill({ json: responses[path] || {} });
+    });
+    await page.goto('/');
+    const openViewers = () => [...viewers].filter(([, list]) => list.some(viewer => viewer.open)).map(([tabId]) => tabId);
+    // The active tab connects first; the background pass then reconnects the other one.
+    await expect.poll(openViewers).toEqual(['one', 'two']);
+    await expect.poll(() => page.evaluate(() => window.app.terminalController.manager.getActiveTab()
+        .instance.vibeTerminal._activeRenderer)).toBe(renderer);
+    return { errors, openViewers, takeover: page.getByText(/taken over/i) };
+}
+
+test('Open on Board with the Canvas renderer closes every terminal and mounts the Board', async ({ page }) => {
+    const fixture = await openLiveTabs(page, { renderer: 'canvas' });
+    await page.locator('#terminal-card-link-btn').click();
+    await page.getByRole('button', { name: 'Open on Board', exact: true }).click();
+    await expect(page.locator('#app-content [data-view="board"]')).toBeVisible();
+    await expect(page.locator('#app-content [data-view="terminal-focus"]')).toHaveCount(0);
+    await expect.poll(fixture.openViewers).toEqual([]);
+
+    await page.locator('.app-subnav-link[data-view="terminal-focus"]').click();
+    await expect.poll(fixture.openViewers).toEqual(['one', 'two']);
+    await expect(fixture.takeover).toHaveCount(0);
+    expect(fixture.errors).toEqual([]);
+});
+
+test('a tab whose xterm fails to dispose does not keep the other terminals connected', async ({ page }) => {
+    const fixture = await openLiveTabs(page);
+    await page.evaluate(() => {
+        const xterm = window.app.terminalController.manager.getActiveTab().instance.vibeTerminal._terminal;
+        const dispose = xterm.dispose.bind(xterm);
+        xterm.dispose = () => { dispose(); throw new Error('renderer dispose failed'); };
+    });
+    await page.locator('.app-subnav-link[data-view="board"]').click();
+    await expect(page.locator('#app-content [data-view="board"]')).toBeVisible();
+    await expect.poll(fixture.openViewers).toEqual([]);
+    expect(fixture.errors).toEqual([expect.stringContaining('[TerminalTeardown] Tab one did not dispose cleanly')]);
+
+    await page.locator('.app-subnav-link[data-view="terminal-focus"]').click();
+    await expect.poll(fixture.openViewers).toEqual(['one', 'two']);
+    await expect(fixture.takeover).toHaveCount(0);
+});
+

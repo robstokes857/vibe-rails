@@ -202,6 +202,17 @@ inside full-size cells; browsers on older Chromium still accepted it (xterm.js #
 `Tests/wwwroot/js/xterm-canvas-font.test.mjs` fails on an unpatched bundle, and
 `terminal-automations.spec.js` emulates the strict parser for both renderers.
 
+**Vendored Canvas addon dispose guard (2026-11-19, VIBE-351).** `addon-canvas.js` skips putting
+xterm's DOM renderer back when the terminal itself is being disposed, as upstream's WebGL addon
+already does (`if (this._terminal._core._store._isDisposed) return`). Without it, disposing any
+Canvas-rendered terminal threw `Cannot read properties of undefined (reading 'onShowLinkUnderline')`
+out of `Terminal.dispose()`. With Canvas selected, leaving Terminals (including **Open on Board**)
+stopped before the next view mounted, left the remaining tabs' sockets open, and the next connect
+showed a false "taken over" warning. Keep the guard when re-vendoring;
+`xterm-canvas-dispose.test.mjs` fails without it. `TerminalManager.destroy()` also disposes each tab
+in its own `try`, logging `[TerminalTeardown]`, so one xterm failure never keeps another tab
+connected. `terminal-board-card.spec.js` covers both.
+
 Dashboard inline scripts use `{{VIBERAILS_CSP_NONCE}}`, replaced per response by the backend
 and by the VS Code HTML builder. Keep `window.__viberails_NONCE__` available to script loaders
 and Atlas. The opaque MCP remote frame also receives a per-response nonce: an external script
