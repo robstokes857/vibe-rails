@@ -60,6 +60,16 @@ function cleanString(value) {
     return trimmed.length > 0 ? trimmed : null;
 }
 
+function isBoardLaunchLabel(state) {
+    if (!state.taskKey?.startsWith('board-card:') || state.labelSource === 'user') return false;
+    if (state.labelSource === 'launch') return true;
+    // Older tabs did not record the source. Only adopt a label that still matches
+    // its linked card; a different remembered name may have been set by the user.
+    const card = state.boardCard;
+    return !!card && (state.taskKey === `board-card:${card.id}` || state.taskKey === `board-card:${card.id}:chat`)
+        && state.label === cardLabel(card);
+}
+
 // A caller can prefer a fresh tab without making a launch impossible at the
 // server-enforced cap. An active blank tab has no session or user work to
 // preserve, so it is the safe fallback when another tab cannot be created.
@@ -622,6 +632,7 @@ export class TerminalManager {
                 accentColor: metadata?.accentColor || null,
                 taskKey: metadata?.taskKey || null,
                 customLabel: metadata?.customLabel === true,
+                labelSource: metadata?.labelSource || null,
                 minimized: metadata?.minimized === true,
                 pinned: metadata?.pinned === true,
                 notifyEnabled: metadata?.notifyEnabled === true,
@@ -805,6 +816,7 @@ export class TerminalManager {
             accentColor: this.normalizeAccentColor(options.accentColor),
             taskKey: cleanString(options.taskKey),
             customLabel: options.customLabel === true,
+            labelSource: cleanString(options.labelSource),
             minimized: options.minimized === true,
             pinned: options.pinned === true,
             notifyEnabled: options.notifyEnabled === true,
@@ -2290,10 +2302,15 @@ export class TerminalManager {
         for (const tab of this.tabs.values()) {
             const state = tab.state;
             const title = titles.get(state.sessionId);
-            // Check the current session after the history request finishes. Explicit tab
-            // names (including Board launch labels) and an in-progress rename win.
-            if (!title || !state.hasActiveSession || state.customLabel || state.renaming) continue;
-            if (state.label === title && state.title === title) continue;
+            // Board launch labels are a fallback until the conversation has a title.
+            // User renames, including names identical to a card label, still win.
+            const boardLaunchLabel = isBoardLaunchLabel(state);
+            if (!title || !state.hasActiveSession || (state.customLabel && !boardLaunchLabel) || state.renaming) continue;
+            if (state.label === title && state.title === title && !boardLaunchLabel) continue;
+            if (boardLaunchLabel) {
+                state.customLabel = false;
+                state.labelSource = null;
+            }
             this.updateTabMetadata(tab, { label: title, title });
         }
     }
@@ -2384,9 +2401,11 @@ export class TerminalManager {
         if (clean) {
             tab.state.label = clean;
             tab.state.customLabel = true;
+            tab.state.labelSource = 'user';
         } else {
             // Empty name → drop the custom flag and fall back to the CLI label.
             tab.state.customLabel = false;
+            tab.state.labelSource = null;
             tab.state.label = this.getSelectionMeta(tab.state.selection).displayName;
         }
 
@@ -3112,6 +3131,7 @@ export class TerminalManager {
             accentColor: state.accentColor,
             taskKey: state.taskKey,
             customLabel: state.customLabel,
+            labelSource: state.labelSource,
             minimized: state.minimized === true,
             pinned: state.pinned === true,
             notifyEnabled: state.notifyEnabled === true,
@@ -3128,6 +3148,7 @@ export class TerminalManager {
                 accentColor: this.normalizeAccentColor(metadata.accentColor),
                 taskKey: cleanString(metadata.taskKey) || null,
                 customLabel: metadata.customLabel === true,
+                labelSource: cleanString(metadata.labelSource),
                 minimized: metadata.minimized === true,
                 pinned: metadata.pinned === true,
                 notifyEnabled: metadata.notifyEnabled === true,
@@ -3148,6 +3169,7 @@ export class TerminalManager {
                 accentColor: this.normalizeAccentColor(parsed?.accentColor),
                 taskKey: cleanString(parsed?.taskKey) || null,
                 customLabel: parsed?.customLabel === true,
+                labelSource: cleanString(parsed?.labelSource),
                 minimized: parsed?.minimized === true,
                 pinned: parsed?.pinned === true,
                 notifyEnabled: parsed?.notifyEnabled === true,
@@ -3274,16 +3296,23 @@ export class TerminalController {
         if (!id) return;
 
         try {
+            let previous = this.manager?.tabs?.get(id)?.state;
+            if (!previous) {
+                try { previous = JSON.parse(window.sessionStorage.getItem(`${TAB_META_PREFIX}${id}`)); } catch {}
+            }
+            const keepUserName = previous?.customLabel === true && previous?.labelSource === 'user';
+            const label = cleanString(keepUserName ? previous.label : metadata.label);
             const selection = cleanString(metadata.selection);
             const title = cleanString(metadata.title);
             if (selection) window.sessionStorage.setItem(`${TAB_SELECTION_PREFIX}${id}`, selection);
             if (title) window.sessionStorage.setItem(`${TAB_TITLE_PREFIX}${id}`, title);
             window.sessionStorage.setItem(`${TAB_META_PREFIX}${id}`, JSON.stringify({
-                label: cleanString(metadata.label) || null,
+                label,
                 icon: cleanString(metadata.icon) || null,
                 accentColor: cleanString(metadata.accentColor) || null,
                 taskKey: cleanString(metadata.taskKey) || null,
-                customLabel: cleanString(metadata.label) != null,
+                customLabel: label != null,
+                labelSource: keepUserName ? 'user' : label ? 'launch' : null,
                 minimized: false,
                 pinned: false,
                 notifyEnabled: false,
@@ -3369,6 +3398,7 @@ export class TerminalController {
                 icon: metadata?.icon || null,
                 taskKey: metadata?.taskKey || null,
                 customLabel: metadata?.customLabel === true,
+                labelSource: metadata?.labelSource || null,
                 workingDirectory: authoritative?.workingDirectory || metadata?.workingDirectory || null
             });
             if (!tab) return false;

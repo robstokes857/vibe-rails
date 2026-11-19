@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TerminalManager } from '../../../VibeRails/wwwroot/js/modules/terminal-multitab.js';
+import { TerminalController, TerminalManager } from '../../../VibeRails/wwwroot/js/modules/terminal-multitab.js';
 import { ChatHistorySidebar } from '../../../VibeRails/wwwroot/js/modules/chat-history-sidebar.js';
 
 function titleManager() {
@@ -24,6 +24,71 @@ function titleManager() {
 
 const titled = (id, name = 'Diagnose backup failures') => ({
     id, sessionDisplayName: name, sessionTitleGenerated: true
+});
+
+const boardCard = { id: 'story', key: 'VB-ABCDE-17', displayId: 'VIBE-17', title: 'Investigate the queue' };
+const boardLabel = 'VIBE-17 · Investigate the queue';
+
+test('generated titles replace both remembered and legacy Board launch labels and keep refreshing', () => {
+    const { manager, add } = titleManager();
+    const remembered = add('remembered', { customLabel: true, labelSource: 'launch',
+        taskKey: 'board-card:story', label: boardLabel, boardCard });
+    const legacy = add('legacy', { customLabel: true,
+        taskKey: 'board-card:story:chat', label: boardLabel, boardCard });
+    manager.syncSessionTitles([titled('remembered'), titled('legacy')]);
+    for (const state of [remembered, legacy]) {
+        assert.equal(state.label, 'Diagnose backup failures');
+        assert.equal(state.title, state.label);
+        assert.equal(state.customLabel, false, 'a generated name remains automatic');
+    }
+    manager.syncSessionTitles([titled('remembered', 'Fix queue acknowledgements'),
+        titled('legacy', 'Fix queue acknowledgements')]);
+    assert.equal(remembered.label, 'Fix queue acknowledgements');
+    assert.equal(legacy.label, remembered.label);
+});
+
+test('Board title updates preserve manual names, renames in progress and unrelated launch labels', () => {
+    const { manager, add, rendered } = titleManager();
+    const manual = add('manual', { customLabel: true, taskKey: 'board-card:story', boardCard });
+    manager.renameTab('manual', boardLabel);
+    assert.equal(manual.labelSource, 'user');
+    add('legacy-manual', { customLabel: true, taskKey: 'board-card:story', label: 'My queue notes', boardCard });
+    add('editing', { customLabel: true, labelSource: 'launch', taskKey: 'board-card:story', renaming: true });
+    add('script', { customLabel: true, labelSource: 'launch', taskKey: 'python-script:script' });
+    add('manager', { customLabel: true, labelSource: 'launch', taskKey: 'board-manager:board' });
+    add('other-card', { customLabel: true, taskKey: 'board-card:different', label: boardLabel, boardCard });
+    rendered.length = 0;
+    manager.syncSessionTitles([...manager.tabs.keys()].map(id => titled(id)));
+    assert.deepEqual(rendered, []);
+    assert.equal(manual.label, boardLabel, 'even a manual name identical to the card stays protected');
+});
+
+test('launch-label provenance survives storage and reopening cannot erase a manual rename', t => {
+    const storage = new Map();
+    const previousWindow = globalThis.window;
+    globalThis.window = { sessionStorage: {
+        setItem: (key, value) => storage.set(key, value), getItem: key => storage.get(key) ?? null
+    } };
+    t.after(() => { globalThis.window = previousWindow; });
+    const { manager, add } = titleManager();
+    manager.saveTabMeta = TerminalManager.prototype.saveTabMeta;
+    const controller = new TerminalController({});
+    const metadata = { label: boardLabel, title: boardLabel, taskKey: 'board-card:story' };
+    controller.rememberTabLaunch('remembered', metadata);
+    const saved = manager.getTabMetaFromStorage('remembered');
+    assert.equal(saved.labelSource, 'launch');
+    const state = add('remembered', { ...saved, boardCard });
+    manager.renameTab(state.id, boardLabel);
+    assert.equal(manager.getTabMetaFromStorage(state.id).labelSource, 'user');
+
+    // No live manager: the restored metadata alone must protect the user's name.
+    controller.rememberTabLaunch(state.id, { ...metadata, label: 'A renamed card' });
+    const restored = manager.getTabMetaFromStorage(state.id);
+    assert.equal(restored.label, boardLabel);
+    assert.equal(restored.labelSource, 'user');
+    Object.assign(state, restored);
+    manager.syncSessionTitles([titled(state.id)]);
+    assert.equal(state.label, boardLabel);
 });
 
 test('generated titles rename matching live tabs without focus changes or a custom-label flag', () => {

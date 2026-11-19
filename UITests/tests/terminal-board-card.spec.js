@@ -1,9 +1,9 @@
 const { test, expect } = require('@playwright/test');
 
 // Real frontend and xterm with read-only HTTP/WebSocket fixtures; no CLI, snapshots or database.
-async function openTerminal(page, cli = 'codex') {
+async function openTerminal(page, cli = 'codex', boardCard = null) {
     const tab = { tabId: 'ordinary', sessionId: 'ordinary-session', cli, hasActiveSession: true,
-        workingDirectory: 'C:/fixture', createdUTC: '2026-10-19T06:00:00Z' };
+        workingDirectory: 'C:/fixture', createdUTC: '2026-10-19T06:00:00Z', boardCard };
     const tabs = new Map([[tab.tabId, tab]]);
     const connections = [];
     await page.addInitScript(() => {
@@ -36,6 +36,50 @@ async function openTerminal(page, cli = 'codex') {
         window.app.terminalController.manager.getActiveTab().instance._initialConnectActive
     )).toBe(false);
     return { tabs, connections };
+}
+
+for (const [width, legacy] of [[1280, false], [390, true]]) {
+    test(`Board tab shows generated titles and preserves manual renames at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 850 });
+        const card = { id: 'story', key: 'VB-ABCDE-17', displayId: 'VIBE-17', title: 'Investigate the queue' };
+        const label = 'VIBE-17 · Investigate the queue';
+        await page.addInitScript(({ label, legacy }) => {
+            const key = 'viberails_terminal_tab_meta_ordinary';
+            if (!sessionStorage.getItem(key)) sessionStorage.setItem(key, JSON.stringify({
+                label, taskKey: 'board-card:story:chat', customLabel: true,
+                ...(legacy ? {} : { labelSource: 'launch' })
+            }));
+        }, { label, legacy });
+        const fixture = await openTerminal(page, 'codex', card);
+        const tabLabel = page.locator('#vb-terminal-tab-list [data-tab-id="ordinary"] .vb-terminal-tab-label');
+        await expect(tabLabel).toHaveText(label);
+        const connections = fixture.connections.length;
+        let generatedTitle = 'Diagnose queue acknowledgement delays';
+        await page.route('**/api/v1/chatHistory**', route => route.fulfill({ json: { items: [{
+            id: 'ordinary-session', cli: 'codex', sessionDisplayName: generatedTitle,
+            sessionTitleGenerated: true, workingDirectory: 'C:/fixture'
+        }] } }));
+        await page.evaluate(() => window.app.terminalController.manager.historySidebar.refresh());
+        await expect(tabLabel).toHaveText(generatedTitle);
+        generatedTitle = 'Fix queue acknowledgements';
+        await page.evaluate(() => window.app.terminalController.manager.historySidebar.refresh());
+        await expect(tabLabel).toHaveText(generatedTitle);
+        expect(fixture.connections).toHaveLength(connections);
+        await page.screenshot({ path: testInfo.outputPath(`generated-board-title-${width}.png`) });
+
+        // Even the exact Board label is now a deliberate manual name.
+        await tabLabel.dblclick();
+        await page.getByRole('textbox', { name: 'Tab name' }).fill(label);
+        await page.getByRole('textbox', { name: 'Tab name' }).press('Enter');
+        await page.reload();
+        await expect(tabLabel).toHaveText(label);
+        generatedTitle = 'Review queue recovery';
+        await page.evaluate(() => window.app.terminalController.manager.historySidebar.refresh());
+        await expect.poll(() => page.evaluate(() =>
+            window.app.terminalController.manager.historySidebar.allItems[0]?.sessionDisplayName
+        )).toBe(generatedTitle);
+        await expect(tabLabel).toHaveText(label);
+    });
 }
 
 for (const [cli, logo] of [['claude', 'claude-color.svg'], ['codex', 'openai.svg']]) {

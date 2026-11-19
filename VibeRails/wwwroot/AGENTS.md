@@ -1100,8 +1100,11 @@ after its run link is saved, removing any provisional shell row seen before that
 
 History loads and soft refreshes synchronize generated session titles to matching live terminal
 tabs through `TerminalManager.syncSessionTitles`. Match the current session ID after the request
-finishes, preserve explicit tab labels and in-progress renames, and never activate or reconnect a
-tab to rename it. Generated names remain automatic; starting another session restores its launch label.
+finishes, preserve user-renamed tab labels and in-progress renames, and never activate or reconnect a
+tab to rename it. Board card launch labels are temporary fallbacks: generated conversation titles
+replace them. Tab metadata records `labelSource` so a manual name identical to a card label stays
+protected after reload; legacy Board labels are eligible only while they match the linked card.
+Generated names remain automatic; starting another session restores its launch label.
 
 Session titles span the full card width above the icon, project, metadata and actions.
 They wrap to at most four lines with no reserved minimum height; short titles leave no
