@@ -98,8 +98,10 @@ public static partial class BoardRoutes
         // Lane and card lists take ?board=<id>; omitted means the project's first board, which is
         // what every client before boards existed was reading.
 
-        app.MapGet("/api/v1/board/boards", (IBoardService board, CancellationToken cancellationToken) =>
-            RunAsync(async () => Results.Ok(await board.GetBoardsAsync(Project(), cancellationToken))))
+        app.MapGet("/api/v1/board/boards", (IBoardService board, bool? existingOnly, CancellationToken cancellationToken) =>
+            RunAsync(async () => Results.Ok(existingOnly == true
+                ? await board.GetExistingBoardsAsync(Project(), cancellationToken)
+                : await board.GetBoardsAsync(Project(), cancellationToken))))
             .WithName("GetBoards");
 
         app.MapPost("/api/v1/board/boards", (IBoardService board, CreateBoardRequest request, CancellationToken cancellationToken) =>
@@ -158,6 +160,20 @@ public static partial class BoardRoutes
         app.MapPut("/api/v1/board/app-context", (IBoardService board, UpdateAppContextRequest request, CancellationToken cancellationToken) =>
             RunAsync(async () => Results.Ok(await board.SaveAppContextSettingsAsync(request, cancellationToken))))
             .WithName("SaveAppContext");
+
+        app.MapGet("/api/v1/board/project-context", (IBoardService board, HttpContext context, CancellationToken cancellationToken) =>
+            RunAsync(async () =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                return Results.Ok(await board.GetProjectContextSettingsAsync(RepositoryProject(), cancellationToken));
+            })).WithName("GetProjectContext");
+
+        app.MapPut("/api/v1/board/project-context", (IBoardService board, UpdateProjectContextRequest request, HttpContext context, CancellationToken cancellationToken) =>
+            RunAsync(async () =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                return Results.Ok(await board.SaveProjectContextSettingsAsync(RepositoryProject(), request, cancellationToken));
+            })).WithName("SaveProjectContext");
 
         // The AI board manager switch (VIBE-204): machine-wide like App context, so no board or project
         // scope. Off by default; while it is off the manager routes below refuse to save or start one.
@@ -553,6 +569,10 @@ public static partial class BoardRoutes
             board.PointsField, board.Columns.Select(ToResponse).ToList(), board.Warnings.ToList());
 
     private static string Project() => ParserConfigs.GetRootPath();
+
+    private static string RepositoryProject() => ParserConfigs.GetIsInGit()
+        ? Project()
+        : throw new BoardValidationException("Open a Git repository to edit Project context.");
 
     // Only middleware-authenticated contacts can select the project captured by their run.
     // No request field or header supplied by a caller is a project capability.

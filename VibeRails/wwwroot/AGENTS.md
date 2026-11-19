@@ -168,7 +168,7 @@ boards/lanes and a card search, confirms the destination and lane Automation cou
 to replace an editor with unsaved drafts. Dispose it on close/replacement/unload. The existing
 navbar **Sign in** opens the device approval flow when signed out. The top navigation is the
 only application navigation. Quality is third and Rules fourth; they are separate destinations.
-AI Agents follows Rules, then MCP. The account menu opens **Review requests**, the
+AI Agents follows Rules, then Context and MCP. The account menu opens **Review requests**, the
 separate pre-commit inbox. The standalone play button opens
 Quick actions for eligible Agents, Quick Launches and Actions. Application Settings opens from
 **Account settings** in the account dropdown; when signed out, a text **Settings** link
@@ -532,16 +532,16 @@ rewrites it when a card is flagged or unflagged. Stored story points stay on the
 not shown. Search and filters share a second
 row on the same surface. Lane headers retain their card counts. There are no lane-bottom entry
 fields: **New card** opens the editor, whose Lane selector chooses the destination.
-The settings modal has General, Jira Cloud, Azure DevOps, App context and History tabs
+The settings modal has General, Jira Cloud, Azure DevOps, Context and History tabs
 (VIBE-103, VIBE-165) for local boards. A dedicated tracker board combines the board settings and
-its own tracker's controls in **General**, followed by App context and History, with that
+its own tracker's controls in **General**, followed by Context and History, with that
 tracker's logo beside the board name in the modal header; the other tracker's tab is hidden, so a
 Jira board shows no Azure DevOps tab and an Azure DevOps board no Jira tab.
 The sync status's `remoteProvider` (`isJiraBoard` for older responses) determines this layout and
 logo from the current dedicated connection, never past links or imported-card badges.
 `mountBoardSettingsNavigation(...).followProvider(provider)` moves the panels; its `onSelect`
 callback names the tracker whose controls are visible, so the matching heading sits in the header. Moving a legacy connection to its dedicated
-board refreshes the source settings status while preserving General/App context drafts. Move
+board refreshes the source settings status while preserving General drafts. Move
 existing controls without replacing drafts or interrupting the selected section when status arrives.
 Each tab has a thin button border, with a filled active tab. Jira controls (`board-jira.js`) target
 the explicit board being edited. The Jira Cloud connection status sits at the right of the modal
@@ -609,19 +609,16 @@ Lane cards have an 11rem minimum height and keep activity and assignment at the 
 The thumbtack button pins a card's slot during automatic activity promotion. Its narrow save
 preserves other fields, focus and the open editor; failures keep the previous pin state. Explicit
 dragging still moves pinned cards, and ordinary polling reads the saved marker from card summaries.
-The settings modal's **Context** tab and Settings' **Context** tab share one editor
-(`contextEditorSection` / `mountContextEditor` in `board-settings.js`, VIBE-229). It lists the
-levels broadest first and says which launches each reaches: **App context** (every LLM launch,
-GET/PUT `/api/v1/board/app-context`), **Board context** (the board's Every Context message, GET/PUT
-`/api/v1/board/boards/{boardId}/every-context`), **Card context** and **Card type context** (the
-board's default message and per-type default/replace/append overrides, GET/PUT `.../context`).
-Settings mounts App context alone; a board mounts all four. App, Board and Card context use the same
-native triangle disclosures as the card types; only App starts open. One **Save context** button below
-the editor saves changed units, each with its own revision; Card and Card type context stay one record.
-Loading must finish before saving. A partial save keeps all drafts and advances only successful units'
-revisions, so retrying sends only remaining changes. App and Board context reach launches only when their Nudge switch is on; Card
-and Card type context reach card agents for Start work and Chat with agent either way. The editors
-escape saved text. Saving context is independent of **Save name**.
+The top navigation opens **Context** (`context-controller.js`). Settings links there, and the
+Board settings link preselects the board. The workspace shows the open repository and lists
+existing editable boards without creating one or changing the active Board selection. The editor
+mounts App, Project, Board, Card and Card type disclosures in that order; only App starts open.
+Project context requires a Git repository. Board and card levels require an editable board.
+Each changed unit saves through the same **Save context** action. Card and Card type share one
+record; the App disclosure's Nudge switches send only changed fields to
+`PUT /api/v1/settings/context-nudge`. A partial save keeps drafts and advances successful units'
+revisions. Changing boards keeps App and Project drafts and confirms discarding board drafts.
+The navigation guard also protects unsaved context when leaving the workspace.
 The picker footer's **Manage boards** opens an up/down order editor. **Save order** persists the
 complete project-scoped order through `PUT /api/v1/board/boards/order`; the first board opens
 on each Board view load, regardless of the last selection. Explicit card navigation still opens

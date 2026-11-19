@@ -23,6 +23,12 @@ public static class AppSettingsRoutes
 
         if (!allowWrites) return;
 
+        app.MapPut("/api/v1/settings/context-nudge", (UpdateContextNudgeRequest request, HttpContext context) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Ok(UpdateContextNudge(request, Config.Store));
+        }).WithName("UpdateContextNudge");
+
         app.MapGet("/api/v1/settings/security-challenge", (HttpContext context, SettingsPresenceService presence) =>
         {
             context.Response.Headers.CacheControl = "no-store";
@@ -70,6 +76,21 @@ public static class AppSettingsRoutes
         // stale client-side copy (remoteAccess, mcpEnabled, theme, …).
         app.MapPost("/api/v1/settings/computer-name", (UpdateComputerNameDto dto) =>
             Results.Ok(UpdateComputerName(dto, Config.Store))).WithName("UpdateComputerName");
+    }
+
+    internal static UpdateContextNudgeRequest UpdateContextNudge(UpdateContextNudgeRequest request, SettingsFile store)
+    {
+        using var lease = store.AcquireWriteLock();
+        var settings = store.LoadFresh();
+        ApplyContextNudge(settings, request.CreateVibeStoryTracking, request.CreateVibeStoryTrackingCustomEnvs);
+        store.Save(settings);
+        return new(settings.CreateVibeStoryTracking, settings.CreateVibeStoryTrackingCustomEnvs);
+    }
+
+    private static void ApplyContextNudge(Settings settings, bool? builtIn, bool? custom)
+    {
+        if (builtIn.HasValue) settings.CreateVibeStoryTracking = builtIn.Value;
+        if (custom.HasValue) settings.CreateVibeStoryTrackingCustomEnvs = custom.Value;
     }
 
     internal static bool RequiresPresence(AppSettingsDto request, Settings settings) =>
@@ -171,10 +192,7 @@ public static class AppSettingsRoutes
             settings.UseVsCodeTheme = settingsDto.UseVsCodeTheme;
             if (settingsDto.VsCodeSpellCheck.HasValue)
                 settings.VsCodeSpellCheck = settingsDto.VsCodeSpellCheck.Value;
-            if (settingsDto.CreateVibeStoryTracking.HasValue)
-                settings.CreateVibeStoryTracking = settingsDto.CreateVibeStoryTracking.Value;
-            if (settingsDto.CreateVibeStoryTrackingCustomEnvs.HasValue)
-                settings.CreateVibeStoryTrackingCustomEnvs = settingsDto.CreateVibeStoryTrackingCustomEnvs.Value;
+            ApplyContextNudge(settings, settingsDto.CreateVibeStoryTracking, settingsDto.CreateVibeStoryTrackingCustomEnvs);
             // MCP registration is always on. Keep the field true for old clients/settings files.
             settings.McpEnabled = true;
             // Store the raw name (blank allowed). The machine-name default is resolved

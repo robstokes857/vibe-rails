@@ -6,6 +6,56 @@ const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAw
 const DESCRIPTION = 'Repro screenshot\n![Screenshot.png](attachment:att_image)\n<img src=x onerror="window.__injected=true">';
 
 for (const width of [1440, 390]) {
+    test(`permanent ID copies the saved key at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 950 });
+        await page.addInitScript(() => {
+            window.copiedIds = [];
+            Object.defineProperty(navigator, 'clipboard', { value: { writeText: async text => window.copiedIds.push(text) } });
+        });
+        await openBoard(page, {
+            mainBoard: { shared: width === 390 },
+            onCard: card => Object.assign(card, { key: 'VB-ABCDE-123', displayId: 'VIBE-123', shared: width === 390 })
+        });
+        await page.locator('.board-card').click();
+        const editor = page.locator('[data-board-card-editor]');
+        if (width === 1440) await editor.locator('#board-card-display-id').fill('RENAMED-7');
+        const copy = editor.getByRole('button', { name: 'Copy permanent ID', exact: true });
+        await expect(copy).toBeVisible();
+        await copy.focus();
+        await copy.press('Enter');
+        await expect.poll(() => page.evaluate(() => window.copiedIds)).toEqual(['VB-ABCDE-123']);
+        await expect(copy).toHaveAttribute('data-copy-state', 'success');
+        await expect(editor.locator('[data-board-permanent-id-status]')).toHaveText('Permanent ID copied.');
+        const bounds = await copy.boundingBox();
+        expect(bounds.x).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+        expect(bounds.height).toBeGreaterThanOrEqual(width === 390 ? 44 : 32);
+        await page.screenshot({ path: testInfo.outputPath(`permanent-id-${width}.png`) });
+        await expect(copy).not.toHaveAttribute('data-copy-state', 'success');
+    });
+}
+
+for (const missing of [false, true]) {
+    test(`permanent ID reports ${missing ? 'missing' : 'blocked'} clipboard access`, async ({ page }) => {
+        await page.addInitScript(missing => {
+            Object.defineProperty(navigator, 'clipboard', { value: missing ? undefined : {
+                writeText: async () => { throw new Error('denied'); }
+            } });
+        }, missing);
+        await openBoard(page);
+        await page.locator('.board-card').click();
+        const editor = page.locator('[data-board-card-editor]');
+        const copy = editor.getByRole('button', { name: 'Copy permanent ID', exact: true });
+        await copy.click();
+        const status = editor.locator('[data-board-permanent-id-status]');
+        await expect(status).toBeVisible();
+        await expect(status).toHaveText('Could not copy. Select the permanent ID and copy it manually.');
+        await expect(copy).toBeEnabled();
+        await expect(copy).not.toHaveAttribute('data-copy-state', 'success');
+    });
+}
+
+for (const width of [1440, 390]) {
     test(`offline spelling corrects native fields and preserves undo at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         await openBoard(page, { appSettings: { vsCodeSpellCheck: true } });
@@ -2085,6 +2135,10 @@ async function openBoard(page, { active = false, assignee = null, relatedCards =
         const payloads = {
             '/api/v1/context': { isInGit: true, rootPath: 'C:/board-fixture', launchDirectory: 'C:/board-fixture' },
             '/api/v1/settings': appSettings,
+            '/api/v1/board/project-context': { message: 'Repository rules', revision: 1 },
+            '/api/v1/board/app-context': { message: '', revision: 0 },
+            '/api/v1/board/boards/brd_main/every-context': { message: '', revision: 0 },
+            '/api/v1/board/boards/brd_main/context': { revision: 0, context: { defaultMessage: '', typeOverrides: [] } },
             '/api/v1/environments': { environments: [{ id: 7, name: 'Card review', cli: 'claude' }] },
             // The server answers with a list; the shared editor's Projects picker maps over it (VIBE-307).
             '/api/v1/launch-projects': [],
@@ -2579,162 +2633,94 @@ for (const width of [1440, 390]) {
         await expect(pin).toHaveAttribute('aria-pressed', 'false');
     });
 
-    test(`Context tab shows every level broadest first and saves each with its own revision at ${width}px`, async ({ page }, testInfo) => {
+    test('Context workspace saves the board scopes with independent revisions at ' + width + 'px', async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         await openBoard(page);
-        let saved = { message: '', revision: 0 };
-        let appContext = { message: 'Applies everywhere', revision: 3 };
-        let failSave = false;
-        const writes = [];
-        await page.route('**/api/v1/board/boards/brd_main/every-context', async route => {
-            if (route.request().method() === 'PUT') {
-                writes.push(route.request().postDataJSON());
-                if (failSave) return route.fulfill({ status: 500, json: { error: 'Context save failed.' } });
-                expect(writes.at(-1).expectedRevision).toBe(saved.revision);
-                saved = { message: writes.at(-1).message, revision: saved.revision + 1 };
-            }
-            return route.fulfill({ json: saved });
-        });
-        await page.route('**/api/v1/board/app-context', async route => {
+        let boardState = { message: '', revision: 0 };
+        let appState = { message: 'Applies everywhere', revision: 3 };
+        let cardState = { context: { defaultMessage: 'Card instructions', typeOverrides: [] }, revision: 0 };
+        let failBoardSave = false;
+        await page.route('**/api/v1/board/boards/brd_main/every-context', route => {
             if (route.request().method() === 'PUT') {
                 const body = route.request().postDataJSON();
-                expect(body.expectedRevision).toBe(appContext.revision);
-                appContext = { message: body.message, revision: appContext.revision + 1 };
+                expect(body.expectedRevision).toBe(boardState.revision);
+                if (failBoardSave) return route.fulfill({ status: 500, json: { error: 'Context save failed.' } });
+                boardState = { message: body.message, revision: boardState.revision + 1 };
             }
-            return route.fulfill({ json: appContext });
+            return route.fulfill({ json: boardState });
         });
-        let cardContext = { revision: 0, context: { defaultMessage: 'Board-only instructions', typeOverrides: [] } };
+        await page.route('**/api/v1/board/app-context', route => {
+            if (route.request().method() === 'PUT') {
+                const body = route.request().postDataJSON();
+                expect(body.expectedRevision).toBe(appState.revision);
+                appState = { message: body.message, revision: appState.revision + 1 };
+            }
+            return route.fulfill({ json: appState });
+        });
         await page.route('**/api/v1/board/boards/brd_main/context', route => {
             if (route.request().method() === 'PUT') {
                 const body = route.request().postDataJSON();
-                expect(body.expectedRevision).toBe(cardContext.revision);
-                cardContext = { revision: cardContext.revision + 1, context: body.context };
+                expect(body.expectedRevision).toBe(cardState.revision);
+                cardState = { context: body.context, revision: cardState.revision + 1 };
             }
-            return route.fulfill({ json: cardContext });
+            return route.fulfill({ json: cardState });
         });
-        const open = async () => {
-            await page.getByRole('button', { name: 'Board settings', exact: true }).click();
-            await page.getByRole('tab', { name: 'Context', exact: true }).click();
-            await expect(page.getByRole('tab', { name: 'Context', exact: true })).toHaveAttribute('aria-selected', 'true');
-            await expect(page.getByRole('tab', { name: 'Context', exact: true })).toHaveClass(/\bactive\b/);
-            await expect(page.getByRole('tab', { name: 'General', exact: true })).toHaveAttribute('aria-selected', 'false');
-        };
-        await open();
-        for (const name of ['App context', 'Every Context', 'Agent context']) {
-            await expect(page.getByRole('tab', { name, exact: true })).toHaveCount(0);
-        }
-        const contextPanel = page.locator('#board-settings-context');
-        // VIBE-229: one editor, broadest level first, each saying which launches it reaches.
-        await expect(contextPanel.locator('[data-context-level] > summary, [data-context-level] > h6')).toHaveText(['App context', 'Board context', 'Card context', 'Card type context']);
-        const disclosures = contextPanel.locator('details');
-        await expect(disclosures).toHaveCount(8);
-        await expect(contextPanel.locator('details[open] > summary')).toHaveText(['App context']);
-        await expect(contextPanel.getByRole('button', { name: /Save/ })).toHaveCount(1);
-        await page.screenshot({ path: testInfo.outputPath('context-default.png'), animations: 'disabled' });
-        await contextPanel.locator('[data-context-level="board"] > summary').focus();
-        await page.keyboard.press('Enter');
-        await contextPanel.locator('[data-context-level="card"] > summary').click();
-        await expect(contextPanel.locator('[data-context-level="app"] [data-context-reach]')).toContainText('launches with no board');
-        await expect(contextPanel.locator('[data-context-level="board"] [data-context-reach]')).toContainText('currently selected board');
-        const appMessage = page.getByLabel('App context', { exact: true });
-        const message = page.getByLabel('Board context', { exact: true });
-        const cardMessage = page.getByLabel('Card context', { exact: true });
-        await expect(appMessage).toHaveValue('Applies everywhere');
-        await expect(message).toHaveValue('');
-        await expect(message).toHaveAttribute('maxlength', '4000');
-        await expect(cardMessage).toHaveValue('Board-only instructions');
-        await cardMessage.fill('Unsaved Card context draft');
-        await appMessage.fill('Unsaved App draft');
-        const text = 'Use project conventions.\n</textarea><img src=x onerror="window.__everyContextXss=1">';
-        await message.fill(text);
-        await page.getByRole('tab', { name: 'General', exact: true }).click();
+        await page.getByRole('button', { name: 'Board settings', exact: true }).click();
         await page.getByRole('tab', { name: 'Context', exact: true }).click();
-        await expect(message).toHaveValue(text);
-        await page.getByRole('button', { name: 'Save context', exact: true }).click();
-        await expect.poll(() => saved.message).toBe(text);
-        expect(Object.keys(writes[0])).toEqual(['message', 'expectedRevision']);
-        // One action saves changed levels, retaining every draft and its own revision.
-        await expect(cardMessage).toHaveValue('Unsaved Card context draft');
-        await expect(appMessage).toHaveValue('Unsaved App draft');
-        await expect.poll(() => appContext.message).toBe('Unsaved App draft');
-        await expect.poll(() => cardContext.context.defaultMessage).toBe('Unsaved Card context draft');
-        await expect(page.getByRole('button', { name: 'Save context', exact: true })).toBeEnabled();
-        await page.evaluate(() => window.app.closeModal());
-        await open();
-        await contextPanel.locator('[data-context-level="board"] > summary').click();
-        await expect(message).toHaveValue(text);
-        await expect(appMessage).toHaveValue('Unsaved App draft');
-        expect(await page.evaluate(() => window.__everyContextXss)).toBeUndefined();
-        const panel = page.locator('[data-board-board-editor]');
-        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-        await page.screenshot({ path: testInfo.outputPath('context-levels.png'), animations: 'disabled' });
-        failSave = true;
-        await message.fill('Preserve this draft after failure');
+        await page.getByRole('link', { name: 'Edit launch context for this board' }).click();
+
+        const editor = page.locator('[data-context-editor]');
+        await expect(editor.locator('[data-context-board-picker]')).toHaveValue('brd_main');
+        await expect(editor.locator('[data-context-level] > summary')).toHaveText([
+            'App context', 'Project context', 'Board context', 'Card context', 'Card type context'
+        ]);
+        await expect(editor.locator('details[open] > summary')).toHaveText(['App context']);
+        await editor.locator('[data-context-level="board"] > summary').press('Enter');
+        await editor.locator('[data-context-level="card"] > summary').click();
+        await editor.locator('[data-context-level="type"] > summary').click();
+        await editor.locator('[data-context-level="type"] summary').filter({ hasText: /^Bug$/ }).click();
+        const appMessage = editor.getByLabel('App context', { exact: true });
+        const boardMessage = editor.getByLabel('Board context', { exact: true });
+        const cardMessage = editor.getByLabel('Card context', { exact: true });
+        const save = editor.getByRole('button', { name: 'Save context', exact: true });
+        await expect(appMessage).toHaveValue('Applies everywhere');
+        await expect(boardMessage).toHaveAttribute('maxlength', '4000');
+        await expect(cardMessage).toHaveValue('Card instructions');
+
+        const text = 'Use project conventions.\n</textarea><img src=x onerror="window.__everyContextXss=1">';
+        await boardMessage.fill(text);
         await appMessage.fill('Saved despite Board failure');
-        await page.getByRole('button', { name: 'Save context', exact: true }).click();
+        await cardMessage.fill('Read conventions');
+        await editor.getByLabel('Bug cards', { exact: true }).selectOption('append');
+        await editor.getByLabel('Bug card type context', { exact: true }).fill('Reproduce the issue first.');
+        failBoardSave = true;
+        await save.click();
         await expect(page.getByText('Context save failed.', { exact: true })).toBeVisible();
-        await expect(message).toHaveValue('Preserve this draft after failure');
-        await expect.poll(() => appContext.message).toBe('Saved despite Board failure');
-        const appRevision = appContext.revision;
-        await expect(page.getByRole('button', { name: 'Save context', exact: true })).toBeEnabled();
-        failSave = false;
-        await message.fill('');
-        await page.getByRole('button', { name: 'Save context', exact: true }).click();
-        await expect.poll(() => saved.message).toBe('');
-        expect(appContext.revision).toBe(appRevision);
-        await page.evaluate(() => window.app.closeModal());
-        await open();
-        await expect(message).toHaveValue('');
+        await expect(boardMessage).toHaveValue(text);
+        await expect.poll(() => appState.message).toBe('Saved despite Board failure');
+        await expect.poll(() => cardState.context.defaultMessage).toBe('Read conventions');
+        expect(cardState.context.typeOverrides.find(item => item.type === 'bug')).toEqual({
+            type: 'bug', mode: 'append', message: 'Reproduce the issue first.'
+        });
+
+        failBoardSave = false;
+        await save.click();
+        await expect(save).toBeDisabled();
+        expect(boardState).toEqual({ message: text, revision: 1 });
+        expect(appState.revision).toBe(4);
+        expect(cardState.revision).toBe(1);
+
+        await page.getByRole('navigation').getByRole('link', { name: 'Context', exact: true }).click();
+        await editor.locator('[data-context-level="board"] > summary').click();
+        await expect(boardMessage).toHaveValue(text);
+        expect(await page.evaluate(() => window.__everyContextXss)).toBeUndefined();
+        expect(await editor.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath('context-levels.png'), animations: 'disabled' });
     });
 }
 
-test('Card and Card type context persist default and per-type choices and preserve a conflicted draft', async ({ page }, testInfo) => {
-    await openBoard(page);
-    let saved = { revision: 0, context: { defaultMessage: '', typeOverrides: [] } };
-    let conflict = false;
-    await page.route('**/api/v1/board/boards/brd_main/context', async route => {
-        if (route.request().method() === 'PUT') {
-            if (conflict) return route.fulfill({ status: 409, json: { error: 'Board context changed while you were editing.' } });
-            const body = route.request().postDataJSON();
-            expect(body.expectedRevision).toBe(saved.revision);
-            saved = { revision: saved.revision + 1, context: body.context };
-        }
-        return route.fulfill({ json: saved });
-    });
-    await page.getByRole('button', { name: 'Board settings', exact: true }).click();
-    await page.getByRole('tab', { name: 'Context', exact: true }).click();
-    await page.locator('[data-context-level="card"] > summary').click();
-    await page.getByLabel('Card context', { exact: true }).fill('Read project conventions. <img src=x onerror="window.__contextXss=1">');
-    await page.locator('[data-context-level="type"] summary').filter({ hasText: /^Bug$/ }).click();
-    await page.getByLabel('Bug cards', { exact: true }).selectOption('append');
-    await page.getByLabel('Bug card type context', { exact: true }).fill('Reproduce before changing code.');
-    await page.getByRole('button', { name: 'Save context', exact: true }).click();
-    await expect.poll(() => saved.revision).toBe(1);
-    expect(saved.context.typeOverrides.find(item => item.type === 'bug')).toEqual({ type: 'bug', mode: 'append', message: 'Reproduce before changing code.' });
-    await page.locator('#modal-container [data-action="close-modal"]').first().click();
-    await page.getByRole('button', { name: 'Board settings', exact: true }).click();
-    await page.getByRole('tab', { name: 'Context', exact: true }).click();
-    await page.locator('[data-context-level="card"] > summary').click();
-    await expect(page.getByLabel('Card context', { exact: true })).toHaveValue(saved.context.defaultMessage);
-    await page.locator('[data-context-level="type"] summary').filter({ hasText: /^Bug$/ }).click();
-    await expect(page.getByLabel('Bug cards', { exact: true })).toHaveValue('append');
-    expect(await page.evaluate(() => window.__contextXss)).toBeUndefined();
-    await page.screenshot({ path: testInfo.outputPath('board-context.png') });
-    conflict = true;
-    await page.getByLabel('Card context', { exact: true }).fill('Keep my draft');
-    await page.getByRole('button', { name: 'Save context', exact: true }).click();
-    await expect(page.getByText('Board context changed while you were editing.', { exact: true })).toBeVisible();
-    await expect(page.getByLabel('Card context', { exact: true })).toHaveValue('Keep my draft');
-});
-
 test('Context save waits for loading and preserves edits made during an in-flight save', async ({ page }) => {
     await openBoard(page);
-    await page.route('**/api/v1/board/boards/brd_main/context', route => route.fulfill({
-        json: { revision: 0, context: { defaultMessage: '', typeOverrides: [] } }
-    }));
-    await page.route('**/api/v1/board/boards/brd_main/every-context', route => route.fulfill({
-        json: { revision: 0, message: '' }
-    }));
     let finishLoad;
     let finishSave;
     let saved = { message: 'Original', revision: 4 };
@@ -2751,13 +2737,11 @@ test('Context save waits for loading and preserves edits made during an in-fligh
         }
         return route.fulfill({ json: saved });
     });
-    await page.getByRole('button', { name: 'Board settings', exact: true }).click();
-    await page.getByRole('tab', { name: 'Context', exact: true }).click();
+    await page.getByRole('navigation').getByRole('link', { name: 'Context', exact: true }).click();
     const save = page.locator('[data-context-save]');
     await expect(save).toBeDisabled();
     await expect.poll(() => Boolean(finishLoad)).toBe(true);
     finishLoad();
-    await expect(save).toBeEnabled();
     const message = page.getByLabel('App context', { exact: true });
     await message.fill('First draft');
     await save.click();
@@ -2771,37 +2755,42 @@ test('Context save waits for loading and preserves edits made during an in-fligh
     expect(saved.message).toBe('First draft');
     await save.click();
     await expect.poll(() => saved.message).toBe('Newer draft');
-    await expect(save).toBeEnabled();
-    await save.click();
-    await expect(save).toBeEnabled();
+    await expect(save).toBeDisabled();
     expect(writes).toEqual([
         { message: 'First draft', expectedRevision: 4 },
         { message: 'Newer draft', expectedRevision: 5 }
     ]);
 });
 
-test('Settings reuses the App-only context disclosure and single save action', async ({ page }) => {
-    await openBoard(page);
-    let saved = { message: 'Every launch', revision: 2 };
-    await page.route('**/api/v1/board/app-context', route => {
-        if (route.request().method() === 'PUT') {
-            const body = route.request().postDataJSON();
-            expect(body.expectedRevision).toBe(saved.revision);
-            saved = { message: body.message, revision: saved.revision + 1 };
-        }
-        return route.fulfill({ json: saved });
-    });
-    await page.evaluate(() => window.app.navigate('settings'));
-    await page.getByRole('tab', { name: 'Context', exact: true }).click();
+test('Switching Context boards preserves wider drafts and protects board-specific edits', async ({ page }) => {
+    await openBoard(page, { relatedCards: true });
+    await page.route('**/api/v1/board/boards/brd_sprint/every-context', route =>
+        route.fulfill({ json: { message: 'Sprint instructions', revision: 1 } }));
+    await page.route('**/api/v1/board/boards/brd_sprint/context', route =>
+        route.fulfill({ json: { context: { defaultMessage: '', typeOverrides: [] }, revision: 1 } }));
+    await page.getByRole('navigation').getByRole('link', { name: 'Context', exact: true }).click();
     const editor = page.locator('[data-context-editor]');
-    await expect(editor.locator('details')).toHaveCount(1);
-    await expect(editor.locator('details[open] > summary')).toHaveText(['App context']);
-    await expect(editor.getByRole('button')).toHaveCount(1);
-    await editor.getByLabel('App context', { exact: true }).fill('All projects');
-    await editor.getByRole('button', { name: 'Save context', exact: true }).click();
-    await expect.poll(() => saved.message).toBe('All projects');
+    const appMessage = editor.getByLabel('App context', { exact: true });
+    const boardMessage = editor.getByLabel('Board context', { exact: true });
+    const projectMessage = editor.getByLabel('Project context', { exact: true });
+    const picker = editor.locator('[data-context-board-picker]');
+    await appMessage.fill('All projects');
+    await editor.locator('[data-context-level="project"] > summary').click();
+    await projectMessage.fill('This repository only');
+    await editor.locator('[data-context-level="board"] > summary').click();
+    await boardMessage.fill('Old board draft');
+    await picker.selectOption('brd_sprint');
+    await page.getByRole('button', { name: 'Keep editing' }).click();
+    await expect(picker).toHaveValue('brd_main');
+    await expect(boardMessage).toHaveValue('Old board draft');
+    await picker.selectOption('brd_sprint');
+    await page.getByRole('button', { name: 'Discard changes' }).click();
+    await expect(picker).toHaveValue('brd_sprint');
+    await editor.locator('[data-context-level="board"] > summary').click();
+    await expect(boardMessage).toHaveValue('Sprint instructions');
+    await expect(appMessage).toHaveValue('All projects');
+    await expect(projectMessage).toHaveValue('This repository only');
 });
-
 // VIBE-338: an agent's skip shows on the tile and the rail until a person dismisses it; the rail's
 // steps read as rows with status pills; a check's receipt comment wears the VibeRails mark.
 for (const width of [375, 1280]) test(`agent skip, step rows and check receipt read cleanly at ${width}px`, async ({ page }, testInfo) => {

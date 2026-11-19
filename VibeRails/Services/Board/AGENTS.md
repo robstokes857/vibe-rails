@@ -1,15 +1,13 @@
 # Working on Vibe Board
 
-User context has four levels, broadest first (VIBE-229): **App** (every LLM launch), **Board**
-(stored as the board's Every Context), **Card** (the Agent context default message) and **Card type**
-(its per-type override). `Services/Terminal/Commands/ContextLevels.cs` resolves and formats them;
-every path (card prompt, plain launch prefix, context estimate, `get_board_card`) goes through it so
-they show the same labelled block. App and Board apply only under the launch's Nudge switch; Card and
-Card type always reach card agents. A card launch composes the block into its prompt and sets
-`ContextIncluded`, so the tab child does not prepend App and Board again. Board settings' **Context**
-tab and Settings' **Context** tab share one editor. Each level saves with its own revision behind
-`IBoardStore`; ordinary Agent context writes preserve Every Context, and App context is one row in
-`BoardAppContextSettings`.
+The top navigation's **Context** workspace edits five levels in order: **App**, **Project**,
+**Board**, **Card** and **Card type**. The Board settings Context link opens that workspace with
+its board selected. `Services/Terminal/Commands/ContextLevels.cs` renders the same labelled
+block for card prompts, ordinary launches, context estimates and `get_board_card`. App and Board
+follow the launch's Nudge switch. Project follows the repository, and the card levels apply to
+card agents. Card launches set `ContextIncluded` after composing the prompt so the child adds
+no duplicate context. App, Project, Board and the shared Card/Card type record save with
+independent revisions behind `IBoardStore`.
 
 Cards have a local pin toggle. Pins preserve their slots during automatic activity promotion,
 including when another card is promoted; explicit dragging still moves a pinned card. Existing

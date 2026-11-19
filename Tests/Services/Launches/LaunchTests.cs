@@ -133,6 +133,8 @@ public sealed class LaunchTests : IDisposable
         var boards = new Mock<IBoardStore>(MockBehavior.Strict);
         boards.Setup(b => b.GetAppContextSettingsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AppContextSettingsRecord("App instructions", 1));
+        boards.Setup(b => b.GetProjectContextSettingsAsync(root, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProjectContextSettingsRecord("Repository instructions", 1));
         boards.Setup(b => b.GetEveryContextSettingsAsync(root, "board", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BoardEveryContextSettingsRecord("Board instructions", 1));
         var launch = new LaunchService(store, Mock.Of<IAutomationScriptService>(), boards.Object,
@@ -144,6 +146,7 @@ public sealed class LaunchTests : IDisposable
         Assert.True(run.Snapshot.Context.ContextIncluded);
         Assert.Equal(nudge && string.IsNullOrWhiteSpace(message), composed.Contains(VibeRails.Services.Terminal.VibeStoryTrackingPrompt.Guidance));
         Assert.Equal(nudge, composed.Contains("App instructions"));
+        Assert.Contains("Repository instructions", composed);
         Assert.Equal(nudge, composed.Contains("Board instructions"));
         var resolved = await new VibeRails.Services.Environments.PromptPlaceholderService().ResolveLaunchAsync(
             NativeLaunchRunner.ComposePrompt(run.Snapshot), new(root, UserMessage: run.Snapshot.Context.UserMessage), Ct);

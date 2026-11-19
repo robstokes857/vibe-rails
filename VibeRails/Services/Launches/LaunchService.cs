@@ -248,8 +248,8 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
                 var nudge = (launchSettings ?? Config.LoadFresh)().CreateVibeStoryTracking;
                 if (nudge && string.IsNullOrWhiteSpace(prompt) && string.IsNullOrWhiteSpace(context.UserMessage))
                     prompt = VibeStoryTrackingPrompt.Guidance;
-                if (nudge)
-                    prompt = VibeRails.Services.Terminal.ContextLevels.Prefix(await VibeRails.Services.Terminal.ContextLevels.ResolveNudgedAsync(boards, context.Root, context.BoardId, ct)) + prompt;
+                var levels = await VibeRails.Services.Terminal.ContextLevels.ResolveForLaunchAsync(boards, context.Root, context.BoardId, nudge, ct);
+                prompt = VibeRails.Services.Terminal.ContextLevels.PrependToPrompt(levels, prompt, !string.IsNullOrWhiteSpace(context.UserMessage));
                 snapshot = snapshot with { Context = context with { ComposedPrompt = prompt, ContextIncluded = true } };
             }
         }

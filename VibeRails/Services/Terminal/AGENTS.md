@@ -177,20 +177,21 @@ backend assembly). Update that file using the model-update checklist in
 `vibe-books/custom_envs/CLI_OPTIONS.md`. Speed is optional JSON in existing Board options;
 older cards need no migration. Account eligibility remains enforced by Codex.
 
-General Settings' **Vibe Board Nudge** defaults on for default/base LLM launches; the independent
+The Context workspace's **Vibe Board Nudge** defaults on for default/base LLM launches and Agent
+presets. The independent
 **Vibe Board Nudge - Custom Envs** defaults off for saved/custom environments. The existing
 `CreateVibeStoryTracking` saved key controls base launches, and `CreateVibeStoryTrackingCustomEnvs`
 controls custom environments; older settings files retain the base choice and default custom off.
 When a managed LLM launch has no
 nonblank initial message or continuation summary, `CommandService` reads the shared settings file
 and uses optional story-tracking guidance as its default prompt only if that launch's switch is on.
-**App context** (Settings → Context) and the board's **Board context** (Board settings → Context)
-are prepended, in that order and in one labelled block (`ContextLevels`, VIBE-229), to every managed
-CLI launch whose corresponding nudge switch is on, including explicit tasks, Agents, Automations and
-continuation summaries. Both are stored behind `IBoardStore` in board.db, each with its own revision.
+**App context** and **Board context** follow the Nudge, including for explicit tasks, Agents,
+Automations and continuations. **Project context** follows the Git repository and is included with
+either Nudge setting. `ContextLevels` composes applicable instructions as App, Project, Board,
+Card and Card type in a single block. These settings live behind `IBoardStore` in board.db.
 Browser launches carry the currently selected board; native launches without a board selection use
 the project's first existing board; App context applies with no project or board at all. A card
-launch already carries the full block (App, Board, Card, Card type) in its prompt and sets
+launch already carries its context block in its prompt and sets
 `ContextIncluded`, so the child adds nothing. A card-triggered Automation Worker gets the same block
 from `CliLoop` (`ComposeAutomationPrompt`'s `userContext`) and passes `contextIncluded` through
 `RunCliWithWebAsync`. Empty levels send nothing. Task/summary precedence is

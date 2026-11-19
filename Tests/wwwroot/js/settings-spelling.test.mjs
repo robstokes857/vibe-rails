@@ -36,7 +36,7 @@ test('spell check sends explicit on/off choices through the existing settings sa
     for (const enabled of [true, false]) {
         const { controller, writes } = fixture();
         await controller.saveSettings(false, '', false, true, '', '', 'subscription', '', '', '',
-            'subscription', true, true, true, true, false, true, false, {}, enabled);
+            'subscription', true, true, true, true, false, {}, enabled);
         assert.equal(writes.length, 1);
         assert.equal(writes[0].url, '/api/v1/settings');
         assert.equal(writes[0].body.vsCodeSpellCheck, enabled);

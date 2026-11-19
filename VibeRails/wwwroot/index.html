@@ -92,6 +92,10 @@
                 <i class="fa-solid fa-robot me-1"></i>
                 <span>AI Agents</span>
             </button>
+            <a href="?view=context" class="app-subnav-link" data-action="navigate" data-view="context" title="Context">
+                <i class="fa-solid fa-layer-group me-1" aria-hidden="true"></i>
+                <span>Context</span>
+            </a>
 
             <button class="app-subnav-link" data-action="navigate" data-view="mcp"
                 title="MCP Explorer — inspect and call tools on the local MCP server">
@@ -1095,6 +1099,18 @@
         </div>
     </template>
 
+    <template id="context-template">
+        <div class="view context-view" data-view="context">
+            <header class="vb-page-header">
+                <div class="vb-page-heading">
+                    <h1 class="vb-page-title">Context</h1>
+                    <p class="vb-page-subtitle" data-context-project></p>
+                </div>
+            </header>
+            <section class="context-workspace mx-auto" aria-label="Launch instructions" data-context-workspace></section>
+        </div>
+    </template>
+
     <template id="settings-template">
         <div class="view settings-view" data-view="settings">
             <header class="vb-page-header">
@@ -1109,8 +1125,6 @@
                             aria-controls="settings-panel-general" aria-selected="true" data-settings-tab="general">General</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-llm"
                             aria-controls="settings-panel-llm" aria-selected="false" tabindex="-1" data-settings-tab="llm">LLMs</button>
-                        <button type="button" class="settings-tab" role="tab" id="settings-tab-context"
-                            aria-controls="settings-panel-context" aria-selected="false" tabindex="-1" data-settings-tab="context">Context</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-keys"
                             aria-controls="settings-panel-keys" aria-selected="false" tabindex="-1" data-settings-tab="keys">KEYS</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-setup"
@@ -1119,16 +1133,6 @@
                             aria-controls="settings-panel-ai-board-manager" aria-selected="false" tabindex="-1" data-settings-tab="ai-board-manager">AI board manager</button>
                     </div>
                 </div>
-            </div>
-            <div class="settings-panel" id="settings-panel-context" role="tabpanel" aria-labelledby="settings-tab-context" tabindex="0" hidden>
-                <div class="row justify-content-center"><div class="col-md-8 col-lg-6">
-                    <section class="sandbox-item-card text-start" data-settings-context>
-                        <h2 class="sandbox-item-name">Context</h2>
-                        <p>Instructions you add to LLM launches, from the broadest level to the most specific: App, Board, Card, then Card type.
-                            App context is set here. Each board's settings, under Context, show all four levels for that board.</p>
-                        <div data-settings-context-editor></div>
-                    </section>
-                </div></div>
             </div>
             <div class="settings-panel" id="settings-panel-ai-board-manager" role="tabpanel" aria-labelledby="settings-tab-ai-board-manager" tabindex="0" hidden>
                 <div class="row justify-content-center"><div class="col-md-8 col-lg-6">
@@ -1477,26 +1481,7 @@
                                 <small class="form-text text-muted">Disable background animations to reduce CPU
                                     usage</small>
                             </div>
-                            <div class="mb-4">
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="setting-create-vibe-story-tracking" checked>
-                                    <label class="form-check-label" for="setting-create-vibe-story-tracking">Vibe Board nudge — built-in CLIs</label>
-                                </div>
-                                <small class="form-text text-muted">When a built-in CLI starts with no message of its own, open with the Vibe Board prompt:
-                                    consider tracking this work as a Vibe Story (the agent decides). Agents always start with their own
-                                    message, so this tracking prompt never applies to them. Also include App context and the
-                                    selected board's Board context on every built-in CLI launch, even with a starting message.
-                                    Card and Card type context reach card agents either way. On by default; applies to new sessions.</small>
-                            </div>
-                            <div class="mb-4">
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="setting-create-vibe-story-tracking-custom-envs">
-                                    <label class="form-check-label" for="setting-create-vibe-story-tracking-custom-envs">Vibe Board nudge — Quick Launches</label>
-                                </div>
-                                <small class="form-text text-muted">The same opening prompt for a Quick Launch started with no message or continuation summary.
-                                    Also include App context and the selected board's Board context on every saved setup launch,
-                                    including Agents with a starting message. Off by default; applies to new sessions.</small>
-                            </div>
+                            <div class="mb-4"><a href="?view=context" data-open-context>Launch context and Vibe Board Nudge</a></div>
                             <div class="mb-4">
                                 <label class="form-label" for="setting-api-key">API Key</label>
                                 <input type="text" class="form-control" id="setting-api-key"
@@ -4595,7 +4580,16 @@
                     padding-bottom: 0.5rem;
                     border-bottom: 1px solid var(--border-color, #3b3b3b);
                 }
-                .board-permanent-id { margin: 0.45rem 0 0.75rem; overflow-wrap: anywhere; }
+                .board-permanent-id { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin: 0.45rem 0 0.75rem; }
+                .board-permanent-id > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+                .board-permanent-id-copy.btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 32px; min-width: 32px; min-height: 32px; padding: 0; border-radius: var(--radius-control); }
+                .board-permanent-id-copy [data-copy-check],
+                .board-permanent-id-copy[data-copy-state="success"] [data-copy-icon] { display: none; }
+                .board-permanent-id-copy[data-copy-state="success"] [data-copy-check] { display: initial; }
+                .board-permanent-id-copy[data-copy-state="success"] { color: var(--tone-success-fg); }
+                @media (max-width: 767px), (pointer: coarse) {
+                    .board-permanent-id-copy.btn { width: 44px; min-width: 44px; min-height: 44px; }
+                }
                 .board-card-identity-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 0.6rem; }
                 .board-card-identity-actions .board-agent-provenance { min-width: 0; overflow-wrap: anywhere; }
                 .board-ghost-recheck { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; }

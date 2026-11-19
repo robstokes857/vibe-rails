@@ -1,117 +1,129 @@
-// Production frontend with intercepted settings persistence; no backend, database or CLI.
 const { test, expect } = require('@playwright/test');
 
-for (const baseEnabled of [false, true]) {
-    for (const customEnabled of [false, true]) {
-        test(`independent Board nudges save and reload: base=${baseEnabled}, custom=${customEnabled}`, async ({ page }) => {
-            await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'board-nudge-fixture'));
-            await page.routeWebSocket('**/api/v1/events/ws*', () => {});
-            let settings = { apiKey: '', computerName: '', mcpEnabled: true };
-            const saves = [];
-            await page.route('**/api/v1/**', async route => {
-                const request = route.request();
-                const pathname = new URL(request.url()).pathname;
-                if (pathname === '/api/v1/settings') {
-                    if (request.method() === 'POST') {
-                        saves.push(request.postDataJSON());
-                        settings = { ...settings, ...saves.at(-1) };
-                    }
-                    return route.fulfill({ json: settings });
-                }
-                const payloads = {
-                    '/api/v1/context': { isInGit: false, rootPath: 'C:/fixture', launchDirectory: 'C:/fixture' },
-                    '/api/v1/settings/pin/status': { isSet: false },
-                    '/api/v1/settings/remote-link': { status: 'idle' },
-                    '/api/v1/environments': { environments: [] },
-                    '/api/v1/llm-picker/preferences': { items: [] }
-                };
-                return route.fulfill({ json: payloads[pathname] || {} });
-            });
-
-            await page.goto('/?view=settings', { waitUntil: 'domcontentloaded' });
-            const root = page.locator('#app-content [data-view="settings"]');
-            const base = root.getByRole('checkbox', { name: 'Vibe Board nudge — built-in CLIs', exact: true });
-            const custom = root.getByRole('checkbox', { name: 'Vibe Board nudge — Quick Launches', exact: true });
-            const save = root.locator('#settings-save-button');
-            await expect(base).toBeChecked();
-            await expect(custom).not.toBeChecked();
-            await expect(save).toBeDisabled();
-
-            // Each switch alone changes the dirty state, and restoring it clears the draft.
-            await base.uncheck();
-            await expect(save).toBeEnabled();
-            await base.check();
-            await expect(save).toBeDisabled();
-            await custom.check();
-            await expect(save).toBeEnabled();
-            await custom.uncheck();
-            await expect(save).toBeDisabled();
-
-            await base.setChecked(baseEnabled);
-            await custom.setChecked(customEnabled);
-            // Save even the default combination through an unrelated change.
-            await root.locator('#setting-computer-name').fill('Fixture machine');
-            await save.click();
-            await expect(save).toBeDisabled();
-            expect(saves).toHaveLength(1);
-            expect(saves[0].createVibeStoryTracking).toBe(baseEnabled);
-            expect(saves[0].createVibeStoryTrackingCustomEnvs).toBe(customEnabled);
-            await expect(base).toBeChecked({ checked: baseEnabled });
-            await expect(custom).toBeChecked({ checked: customEnabled });
-
-            await page.reload({ waitUntil: 'domcontentloaded' });
-            await expect(page.locator('#app-content > *').first()).toBeAttached();
-            await page.evaluate(() => window.app.navigate('settings'));
-            await expect(base).toBeChecked({ checked: baseEnabled });
-            await expect(custom).toBeChecked({ checked: customEnabled });
-            await expect(save).toBeDisabled();
-        });
-    }
-}
-
-// VIBE-229: App context is edited in Settings with the same editor a board's Context tab uses.
-test('Settings Context tab edits App context alone and keeps the Settings form clean', async ({ page }, testInfo) => {
-    await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'board-nudge-fixture'));
+async function installFixture(page, { isInGit = true, boards = [] } = {}) {
+    await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'context-fixture'));
     await page.routeWebSocket('**/api/v1/events/ws*', () => {});
-    let appContext = { message: 'Existing rule', revision: 2 };
-    const settingsSaves = [];
+    const writes = [];
+    const states = {
+        '/api/v1/settings': { apiKey: '', computerName: 'Fixture machine', mcpEnabled: true },
+        '/api/v1/board/app-context': { message: 'Existing app rule', revision: 2 },
+        '/api/v1/board/project-context': { message: 'Existing repo rule', revision: 3 }
+    };
     await page.route('**/api/v1/**', async route => {
         const request = route.request();
-        const pathname = new URL(request.url()).pathname;
-        if (pathname === '/api/v1/board/app-context') {
-            if (request.method() === 'PUT') {
-                const body = request.postDataJSON();
-                expect(body.expectedRevision).toBe(appContext.revision);
-                appContext = { message: body.message, revision: appContext.revision + 1 };
-            }
-            return route.fulfill({ json: appContext });
+        const url = new URL(request.url());
+        const path = url.pathname;
+        if (path === '/api/v1/board/boards') {
+            expect(url.searchParams.get('existingOnly')).toBe('true');
+            return route.fulfill({ json: { boards } });
         }
-        if (pathname === '/api/v1/settings' && request.method() === 'POST') settingsSaves.push(request.postDataJSON());
+        if (path === '/api/v1/settings/context-nudge') {
+            const changes = request.postDataJSON();
+            writes.push({ path, changes });
+            Object.assign(states['/api/v1/settings'], changes);
+            return route.fulfill({ json: states['/api/v1/settings'] });
+        }
+        if (states[path]) {
+            if (request.method() === 'PUT') {
+                const changes = request.postDataJSON();
+                writes.push({ path, changes });
+                expect(changes.expectedRevision).toBe(states[path].revision);
+                states[path] = { message: changes.message, revision: states[path].revision + 1 };
+            }
+            return route.fulfill({ json: states[path] });
+        }
         const payloads = {
-            '/api/v1/settings': { apiKey: '', computerName: '', mcpEnabled: true },
-            '/api/v1/context': { isInGit: false, rootPath: 'C:/fixture', launchDirectory: 'C:/fixture' },
+            '/api/v1/context': { isInGit, rootPath: 'C:/fixture-repo', launchDirectory: 'C:/fixture-repo' },
             '/api/v1/settings/pin/status': { isSet: false },
             '/api/v1/settings/remote-link': { status: 'idle' },
-            '/api/v1/environments': { environments: [] },
             '/api/v1/llm-picker/preferences': { items: [] }
         };
-        return route.fulfill({ json: payloads[pathname] || {} });
+        return route.fulfill({ json: payloads[path] || {} });
     });
+    return { writes, states };
+}
 
+test('nav opens the Context workspace and saves both nudge choices independently', async ({ page }) => {
+    const { writes, states } = await installFixture(page);
     await page.goto('/?view=settings', { waitUntil: 'domcontentloaded' });
-    const root = page.locator('#app-content [data-view="settings"]');
-    await root.getByRole('tab', { name: 'Context', exact: true }).click();
-    const panel = root.locator('#settings-panel-context');
-    await expect(panel.locator('[data-context-level] > h6')).toHaveText(['App context']);
-    await expect(panel.locator('[data-context-reach]')).toContainText('launches with no board');
-    const message = panel.getByLabel('App context', { exact: true });
-    await expect(message).toHaveValue('Existing rule');
-    await message.fill('Answer in British English.');
-    await panel.getByRole('button', { name: 'Save App context', exact: true }).click();
-    await expect.poll(() => appContext.message).toBe('Answer in British English.');
-    await expect(page.getByText('App context saved for every launch.', { exact: true })).toBeVisible();
-    // The editor saves on its own; the Settings form has nothing pending and posted nothing.
-    await expect(root.locator('#settings-save-button')).toBeDisabled();
-    expect(settingsSaves).toHaveLength(0);
-    await page.screenshot({ path: testInfo.outputPath('settings-app-context.png'), animations: 'disabled' });
+    const nav = page.getByRole('navigation').getByRole('link', { name: 'Context', exact: true });
+    await expect(page.getByRole('link', { name: 'Launch context and Vibe Board Nudge' })).toBeVisible();
+    await nav.click();
+    await expect(nav).toHaveAttribute('aria-current', 'page');
+    const root = page.locator('#app-content [data-view="context"]');
+    const base = root.getByRole('checkbox', { name: 'Built-in CLIs and Agent presets' });
+    const custom = root.getByRole('checkbox', { name: 'Legacy custom environments' });
+    const save = root.getByRole('button', { name: 'Save context' });
+    await expect(base).toBeChecked();
+    await expect(custom).not.toBeChecked();
+    await expect(save).toBeDisabled();
+
+    await base.uncheck();
+    await expect(save).toBeEnabled();
+    await base.check();
+    await expect(save).toBeDisabled();
+    await custom.check();
+    await save.click();
+    await expect(save).toBeDisabled();
+    await base.uncheck();
+    await save.click();
+    await expect(save).toBeDisabled();
+    expect(writes.map(item => item.changes)).toEqual([
+        { createVibeStoryTrackingCustomEnvs: true },
+        { createVibeStoryTracking: false }
+    ]);
+    expect(states['/api/v1/settings'].computerName).toBe('Fixture machine');
+
+    await page.goto('/?view=context', { waitUntil: 'domcontentloaded' });
+    await expect(base).not.toBeChecked();
+    await expect(custom).toBeChecked();
+    await expect(save).toBeDisabled();
+
+    await base.check();
+    await page.getByRole('navigation').getByRole('button', { name: 'Settings', exact: true }).click();
+    await expect(page.getByRole('alertdialog').getByText('Discard unsaved context?')).toBeVisible();
+    await page.getByRole('button', { name: 'Keep editing' }).click();
+    await expect(base).toBeChecked();
+    await expect(save).toBeEnabled();
+});
+
+for (const width of [390, 1280]) {
+    test('a repository without boards can save Project and App context at ' + width + 'px', async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        const { writes } = await installFixture(page);
+        await page.goto('/?view=context', { waitUntil: 'domcontentloaded' });
+        const editor = page.locator('[data-context-editor]');
+        await expect(page.locator('[data-context-project]')).toHaveText('fixture-repo');
+        await expect(editor.locator('details[open] > summary')).toHaveText(['App context']);
+        await expect(editor.getByLabel('Board to edit')).toHaveText('No editable boards');
+        const appMessage = editor.getByLabel('App context', { exact: true });
+        const projectMessage = editor.getByLabel('Project context', { exact: true });
+        await editor.locator('[data-context-level="project"] > summary').click();
+        await expect(appMessage).toHaveValue('Existing app rule');
+        await expect(projectMessage).toHaveValue('Existing repo rule');
+        await projectMessage.fill('Run the repository tests before asking for review.');
+        await appMessage.fill('Keep final answers short.');
+        await editor.getByRole('button', { name: 'Save context' }).click();
+        await expect(page.getByText('Context saved.', { exact: true })).toBeVisible();
+        expect(writes.find(item => item.path.endsWith('/project-context')).changes).toEqual({
+            message: 'Run the repository tests before asking for review.', expectedRevision: 3
+        });
+        expect(writes.find(item => item.path.endsWith('/app-context')).changes).toEqual({
+            message: 'Keep final answers short.', expectedRevision: 2
+        });
+        expect(await editor.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath('context-workspace.png'), animations: 'disabled' });
+    });
+}
+
+test('outside a repository the Settings shortcut opens Context with App context available', async ({ page }) => {
+    await installFixture(page, { isInGit: false });
+    await page.goto('/?view=settings', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('link', { name: 'Launch context and Vibe Board Nudge' }).click();
+    const editor = page.locator('[data-context-editor]');
+    await expect(page.locator('[data-context-project]')).toHaveText('No Git repository open');
+    await editor.locator('[data-context-level="project"] > summary').click();
+    await expect(editor.getByText('Open a Git repository to edit Project context.')).toBeVisible();
+    await expect(editor.getByLabel('App context', { exact: true })).toHaveValue('Existing app rule');
+    await expect(editor.getByLabel('Project context', { exact: true })).toHaveCount(0);
 });

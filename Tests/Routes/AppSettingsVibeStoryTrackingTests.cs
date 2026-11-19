@@ -31,6 +31,27 @@ public sealed class AppSettingsVibeStoryTrackingTests
         Assert.Null(dto.CreateVibeStoryTrackingCustomEnvs);
     }
 
+    [Fact]
+    public void ContextWorkspaceUpdatesOnlyTheSuppliedNudgeFields()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"viberails-context-nudge-{Guid.NewGuid():N}");
+        try
+        {
+            using var store = new SettingsFile(Path.Combine(directory, "settings.json"));
+            store.Save(new Settings { ComputerName = "Named machine", UseVsCodeTheme = true });
+
+            Assert.Equal(new UpdateContextNudgeRequest(true, true), AppSettingsRoutes.UpdateContextNudge(new(null, true), store));
+            Assert.Equal(new UpdateContextNudgeRequest(false, true), AppSettingsRoutes.UpdateContextNudge(new(false, null), store));
+            var saved = store.LoadFresh();
+            Assert.Equal("Named machine", saved.ComputerName);
+            Assert.True(saved.UseVsCodeTheme);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
     public static TheoryData<bool, bool, bool?, bool?> NudgeSettingsUpdates
     {
         get

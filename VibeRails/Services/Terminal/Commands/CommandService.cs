@@ -102,12 +102,12 @@ public class CommandService : ICommandService
 
     public Task<PreparedTerminalSession> PrepareSessionAsync(LLM llm, string? envName, string[]? extraArgs,
         string? initialPrompt = null, string summary = "", string? sessionId = null, bool authorizeBoardTools = false,
-        Func<Task<IReadOnlyList<ContextLevels.Level>>>? resolveNudgedContext = null) =>
-        PrepareLaunchSessionAsync(llm, envName, extraArgs, initialPrompt, summary, sessionId, authorizeBoardTools, resolveNudgedContext);
+        Func<bool, Task<IReadOnlyList<ContextLevels.Level>>>? resolveContext = null) =>
+        PrepareLaunchSessionAsync(llm, envName, extraArgs, initialPrompt, summary, sessionId, authorizeBoardTools, resolveContext);
 
     public async Task<PreparedTerminalSession> PrepareLaunchSessionAsync(
         LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "",
-        string? sessionId = null, bool authorizeBoardTools = false, Func<Task<IReadOnlyList<ContextLevels.Level>>>? resolveNudgedContext = null, bool suppressNudge = false)
+        string? sessionId = null, bool authorizeBoardTools = false, Func<bool, Task<IReadOnlyList<ContextLevels.Level>>>? resolveContext = null, bool contextIncluded = false)
     {
         if (Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI") == "1")
         {
@@ -221,17 +221,15 @@ public class CommandService : ICommandService
             ? summary
             : initialPrompt;
         var settings = _storyTrackingSettings();
-        var nudgeEnabled = string.IsNullOrEmpty(envName)
-            ? settings.CreateVibeStoryTracking
-            : settings.CreateVibeStoryTrackingCustomEnvs;
-        if (nudgeEnabled && !suppressNudge)
+        if (!contextIncluded)
         {
-            // Story tracking remains a fallback, so its ready-only instruction never
-            // displaces a task. App and Board context accompany tasks and continuations too.
-            // A card prompt already carries its own block, so its launch passes no resolver.
-            if (string.IsNullOrWhiteSpace(prompt))
+            var nudgeEnabled = ContextLevels.NudgeEnabled(settings, !string.IsNullOrEmpty(envName));
+            // Keep the ready-only instruction as a fallback and pass the nudge choice
+            // to the resolver, which includes Project context either way.
+            if (nudgeEnabled && string.IsNullOrWhiteSpace(prompt))
                 prompt = VibeStoryTrackingPrompt.Guidance;
-            prompt = ContextLevels.Prefix(resolveNudgedContext is null ? [] : await resolveNudgedContext()) + prompt;
+            if (resolveContext is not null)
+                prompt = ContextLevels.PrependToPrompt(await resolveContext(nudgeEnabled), prompt);
         }
 
         if (!string.IsNullOrWhiteSpace(prompt))

@@ -169,15 +169,19 @@ public class TerminalRunner
             var boardProject = contextProjectPath;
             if (string.IsNullOrWhiteSpace(boardProject)) boardProject = ParserConfigs.GetRootPath();
             if (string.IsNullOrWhiteSpace(boardProject)) boardProject = workDir;
-            Func<Task<IReadOnlyList<ContextLevels.Level>>>? resolveContext = _boardStore is null || contextIncluded
-                ? null : () => ContextLevels.ResolveNudgedAsync(_boardStore, boardProject, contextBoardId, ct);
+            Func<bool, Task<IReadOnlyList<ContextLevels.Level>>>? resolveContext = _boardStore is null || contextIncluded
+                ? null : async nudge =>
+                {
+                    var project = contextProjectPath ?? await ContextLevels.FindLaunchRepositoryAsync(workDir, ct);
+                    return await ContextLevels.ResolveForLaunchAsync(_boardStore, project, contextBoardId, nudge, ct, boardProject);
+                };
             var preparedSession = launch is null
                 ? await _commandService.PrepareSessionAsync(llm, envName, extraArgs, initialPrompt, summary, sessionId,
                     authorizeBoardTools, resolveContext)
                 // A launch snapshot normally carries its composed nudge and context. One queued
                 // without them (ContextIncluded off: git-hook enqueue, VIBE-296) gets them here.
                 : await _commandService.PrepareLaunchSessionAsync(llm, envName, extraArgs, initialPrompt, summary, sessionId,
-                    authorizeBoardTools, resolveContext, suppressNudge: contextIncluded);
+                    authorizeBoardTools, resolveContext, contextIncluded);
             if (launch is not null)
                 await launch.BeforeSpawnAsync(sessionId, preparedSession.InitialPrompt, workDir, ct);
             foreach (var kvp in _toolApiContext.BuildEnvironment(sessionId))

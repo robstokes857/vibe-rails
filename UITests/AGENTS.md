@@ -67,6 +67,13 @@ The file-details cases exercise the real Monaco reader, finding-line navigation,
 excerpts, source fallbacks, ignore/cancel/rescan, file-scoped fix prompts, launch failure,
 picker placement inside the native dialog, cleanup and 320–1440px layouts.
 
+### Focused Context Workspace Tests (No Backend Required)
+
+From `UITests`, run `npx playwright test --config playwright.board-nudge.config.js`.
+This opens the production Context workspace with simulated API responses and checks top navigation,
+Settings entry, independent Nudge updates and project editing with or without a repository.
+The focused Board UX suite also checks board switching, partial saves and in-flight edits.
+
 ### Focused Page Header Tests (No Backend Required)
 
 From `UITests`, run `npx playwright test --config playwright.page-headers.config.js`.

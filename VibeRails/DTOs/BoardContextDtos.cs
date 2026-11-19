@@ -6,6 +6,12 @@ public sealed record UpdateBoardEveryContextRequest(string? Message, int? Expect
 /// <summary>Revision-checked update of App context, the level above every board (VIBE-229).</summary>
 public sealed record UpdateAppContextRequest(string? Message, int? ExpectedRevision);
 
+/// <summary>Revision-checked update of the open repository's context.</summary>
+public sealed record UpdateProjectContextRequest(string? Message, int? ExpectedRevision);
+
+/// <summary>Changes only the supplied app-wide launch nudge settings.</summary>
+public sealed record UpdateContextNudgeRequest(bool? CreateVibeStoryTracking, bool? CreateVibeStoryTrackingCustomEnvs);
+
 /// <summary>
 /// One measured piece of the context an agent receives for a card (VB-63). <see cref="Items"/>
 /// is a count where one applies (comments, notes, sessions…); <see cref="Note"/> is a short

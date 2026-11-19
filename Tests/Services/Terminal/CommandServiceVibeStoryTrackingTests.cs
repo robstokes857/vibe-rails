@@ -85,7 +85,7 @@ public partial class CommandServiceTests
 
     [Theory]
     [MemberData(nameof(IndependentNudgeLaunches))]
-    public async Task AppAndBoardContext_AccompanyTasksAndSummariesOnlyWhenTheLaunchNudgeIsEnabled(
+    public async Task ProjectContextAccompaniesTasksAndSummariesWithEitherNudgeSetting(
         LLM llm, string? envName, bool baseEnabled, bool customEnabled)
     {
         const string context = "Keep the user's \"quoted\" path; preserve $value, `literal`, and\nnew lines.";
@@ -100,17 +100,19 @@ public partial class CommandServiceTests
         foreach (var continuation in new[] { "", summary })
         {
             var prepared = await service.PrepareSessionAsync(llm, envName, null, initialPrompt: task, summary: continuation,
-                resolveNudgedContext: () =>
+                resolveContext: nudge =>
                 {
-                    Assert.True(enabled);
-                    return Task.FromResult<IReadOnlyList<ContextLevels.Level>>([
+                    Assert.Equal(enabled, nudge);
+                    var project = new ContextLevels.Level(ContextLevels.ProjectKey, "Project context", "Repository instructions");
+                    return Task.FromResult<IReadOnlyList<ContextLevels.Level>>(nudge ? [
                         new(ContextLevels.AppKey, "App context", "Every launch"),
-                        new(ContextLevels.BoardKey, "Board context", " \n" + context + "\n ")]);
+                        project,
+                        new(ContextLevels.BoardKey, "Board context", " \n" + context + "\n ")] : [project]);
                 });
             var ownPrompt = continuation.Length > 0 ? summary : task;
-            var expected = enabled
-                ? "Context supplied by the user, broadest first:\n\nApp context:\nEvery launch\n\nBoard context:\n" + context + "\n\n" + ownPrompt
-                : ownPrompt;
+            var expected = "Context supplied by the user, broadest first:\n\n" +
+                (enabled ? "App context:\nEvery launch\n\n" : "") + "Project context:\nRepository instructions\n\n" +
+                (enabled ? "Board context:\n" + context + "\n\n" : "") + ownPrompt;
             var expectedArg = llm switch
             {
                 LLM.Copilot => "--interactive=" + expected,
@@ -133,7 +135,7 @@ public partial class CommandServiceTests
         var prepared = await CreateService(storyTrackingSettings: () => new Settings
         {
             CreateVibeStoryTrackingCustomEnvs = true
-        }).PrepareSessionAsync(llm, envName, null, resolveNudgedContext: () => Task.FromResult<IReadOnlyList<ContextLevels.Level>>([
+        }).PrepareSessionAsync(llm, envName, null, resolveContext: _ => Task.FromResult<IReadOnlyList<ContextLevels.Level>>([
             new(ContextLevels.AppKey, "App context", "Shared instructions"), new(ContextLevels.BoardKey, "Board context", "  ")]));
 
         // The empty Board level sends nothing, not even its label.

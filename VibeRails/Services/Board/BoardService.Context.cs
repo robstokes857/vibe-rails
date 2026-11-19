@@ -10,6 +10,8 @@ public partial interface IBoardService
     Task<BoardEveryContextSettingsRecord?> SaveEveryContextSettingsAsync(string projectPath, string boardId, UpdateBoardEveryContextRequest request, CancellationToken cancellationToken = default);
     Task<AppContextSettingsRecord> GetAppContextSettingsAsync(CancellationToken cancellationToken = default);
     Task<AppContextSettingsRecord> SaveAppContextSettingsAsync(UpdateAppContextRequest request, CancellationToken cancellationToken = default);
+    Task<ProjectContextSettingsRecord> GetProjectContextSettingsAsync(string projectPath, CancellationToken cancellationToken = default);
+    Task<ProjectContextSettingsRecord> SaveProjectContextSettingsAsync(string projectPath, UpdateProjectContextRequest request, CancellationToken cancellationToken = default);
 }
 
 public sealed partial class BoardService
@@ -34,6 +36,16 @@ public sealed partial class BoardService
         if (request.ExpectedRevision is null or < 0)
             throw new BoardValidationException("The expected context revision is required.");
         return store.SaveAppContextSettingsAsync(NormalizeContextMessage(request.Message), request.ExpectedRevision.Value, cancellationToken);
+    }
+
+    public Task<ProjectContextSettingsRecord> GetProjectContextSettingsAsync(string projectPath, CancellationToken cancellationToken = default) =>
+        store.GetProjectContextSettingsAsync(projectPath, cancellationToken);
+
+    public Task<ProjectContextSettingsRecord> SaveProjectContextSettingsAsync(string projectPath, UpdateProjectContextRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.ExpectedRevision is null or < 0)
+            throw new BoardValidationException("The expected context revision is required.");
+        return store.SaveProjectContextSettingsAsync(projectPath, NormalizeContextMessage(request.Message), request.ExpectedRevision.Value, cancellationToken);
     }
 
     public Task<BoardContextSettingsRecord?> GetContextSettingsAsync(string projectPath, string boardId, CancellationToken cancellationToken = default) =>

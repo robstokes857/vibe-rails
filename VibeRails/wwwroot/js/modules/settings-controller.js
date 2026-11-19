@@ -4,8 +4,6 @@ import { SettingsKeysPanel } from './settings-keys.js';
 import { SetupPanel, refreshSetupStatus } from './setup-panel.js';
 import { SetupInstallWindow } from './setup-install-window.js';
 import { AiBoardManagerSettingsPanel } from './settings-ai-board-manager.js';
-import { BoardApi } from './board-api.js';
-import { contextEditorSection, mountContextEditor } from './board-settings.js';
 import { applyGatewaySettings, gatewayCredentialEdits, initGatewaySettings } from './settings-enterprise-gateway.js';
 
 export class SettingsController {
@@ -23,7 +21,6 @@ export class SettingsController {
         this._setupPanel = null;
         // Outlives the Setup panel (see _mountSetupPanel), so it is never cleared on unload.
         this._setupInstallWindow = null;
-        this._disposeContextEditor = null;
         this._selectSettingsTab = null;
         this._linkedKeyVersion = 0;
         // In-app leave-confirm (window.confirm is a silent no-op in the VS Code
@@ -44,8 +41,6 @@ export class SettingsController {
             apiKey: '',
             useVsCodeTheme: false,
             vsCodeSpellCheck: false,
-            createVibeStoryTracking: true,
-            createVibeStoryTrackingCustomEnvs: false,
             mcpEnabled: true,
             computerName: '',
             codexEnterpriseNetworkProxy: '',
@@ -72,6 +67,10 @@ export class SettingsController {
         if (root) {
             this._settingsRoot = root;
             this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
+            this.app.bindAction(root, '[data-open-context]', event => {
+                event.preventDefault();
+                this.app.navigate('context');
+            });
             this._initSettingsTabs(root);
             if (data.tab) this._selectSettingsTab?.(data.tab);
             const projectIdentityCard = root.querySelector('[data-project-identity-card]');
@@ -95,8 +94,6 @@ export class SettingsController {
             const useVsCodeThemeRow = root.querySelector('#setting-use-vscode-theme-row');
             const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
             const vsCodeSpellCheckToggle = root.querySelector('#setting-vscode-spell-check');
-            const createVibeStoryTrackingToggle = root.querySelector('#setting-create-vibe-story-tracking');
-            const createVibeStoryTrackingCustomEnvsToggle = root.querySelector('#setting-create-vibe-story-tracking-custom-envs');
             const mcpEnabledToggle = root.querySelector('#setting-enable-mcp');
             const computerNameInput = root.querySelector('#setting-computer-name');
             const codexEnterpriseNetworkProxyInput = root.querySelector('#setting-codex-enterprise-network-proxy');
@@ -141,12 +138,6 @@ export class SettingsController {
                 useVsCodeThemeToggle.checked = settings.useVsCodeTheme || false;
             }
             if (vsCodeSpellCheckToggle) vsCodeSpellCheckToggle.checked = settings.vsCodeSpellCheck === true;
-            if (createVibeStoryTrackingToggle) {
-                createVibeStoryTrackingToggle.checked = settings.createVibeStoryTracking !== false;
-            }
-            if (createVibeStoryTrackingCustomEnvsToggle) {
-                createVibeStoryTrackingCustomEnvsToggle.checked = settings.createVibeStoryTrackingCustomEnvs === true;
-            }
             if (mcpEnabledToggle) {
                 mcpEnabledToggle.checked = true;
                 mcpEnabledToggle.disabled = true;
@@ -235,8 +226,6 @@ export class SettingsController {
                             opencodeTokenSaverToggle?.checked ?? true,
                             grokTokenSaverToggle?.checked ?? true,
                             clearApiKey,
-                            createVibeStoryTrackingToggle?.checked ?? true,
-                            createVibeStoryTrackingCustomEnvsToggle?.checked ?? false,
                             gatewayCredentialEdits(root),
                             vsCodeSpellCheckToggle?.checked ?? false
                         );
@@ -277,7 +266,7 @@ export class SettingsController {
         }
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexEnterpriseNetworkProxy, codexLlmProxyMode, claudeEnterpriseNetworkProxy, openCodeEnterpriseNetworkProxy, grokEnterpriseNetworkProxy, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, createVibeStoryTracking = true, createVibeStoryTrackingCustomEnvs = false, gatewayCredentials = {}, vsCodeSpellCheck = false) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexEnterpriseNetworkProxy, codexLlmProxyMode, claudeEnterpriseNetworkProxy, openCodeEnterpriseNetworkProxy, grokEnterpriseNetworkProxy, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, gatewayCredentials = {}, vsCodeSpellCheck = false) {
         try {
             const previous = this.app.appSettings || {};
             // A new gateway receives that CLI's traffic and credentials; clearing one does not
@@ -311,8 +300,6 @@ export class SettingsController {
                 openCodeTokenSaverEnabled: openCodeTokenSaverEnabled,
                 grokTokenSaverEnabled: grokTokenSaverEnabled,
                 clearApiKey: clearApiKey,
-                createVibeStoryTracking: createVibeStoryTracking,
-                createVibeStoryTrackingCustomEnvs: createVibeStoryTrackingCustomEnvs,
                 dataExportOptIn: true
             }, { preferErrorResponseMessage: true });
             this.app.setAppSettings(savedSettings);
@@ -325,8 +312,6 @@ export class SettingsController {
     }
 
     unload() {
-        this._disposeContextEditor?.();
-        this._disposeContextEditor = null;
         this._aiBoardManagerPanel?.unload();
         this._aiBoardManagerPanel = null;
         this._keysPanel?.unload();
@@ -473,8 +458,6 @@ export class SettingsController {
             '#setting-api-key',
             '#setting-use-vscode-theme',
             '#setting-vscode-spell-check',
-            '#setting-create-vibe-story-tracking',
-            '#setting-create-vibe-story-tracking-custom-envs',
             '#setting-computer-name',
             '#setting-codex-gateway-auth-mode',
             '#setting-codex-gateway-api-key-header',
@@ -508,8 +491,6 @@ export class SettingsController {
             apiKey: valueOf('#setting-api-key'),
             useVsCodeTheme: isChecked('#setting-use-vscode-theme'),
             vsCodeSpellCheck: isChecked('#setting-vscode-spell-check'),
-            createVibeStoryTracking: isChecked('#setting-create-vibe-story-tracking'),
-            createVibeStoryTrackingCustomEnvs: isChecked('#setting-create-vibe-story-tracking-custom-envs'),
             computerName: valueOf('#setting-computer-name'),
             codexEnterpriseNetworkProxy: (root.querySelector('#setting-codex-enterprise-network-proxy')?.value || '').trim(),
             codexLlmProxyMode: this._getCodexLlmProxyMode(root),
@@ -599,8 +580,6 @@ export class SettingsController {
         const apiKeyInput = root.querySelector('#setting-api-key');
         const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
         const vsCodeSpellCheckToggle = root.querySelector('#setting-vscode-spell-check');
-        const createVibeStoryTrackingToggle = root.querySelector('#setting-create-vibe-story-tracking');
-        const createVibeStoryTrackingCustomEnvsToggle = root.querySelector('#setting-create-vibe-story-tracking-custom-envs');
         const computerNameInput = root.querySelector('#setting-computer-name');
         const codexEnterpriseNetworkProxyInput = root.querySelector('#setting-codex-enterprise-network-proxy');
         const codexLlmProxyModeSubscription = root.querySelector('#setting-codex-llm-proxy-mode-subscription');
@@ -618,8 +597,6 @@ export class SettingsController {
         }
         if (useVsCodeThemeToggle) useVsCodeThemeToggle.checked = settings.useVsCodeTheme === true;
         if (vsCodeSpellCheckToggle) vsCodeSpellCheckToggle.checked = settings.vsCodeSpellCheck === true;
-        if (createVibeStoryTrackingToggle) createVibeStoryTrackingToggle.checked = settings.createVibeStoryTracking !== false;
-        if (createVibeStoryTrackingCustomEnvsToggle) createVibeStoryTrackingCustomEnvsToggle.checked = settings.createVibeStoryTrackingCustomEnvs === true;
         if (computerNameInput) {
             computerNameInput.value = settings.computerName || '';
             if (settings.machineName) computerNameInput.placeholder = settings.machineName;
@@ -696,15 +673,6 @@ export class SettingsController {
                 if (container) {
                     this._setupPanel ??= this._mountSetupPanel(container);
                     void this._setupPanel.activate();
-                }
-            }
-            // App context (VIBE-229) uses the same editor as a board's Context tab, with only its own level.
-            if (id === 'context' && !this._disposeContextEditor) {
-                const container = root.querySelector('[data-settings-context-editor]');
-                if (container) {
-                    BoardApi.attach(this.app);
-                    container.innerHTML = contextEditorSection({ board: false });
-                    this._disposeContextEditor = mountContextEditor(this.app, container.querySelector('[data-context-editor]'), { toastTitle: 'Settings' });
                 }
             }
             if (id === 'ai-board-manager') {

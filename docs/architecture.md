@@ -184,22 +184,22 @@ request human approval with `request_stop_bypass`, check `get_stop_bypass_status
 unchanged staged snapshot only after approval. It forbids substituting `--no-verify` and asks
 the agent to report missing tools as a runtime/version mismatch. The initial response remains
 ready-to-help only, without starting work or calling tools.
-User context is one system of four levels (VIBE-229), broadest first: **App context** (every LLM
-launch, any project or none), **Board context** (launches for one board), **Card context** (agents
-opened from any card on the board) and **Card type context** (a type's default, replace or append
-override). `ContextLevels` resolves and formats them into one labelled block; empty levels send
-nothing and each level is limited to 4,000 characters. App and Board context apply only when the
-launch's nudge switch is on; Card and Card type context always reach card agents. Storage is
-additive: App context is the single-row `BoardAppContextSettings` table (`board-app-context/1`,
-GET/PUT `/api/v1/board/app-context`), Board context is still the Every Context columns of
+User context has five levels, broadest first: App, Project, Board, Card and Card type.
+`ContextLevels` combines applicable messages in one labelled block. Empty levels are omitted.
+Each message is limited to 4,000 characters. App and Board follow the launch's Nudge switch.
+Project context applies to managed launches for the repository with either Nudge setting.
+Card and Card type apply to card agents. In board.db, App context uses `BoardAppContextSettings`
+(GET/PUT `/api/v1/board/app-context`). Project context uses `ProjectContextSettings`
+(`project-context/1`, GET/PUT `/api/v1/board/project-context` for the open Git repository).
+Board context uses the Every Context columns of
 BoardContextSettings (`board-every-context/1`, GET/PUT `/api/v1/board/boards/{boardId}/every-context`)
 and Card/Card type context is still the Agent context JSON; each has its own revision. A card
-launch composes the whole block into its prompt in the root and sets `StartTerminalRequest.ContextIncluded`
+launch composes the block into its prompt in the root and sets `StartTerminalRequest.ContextIncluded`
 so the tab child adds nothing more. A card-triggered Automation Worker is a card agent too: `CliLoop`
-composes all four levels into its startup prompt (App and Board under the saved-environment switch)
+composes the applicable levels into its startup prompt
 and passes `contextIncluded` the same way. Every other managed launch (Agents, card-less Automations,
-continuation summaries, explicit tasks) gets App and Board context prepended by `CommandService` when
-its switch is on. Browser launches carry the selected board; native launches without a selection use the first
+continuation summaries, explicit tasks) receives Project context for the launch repository and
+App and Board context under its Nudge switch. Browser launches carry the selected board; native launches without a selection use the first
 existing project board. The ready-only tracking guidance remains a fallback for sessions without a
 task. The card context estimate, launch samples and `get_board_card` render the same block as the
 launch. `get_board_card` picks the Nudge switch from the calling session's recorded environment
@@ -864,8 +864,9 @@ Normal terminal statuses continue independently. Comment attention metadata surv
 merge; local alert attribution stays local. See `BoardStore.Attention.cs` and the Board guide.
 
 Lane agent buttons include the first lane and open the destination lane's Automation settings.
-The shared Context editor uses native disclosures, opens only App context initially, and saves
-changed levels from one action while retaining their separate revision checks. Base-LLM option
+The top navigation's Context workspace uses native disclosures, opens only App context initially
+and saves changed levels from one action while retaining their separate revision checks. The board
+picker changes the editing target, and App contains the launch Nudge switches. Base-LLM option
 editors share a **Make Default For LLM** action for model, speed, effort, mode and YOLO.
 `LlmPickerPreferenceService` stores these validated presets in one existing `GlobalCache` row per
 CLI (`ui.llm-launch-defaults.v1.<cli>`, normal `state.db`); root-only GET/PUT

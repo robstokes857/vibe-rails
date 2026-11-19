@@ -1,19 +1,20 @@
 using VibeRails.Utils;
 using VibeRails.Services.Board;
+using VibeRails.Services.Git;
 
 namespace VibeRails.Services.Terminal;
 
 /// <summary>
-/// User-written context as one system of scopes (VIBE-229), broadest first: App (every LLM launch),
-/// Board (launches for one board, stored as Every Context), Card (agents opened from any card on the
-/// board, the Agent context default message) and Card type (a type's override). App and Board context
-/// follow the launch's Vibe Board nudge; Card and Card type context always reach card agents.
+/// User-written context from App, Project, Board, Card and Card type, broadest first.
+/// App and Board context follow the launch's Vibe Board nudge. Project context follows
+/// the execution repository and the card levels always reach card agents.
 /// Card prompts, plain launches, the context estimate and get_board_card all render through
 /// <see cref="Format"/>, so each shows the same labelled block.
 /// </summary>
 public static class ContextLevels
 {
     public const string AppKey = "appContext";
+    public const string ProjectKey = "projectContext";
     public const string BoardKey = "boardContext";
     public const string CardKey = "cardContext";
     public const string CardTypeKey = "cardTypeContext";
@@ -41,30 +42,55 @@ public static class ContextLevels
         return parts.Count == 0 ? "" : Heading + "\n\n" + string.Join("\n\n", parts);
     }
 
-    /// <summary>The block placed before a launch's own prompt.</summary>
-    internal static string Prefix(IEnumerable<Level> levels)
+    /// <summary>Adds context to the starting prompt. Context alone leaves the agent waiting for work.</summary>
+    internal static string? PrependToPrompt(IEnumerable<Level> levels, string? prompt, bool hasUserMessage = false)
     {
         var block = Format(levels);
-        return block.Length == 0 ? "" : block + "\n\n";
+        if (block.Length == 0) return prompt;
+        if (!hasUserMessage && string.IsNullOrWhiteSpace(prompt))
+            prompt = "Reply only that you're ready to help, then wait for the user to give you a task.";
+        return block + "\n\n" + prompt;
     }
 
     /// <summary>The non-empty levels, for measuring each one.</summary>
     public static IReadOnlyList<Level> NonEmpty(IEnumerable<Level> levels) =>
         levels.Where(level => BoardPromptComposer.Sanitize(level.Message, BoardService.MaxContextMessageLength).Length > 0).ToList();
 
-    /// <summary>
-    /// App context, then the Board context of <paramref name="boardId"/>. Without a board, the
-    /// project's first board is used, as Every Context always did; without a project, App context alone.
-    /// </summary>
-    internal static async Task<IReadOnlyList<Level>> ResolveNudgedAsync(IBoardStore store, string? projectPath, string? boardId, CancellationToken cancellationToken)
+    /// <summary>Finds the Git project for a launch that has no recorded project scope.</summary>
+    internal static async Task<string?> FindLaunchRepositoryAsync(string workingDirectory, CancellationToken cancellationToken)
     {
-        var levels = new List<Level> { new(AppKey, "App context", (await store.GetAppContextSettingsAsync(cancellationToken)).Message) };
-        if (string.IsNullOrWhiteSpace(projectPath)) return levels;
-        if (string.IsNullOrWhiteSpace(boardId))
+        var root = ParserConfigs.GetRootPath();
+        if (ParserConfigs.GetIsInGit() && ProjectPathComparer.Matches(root, workingDirectory))
+            return root;
+        if (!File.Exists(PathExecutable.Resolve("git"))) return null;
+
+        var result = await GitCli.RunAsync(workingDirectory, ["rev-parse", "--show-toplevel"], cancellationToken,
+            TimeSpan.FromSeconds(5), maxOutputChars: 32_768);
+        return result.Succeeded && !string.IsNullOrWhiteSpace(result.StdOut) ? result.StdOut.Trim() : null;
+    }
+
+    /// <summary>
+    /// Resolves the levels shared by managed launches. An ordinary launch can fall back to the
+    /// first board, whereas a card without a board only receives the applicable wider levels.
+    /// </summary>
+    internal static async Task<IReadOnlyList<Level>> ResolveForLaunchAsync(IBoardStore store, string? projectPath,
+        string? boardId, bool nudgeEnabled, CancellationToken cancellationToken, string? boardProjectPath = null, bool useFirstBoard = true)
+    {
+        var levels = new List<Level>();
+        if (nudgeEnabled)
+            levels.Add(new(AppKey, "App context", (await store.GetAppContextSettingsAsync(cancellationToken)).Message));
+        if (!string.IsNullOrWhiteSpace(projectPath) &&
+            await store.GetProjectContextSettingsAsync(projectPath, cancellationToken) is { Message.Length: > 0 } project)
+            levels.Add(new(ProjectKey, "Project context", project.Message));
+
+        boardProjectPath ??= projectPath;
+        if (!nudgeEnabled || string.IsNullOrWhiteSpace(boardProjectPath)) return levels;
+        if (useFirstBoard && string.IsNullOrWhiteSpace(boardId))
             boardId = (await store.GetLocalBoardsAsync(cancellationToken))
-                .Where(board => ProjectPathComparer.Matches(board.ProjectPath, projectPath))
+                .Where(board => ProjectPathComparer.Matches(board.ProjectPath, boardProjectPath))
                 .OrderBy(board => board.Position).FirstOrDefault()?.Id;
-        if (boardId is not null && await store.GetEveryContextSettingsAsync(projectPath, boardId, cancellationToken) is { } board)
+        if (!string.IsNullOrWhiteSpace(boardId) &&
+            await store.GetEveryContextSettingsAsync(boardProjectPath, boardId, cancellationToken) is { } board)
             levels.Add(new(BoardKey, "Board context", board.Message));
         return levels;
     }
@@ -85,25 +111,13 @@ public static class ContextLevels
         return levels;
     }
 
-    /// <summary>
-    /// App context plus the card's own Board context. A card on no board has no Board context; it
-    /// never borrows the project's first board the way a launch outside a card does.
-    /// </summary>
-    internal static async Task<IReadOnlyList<Level>> ResolveNudgedForCardAsync(IBoardStore store, string projectPath, string? boardId, CancellationToken cancellationToken) =>
-        string.IsNullOrEmpty(boardId)
-            ? [new(AppKey, "App context", (await store.GetAppContextSettingsAsync(cancellationToken)).Message)]
-            : await ResolveNudgedAsync(store, projectPath, boardId, cancellationToken);
-
-    /// <summary>Every level a card agent receives: App and Board only when its launch's nudge is on.</summary>
+    /// <summary>Every applicable level a card agent receives.</summary>
     internal static async Task<IReadOnlyList<Level>> ResolveForCardAsync(IBoardStore store, string projectPath, string? boardId, string cardType,
         bool nudgeEnabled, CancellationToken cancellationToken)
     {
-        var levels = new List<Level>();
-        if (nudgeEnabled)
-            levels.AddRange(await ResolveNudgedForCardAsync(store, projectPath, boardId, cancellationToken));
-        if (!string.IsNullOrEmpty(boardId))
-            levels.AddRange(ForCard((await store.GetContextSettingsAsync(projectPath, boardId, cancellationToken))?.Context, cardType));
-        return levels;
+        var levels = await ResolveForLaunchAsync(store, projectPath, boardId, nudgeEnabled, cancellationToken, useFirstBoard: false);
+        if (string.IsNullOrEmpty(boardId)) return levels;
+        return [.. levels, .. ForCard((await store.GetContextSettingsAsync(projectPath, boardId, cancellationToken))?.Context, cardType)];
     }
 
     /// <summary>

@@ -388,10 +388,12 @@ search before showing candidates. An empty field shows a short search hint. Afte
 successful link, clear the search and results and return focus to the field; preserve
 the query after a failed link so it can be retried.
 
-Context editors use native triangle disclosures for App, Board and Card context and
-each card type, ordered broadest first. Only the first disclosure opens by default.
-Place one primary **Save context** action below the editor; it saves changed levels
-with their own revision checks and preserves drafts if a save fails.
+The desktop top bar links to the Context workspace. Use native triangle disclosures
+for App, Project, Board and Card context and each card type, ordered broadest first.
+Only the first disclosure opens by default. Identify the current repository and use
+a labelled board picker for the Board and card levels. Place one primary **Save context**
+action below the editor; it saves changed levels with their own revision checks and
+preserves drafts if a save fails.
 
 Settings > General exposes **VS Code Spell Check**, off by default and saved with
 the application settings. Only when enabled do Board titles, descriptions and comment

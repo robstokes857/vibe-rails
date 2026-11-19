@@ -18,6 +18,9 @@ public sealed record BoardEveryContextSettingsRecord(string Message, int Revisio
 /// <summary>App context (VIBE-229): one message for every Nudge-enabled LLM launch, on any board or none.</summary>
 public sealed record AppContextSettingsRecord(string Message, int Revision);
 
+/// <summary>Instructions for LLM launches scoped to one repository.</summary>
+public sealed record ProjectContextSettingsRecord(string Message, int Revision);
+
 public partial interface IBoardStore
 {
     Task<BoardContextSettingsRecord?> GetContextSettingsAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
@@ -30,4 +33,8 @@ public partial interface IBoardStore
     Task<AppContextSettingsRecord> GetAppContextSettingsAsync(CancellationToken cancellationToken = default);
     /// <summary>Saves App context with its own revision; a stale revision is a <c>BoardConflictException</c>.</summary>
     Task<AppContextSettingsRecord> SaveAppContextSettingsAsync(string message, int expectedRevision, CancellationToken cancellationToken = default);
+    /// <summary>Reads repository context, with an empty message and revision zero before its first save.</summary>
+    Task<ProjectContextSettingsRecord> GetProjectContextSettingsAsync(string projectPath, CancellationToken cancellationToken = default);
+    /// <summary>Saves repository context with an independent revision.</summary>
+    Task<ProjectContextSettingsRecord> SaveProjectContextSettingsAsync(string projectPath, string message, int expectedRevision, CancellationToken cancellationToken = default);
 }

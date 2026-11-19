@@ -80,6 +80,47 @@ public sealed partial class BoardStore
         return await reader.ReadAsync(cancellationToken) ? new(reader.GetString(0), reader.GetInt32(1)) : new("", 0);
     }
 
+    /// <inheritdoc />
+    public async Task<ProjectContextSettingsRecord> GetProjectContextSettingsAsync(string projectPath, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        return await ReadProjectContextAsync(connection, null, NormalizeProjectPath(projectPath), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<ProjectContextSettingsRecord> SaveProjectContextSettingsAsync(string projectPath, string message, int expectedRevision, CancellationToken cancellationToken = default)
+    {
+        var project = NormalizeProjectPath(projectPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        var current = await ReadProjectContextAsync(connection, transaction, project, cancellationToken);
+        if (current.Revision != expectedRevision)
+            throw new BoardConflictException("Project context changed while you were editing. Reopen Context to load the latest version.");
+        var updated = new ProjectContextSettingsRecord(message, checked(current.Revision + 1));
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO ProjectContextSettings (ProjectPath, Message, Revision) VALUES ($project, $message, $revision)
+            ON CONFLICT(ProjectPath) DO UPDATE SET Message = excluded.Message, Revision = excluded.Revision;
+            """;
+        command.Parameters.AddWithValue("$project", project);
+        command.Parameters.AddWithValue("$message", message);
+        command.Parameters.AddWithValue("$revision", updated.Revision);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return updated;
+    }
+
+    private static async Task<ProjectContextSettingsRecord> ReadProjectContextAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT Message, Revision FROM ProjectContextSettings WHERE ProjectPath = $project;";
+        command.Parameters.AddWithValue("$project", project);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? new(reader.GetString(0), reader.GetInt32(1)) : new("", 0);
+    }
+
     private static async Task<BoardEveryContextSettingsRecord?> ReadEveryContextAsync(SqliteConnection connection, SqliteTransaction? transaction, string project, string boardId, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
@@ -158,6 +199,15 @@ public sealed partial class BoardStore
     private const string AppContextSchemaSql = """
         CREATE TABLE IF NOT EXISTS BoardAppContextSettings (
             Id INTEGER PRIMARY KEY CHECK (Id = 1),
+            Message TEXT NOT NULL,
+            Revision INTEGER NOT NULL
+        );
+        """;
+
+    // Repository context belongs to the project even when it has no boards.
+    private static string ProjectContextSchemaSql => $"""
+        CREATE TABLE IF NOT EXISTS ProjectContextSettings (
+            ProjectPath TEXT PRIMARY KEY{ProjectPathCollation},
             Message TEXT NOT NULL,
             Revision INTEGER NOT NULL
         );

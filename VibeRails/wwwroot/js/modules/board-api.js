@@ -48,8 +48,10 @@ const withBoard = (path, boardId) => boardId ? `${path}?boardId=${enc(boardId)}`
 
 // ---------------------------------------------- boards
 
-async function getBoardsAsync(extra = {}) {
-    const response = await call('/boards', 'GET', null, extra);
+async function getBoardsAsync({ existingOnly = false, ...extra } = {}) {
+    const response = existingOnly
+        ? await call('/boards?existingOnly=true', 'GET', null, extra)
+        : await call('/boards', 'GET', null, extra);
     return (response?.boards || []).sort((a, b) => a.position - b.position);
 }
 
@@ -149,6 +151,14 @@ async function getAppContextAsync(extra = {}) {
 
 async function saveAppContextAsync(payload) {
     return call('/app-context', 'PUT', payload);
+}
+
+async function getProjectContextAsync(extra = {}) {
+    return call('/project-context', 'GET', null, extra);
+}
+
+async function saveProjectContextAsync(payload) {
+    return call('/project-context', 'PUT', payload);
 }
 
 async function setBoardCardPinnedAsync(cardId, pinned) {
@@ -516,6 +526,8 @@ export const BoardApi = {
     saveBoardEveryContextAsync,
     getAppContextAsync,
     saveAppContextAsync,
+    getProjectContextAsync,
+    saveProjectContextAsync,
     setBoardCardPinnedAsync,
     getBoardManagerAsync,
     saveBoardManagerAsync,

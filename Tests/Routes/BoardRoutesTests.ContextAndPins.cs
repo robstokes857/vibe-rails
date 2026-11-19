@@ -3,12 +3,36 @@ using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using VibeRails.DTOs;
 using VibeRails.Services.Board;
+using VibeRails.Utils;
 using Xunit;
 
 namespace Tests.Routes;
 
 public sealed partial class BoardRoutesTests
 {
+    [Fact]
+    public async Task ProjectContextRouteUsesTheOpenRepositoryAndRequiresDashboardCredentials()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        const string path = "/api/v1/board/project-context";
+        var store = _app.Services.GetRequiredService<IBoardStore>();
+        var request = new UpdateProjectContextRequest("Repository rules", 0);
+
+        using var denied = await SendAsync(HttpMethod.Put, path, "test-session", null, request);
+        Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+        using var saved = await SendAsync(HttpMethod.Put, path + "?projectPath=foreign", "test-session", "test-tab", request);
+        saved.EnsureSuccessStatusCode();
+        Assert.Equal(new ProjectContextSettingsRecord("Repository rules", 1),
+            await saved.Content.ReadFromJsonAsync(AppJsonSerializerContext.Default.ProjectContextSettingsRecord, ct));
+        Assert.Equal(new ProjectContextSettingsRecord("", 0), await store.GetProjectContextSettingsAsync(_project + "-foreign", ct));
+
+        using var stale = await SendAsync(HttpMethod.Put, path, "test-session", "test-tab", request);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        ParserConfigs.SetGitState(_project, isInGit: false);
+        using var noRepository = await SendAsync(HttpMethod.Get, path, "test-session", "test-tab");
+        Assert.Equal(HttpStatusCode.BadRequest, noRepository.StatusCode);
+    }
+
     [Fact]
     public async Task EveryContextRoutesRequireCredentialsAndKeepBoardRevisionsIndependent()
     {

@@ -333,6 +333,8 @@ middleware serves their paths rather than registering individual API endpoints.
 | PUT | `/api/v1/board/ai-board-manager` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | GET | `/api/v1/board/app-context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | PUT | `/api/v1/board/app-context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
+| GET | `/api/v1/board/project-context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs); open Git repository only |
+| PUT | `/api/v1/board/project-context` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs); open Git repository only |
 | GET | `/api/v1/board/boards` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | POST | `/api/v1/board/boards` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
 | PUT | `/api/v1/board/boards/order` | [BoardRoutes.cs](VibeRails/Routes/BoardRoutes.cs) |
@@ -543,6 +545,7 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET | `/api/v1/settings/security-challenge` | [AppSettingsRoutes.cs](VibeRails/Routes/AppSettingsRoutes.cs) |
 | GET | `/api/v1/settings/backups` | [DataExportRoutes.cs](VibeRails/Routes/DataExportRoutes.cs) |
 | POST | `/api/v1/settings/computer-name` | [AppSettingsRoutes.cs](VibeRails/Routes/AppSettingsRoutes.cs) |
+| PUT | `/api/v1/settings/context-nudge` | [AppSettingsRoutes.cs](VibeRails/Routes/AppSettingsRoutes.cs); updates only the supplied Nudge switches |
 | POST | `/api/v1/settings/enterprise-network-proxy/test` | [AppSettingsRoutes.cs](VibeRails/Routes/AppSettingsRoutes.cs) |
 | GET | `/api/v1/settings/keys` | [SigningKeyRoutes.cs](VibeRails/Routes/SigningKeyRoutes.cs) |
 | POST | `/api/v1/settings/keys` | [SigningKeyRoutes.cs](VibeRails/Routes/SigningKeyRoutes.cs) |

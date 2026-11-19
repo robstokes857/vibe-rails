@@ -341,6 +341,9 @@ CREATE TABLE BoardSyncSkippedEntries ( BoardId TEXT NOT NULL REFERENCES Boards(I
 -- table Boards
 CREATE TABLE Boards ( Id TEXT PRIMARY KEY, ProjectPath TEXT NOT NULL, Name TEXT NOT NULL, Position INTEGER NOT NULL, CreatedUTC TEXT NOT NULL, UpdatedUTC TEXT NOT NULL , DisplayPrefix TEXT, SyncEnabled INTEGER NOT NULL DEFAULT 1, DefaultColumnId TEXT NULL REFERENCES BoardColumns(Id) ON DELETE SET NULL);
 
+-- table ProjectContextSettings
+CREATE TABLE ProjectContextSettings ( ProjectPath TEXT PRIMARY KEY COLLATE NOCASE, Message TEXT NOT NULL, Revision INTEGER NOT NULL );
+
 -- table SchemaMigrations
 CREATE TABLE SchemaMigrations ( Component TEXT NOT NULL, Version INTEGER NOT NULL CHECK (Version > 0), AppliedUTC TEXT NOT NULL, AppliedBy TEXT, PRIMARY KEY (Component, Version) );
 

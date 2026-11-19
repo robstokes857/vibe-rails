@@ -2160,6 +2160,8 @@ public sealed partial class BoardStore : IBoardStore
         // Agent context stay in BoardContextSettings and are read as the Board, Card and Card type levels.
         SqliteMigrationRunner.Apply(connection, "board-app-context", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, AppContextSchemaSql));
+        SqliteMigrationRunner.Apply(connection, "project-context", 1, MigrationKind.Additive, (db, transaction) =>
+            SqliteSchema.Execute(db, transaction, ProjectContextSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-card-deletion", 1, MigrationKind.Additive, (db, transaction) =>
             SqliteSchema.Execute(db, transaction, CardDeletionSchemaSql));
         SqliteMigrationRunner.Apply(connection, "board-card-deletion", 2, MigrationKind.Additive, (db, transaction) =>

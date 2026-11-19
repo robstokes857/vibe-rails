@@ -530,6 +530,7 @@ code {
     font: 500 .8rem/1.4 var(--font-sans);
     letter-spacing: normal;
     text-transform: none;
+    text-decoration: none;
     background: transparent;
     border: 0;
     border-bottom: 2px solid transparent;
@@ -9119,7 +9120,37 @@ input.form-control:disabled {
     transition: opacity 0.15s;
 }
 
-/* Shared page headers: Quality, ENVs, Vibe AI, MCP and Settings. */
+.context-workspace {
+    --bs-border-color: var(--color-border);
+    max-width: 52rem;
+    padding: clamp(var(--space-3), 3vw, var(--space-5));
+    margin-bottom: var(--space-4);
+    background: var(--portal-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-surface);
+}
+
+.context-workspace summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.context-workspace textarea {
+    min-height: 4.5rem;
+    resize: vertical;
+}
+
+.context-workspace .form-check-label {
+    padding-inline-start: var(--space-2);
+}
+
+@media (max-width: 640px) {
+    .context-workspace :is(textarea, select) {
+        font-size: 1rem;
+    }
+}
+
+/* Shared page headers: Quality, ENVs, Vibe AI, MCP, Context and Settings. */
 .main-container:has(.vb-page-header) {
     padding-top: 14px;
 }

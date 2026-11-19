@@ -112,9 +112,7 @@ test('saving settings omits retired options and preserves following arguments', 
         /* codexTokenSaverEnabled */ true,
         /* openCodeTokenSaverEnabled */ true,
         /* grokTokenSaverEnabled */ true,
-        /* clearApiKey */ true,
-        /* createVibeStoryTracking */ false,
-        /* createVibeStoryTrackingCustomEnvs */ true);
+        /* clearApiKey */ true);
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, '/api/v1/settings');
@@ -125,15 +123,13 @@ test('saving settings omits retired options and preserves following arguments', 
     assert.equal(calls[0].body.codexEnterpriseNetworkProxy, 'https://genai.example.test/v1');
     assert.equal(calls[0].body.codexLlmProxyEnabled, undefined);
     assert.equal(calls[0].body.clearApiKey, true);
-    assert.equal(calls[0].body.createVibeStoryTracking, false);
-    assert.equal(calls[0].body.createVibeStoryTrackingCustomEnvs, true);
+    assert.equal(calls[0].body.createVibeStoryTracking, undefined);
+    assert.equal(calls[0].body.createVibeStoryTrackingCustomEnvs, undefined);
     assert.equal(calls[0].body.dataExportOptIn, true);
 
     await controller.saveSettings(false, '', false, true, '', '', 'subscription',
         '', '', '', 'subscription', true, true, true, true, false);
     assert.equal(calls[1].body.clearApiKey, false);
-    assert.equal(calls[1].body.createVibeStoryTracking, true);
-    assert.equal(calls[1].body.createVibeStoryTrackingCustomEnvs, false);
 });
 
 test('settings page groups its cards under a section tab bar', () => {
@@ -153,16 +149,12 @@ test('settings page groups its cards under a section tab bar', () => {
     assert.match(html, /id="settings-panel-general"[\s\S]*?Remote access password[\s\S]*?Application Settings/);
 });
 
-test('the Context tab reuses the board context editor for App context, and the nudge help names it', () => {
+test('Settings links to the shared Context workspace', () => {
     const html = readFileSync(indexPath, 'utf8');
     const source = readFileSync(modulePath, 'utf8');
-    assert.match(html, /id="settings-tab-context"[\s\S]{0,160}data-settings-tab="context">Context</);
-    assert.match(html, /id="settings-panel-context" role="tabpanel"[\s\S]{0,800}data-settings-context-editor/);
-    assert.match(source, /contextEditorSection\(\{ board: false \}\)/);
-    assert.match(source, /_disposeContextEditor\?\.\(\)/, 'leaving Settings disposes the editor');
-    assert.doesNotMatch(html, /Every Context/);
-    // Both nudge switches, built-in CLIs and Quick Launches, name the levels they gate.
-    assert.equal(html.match(/Also include App context and the\s+selected board's Board context/g)?.length, 2);
+    assert.match(html, /<a href="\?view=context" data-open-context>Launch context and Vibe Board Nudge<\/a>/);
+    assert.match(source, /this\.app\.navigate\('context'\)/);
+    assert.doesNotMatch(html, /settings-panel-context|setting-create-vibe-story-tracking/);
 });
 
 test('every tracked settings control survives the tabbed layout', () => {

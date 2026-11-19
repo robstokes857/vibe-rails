@@ -140,13 +140,13 @@ public static class BoardPromptComposer
         CardActivity? Activity = null,
         IReadOnlyList<string>? AutomationDescriptions = null,
         /// <summary>App and Board context, present only when the launch's nudge is on (VIBE-229).</summary>
-        IReadOnlyList<ContextLevels.Level>? NudgedContext = null)
+        IReadOnlyList<ContextLevels.Level>? LaunchContextLevels = null)
     {
         public static readonly LaunchContext Empty = new([], [], []);
 
         /// <summary>Every level this card's agent receives, broadest first.</summary>
         public IReadOnlyList<ContextLevels.Level> LevelsFor(string cardType) =>
-            [.. NudgedContext ?? [], .. ContextLevels.ForCard(Settings, cardType)];
+            [.. LaunchContextLevels ?? [], .. ContextLevels.ForCard(Settings, cardType)];
     }
 
     /// <summary>Activity read before this launch is linked. Null context activity means unknown, not zero.</summary>

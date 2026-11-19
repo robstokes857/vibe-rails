@@ -45,7 +45,7 @@ import { boardBrandLogo, boardTracker, cardTracker, trackerLabel } from './board
 import { BoardLaneAgents } from './board-lane-agents.js';
 import { BoardCardAssign, ASSIGN_ACTION } from './board-card-assign.js';
 import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
-import { contextEditorSection, mountContextEditor, laneAutomationSection, mountLaneAutomation, boardSettingsNavigation, newBoardNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync, boardManagerSection, mountBoardManager } from './board-settings.js';
+import { laneAutomationSection, mountLaneAutomation, boardSettingsNavigation, newBoardNavigation, mountBoardSettingsNavigation, boardSyncSection, mountBoardSync, boardManagerSection, mountBoardManager } from './board-settings.js';
 import { mountBoardManagerChip } from './board-manager.js';
 import { boardJiraSection, BoardJiraPanel } from './board-jira.js';
 import { boardAdoSection, BoardAdoPanel } from './board-ado.js';
@@ -62,7 +62,7 @@ import { cardReviewsSection, bindCardReviews } from './board-card-reviews.js';
 import { contextSectionMarkup, bindCardContext } from './board-card-context.js';
 import { cardDisplayId, cardLabel } from './board-card-label.js';
 import { agentMadeSummary, bindAgentProvenance } from './board-agent-provenance.js';
-import { cardIdentityHtml, ghostKeyHtml, ghostSettingHtml, ghostSummary, readGhostField } from './board-ghost.js';
+import { bindPermanentIdCopy, cardIdentityHtml, ghostKeyHtml, ghostSettingHtml, ghostSummary, readGhostField } from './board-ghost.js';
 import { boardTextOptions, renderCommentHtml, toPlainPreview } from './board-text.js';
 import { historySection, mountHistory } from './board-history.js';
 import { bindBoardReferences, canonicalSessionId } from './board-references.js';
@@ -2155,6 +2155,7 @@ export class BoardController {
         bindAgentProvenance(editor.querySelector('[data-board-agent-provenance]'),
             (sessionId, seekToUtc) => this.openSessionReplay({ id: sessionId }, { seekToUtc }));
         editor.querySelector('[data-board-recheck-ghost]')?.addEventListener('click', () => void this.recheckCardGhost(editor));
+        this.composerDisposers.push(bindPermanentIdCopy(editor, card));
         this.cardAutomations = bindCardAutomations(editor, card, {
             app: this.app,
             onQueued: () => void this.refreshSessionActivity(),
@@ -2277,7 +2278,7 @@ export class BoardController {
         const readActions = '[data-board-open-session], [data-board-open-diff], [data-board-view-attachment], '
             + '[data-board-comment-jump], [data-board-ref-session], [data-board-ref-commit], [data-board-ref-card], '
             + '[data-board-image], [data-board-open-linked-card], [data-board-comment-more], '
-            + '[data-review-view], [data-review-compare], [data-review-refresh], [data-review-more]';
+            + '[data-review-view], [data-review-compare], [data-review-refresh], [data-review-more], [data-board-copy-permanent-id]';
         const lock = () => {
             editor.querySelectorAll('input, textarea, select').forEach(control => {
                 if (control.matches('[data-board-comment-filter]')) return;
@@ -3372,7 +3373,9 @@ export class BoardController {
                     <section id="board-settings-jira" role="tabpanel" aria-labelledby="board-settings-tab-jira" data-board-settings-panel="jira" hidden>${boardJiraSection()}</section>
                     <section id="board-settings-ado" role="tabpanel" aria-labelledby="board-settings-tab-ado" data-board-settings-panel="ado" hidden>${boardAdoSection()}</section>
                     ${manager ? `<section id="board-settings-manager" role="tabpanel" aria-labelledby="board-settings-tab-manager" data-board-settings-panel="manager" hidden>${boardManagerSection()}</section>` : ''}
-                    <section id="board-settings-context" role="tabpanel" aria-labelledby="board-settings-tab-context" data-board-settings-panel="context" hidden>${contextEditorSection()}</section>
+                    <section id="board-settings-context" role="tabpanel" aria-labelledby="board-settings-tab-context" data-board-settings-panel="context" hidden>
+                        <a href="?view=context" data-open-context>Edit launch context for this board</a>
+                    </section>
                     <section id="board-settings-history" role="tabpanel" aria-labelledby="board-settings-tab-history" data-board-settings-panel="history" hidden>${historySection()}</section>
                 ` : source ? `
                     <section id="board-settings-jira" role="tabpanel" aria-labelledby="board-settings-tab-jira" data-board-settings-panel="jira" hidden>${boardJiraSection({ lanesFrom: source.name })}</section>
@@ -3385,7 +3388,10 @@ export class BoardController {
         const editor = container?.querySelector('[data-board-board-editor]');
         if (!editor) return;
         if (board) {
-            const disposeContext = mountContextEditor(this.app, editor.querySelector('[data-context-editor]'), { boardId: board.id });
+            this.app.bindAction(editor, '[data-open-context]', event => {
+                event.preventDefault();
+                this.app.navigate('context', { boardId: board.id });
+            });
             const disposeManager = manager ? mountBoardManager(this.app, editor.querySelector('[data-board-manager-settings]'), board.id,
                 { onSaved: () => { void this.managerChip?.refresh(); } }) : () => {};
             const disposeHistory = mountHistory(editor.querySelector('[data-board-history-view]'), board.id);
@@ -3401,7 +3407,7 @@ export class BoardController {
                         this.persistBoardSelection();
                     }
                     // Keep the modal and its other sections' unsaved drafts. Only the tracker panel
-                    // follows the connection; General and Context still edit the opened board.
+                    // follows the connection; General and the Context link still target the opened board.
                     // A moved connection no longer determines the opened board's branding or sync
                     // controls. Refresh that board's status without replacing its settings drafts.
                     // A local board that kept the connection became the tracker board itself
@@ -3445,7 +3451,6 @@ export class BoardController {
                 navigation.dispose();
                 disposeSync();
                 trackers.forEach(({ panel }) => panel.dispose());
-                disposeContext();
                 disposeManager();
                 disposeHistory();
             };

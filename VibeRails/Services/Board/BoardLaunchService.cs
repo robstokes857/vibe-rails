@@ -606,7 +606,7 @@ public sealed class BoardLaunchService(
     {
         var columns = (await store.GetColumnsAsync(projectPath, cancellationToken, board.Id)).OrderBy(column => column.Position).ToList();
         var cards = await store.GetManagedCardsAsync(projectPath, board.Id, cancellationToken);
-        var levels = nudgeEnabled ? await ContextLevels.ResolveNudgedForCardAsync(store, projectPath, board.Id, cancellationToken) : [];
+        var levels = await ContextLevels.ResolveForLaunchAsync(store, projectPath, board.Id, nudgeEnabled, cancellationToken, useFirstBoard: false);
         var laneAutomations = await BoardService.DescribeLaneAutomationsByLaneAsync(store, projectPath, columns.Select(column => column.Id).ToList(), cancellationToken);
         var context = new BoardPromptComposer.BoardManagerContext(board, columns, cards,
             columns.Select(column => (IReadOnlyList<string>)laneAutomations[column.Id].Select(automation => automation.Name).ToList()).ToList(),
@@ -633,7 +633,7 @@ public sealed class BoardLaunchService(
         var column = columns.FirstOrDefault(c => c.Id == card.ColumnId);
         var boardName = boardId is null ? null : (await store.GetBoardAsync(projectPath, boardId, cancellationToken))?.Name;
         var boardContext = boardId is null ? null : await store.GetContextSettingsAsync(projectPath, boardId, cancellationToken);
-        var nudged = nudgeEnabled ? await ContextLevels.ResolveNudgedForCardAsync(store, projectPath, boardId, cancellationToken) : null;
+        var launchContext = await ContextLevels.ResolveForLaunchAsync(store, projectPath, boardId, nudgeEnabled, cancellationToken, useFirstBoard: false);
         var detail = await store.GetCardDetailAsync(projectPath, card.Id, cancellationToken);
         var orderedColumns = columns.OrderBy(c => c.Position).ToList();
         var laneAutomations = await BoardService.DescribeLaneAutomationsByLaneAsync(store, projectPath, orderedColumns.Select(c => c.Id).ToList(), cancellationToken);
@@ -646,7 +646,7 @@ public sealed class BoardLaunchService(
             orderedColumns.Select(c => (IReadOnlyList<string>)laneAutomations[c.Id].Select(a => a.Name).ToList()).ToList(),
             detail is null ? null : new BoardPromptComposer.CardActivity(detail.Comments.Count, detail.Notes.Count, detail.Sessions.Count),
             orderedColumns.SelectMany(c => laneAutomations[c.Id].Select(a => $"{c.Name} / {a.Name}: {a.Summary}. Output and next action: {a.Output}")).ToList(),
-            nudged);
+            launchContext);
         var prompt = BoardPromptComposer.Compose(card, column?.Name ?? "(no lane)", assigneeLabel, environmentPrompt, context, intent, workerTask: task, delegatedWorker: delegatedWorker);
         return new BoardLaunchPrompt(prompt, environmentPrompt, context.LevelsFor(card.Type), boardId, boardName, detail, intent);
     }

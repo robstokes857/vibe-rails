@@ -160,6 +160,7 @@ public static class CliLoop
         var managedWorkflow = false;
         string? contextBoardId = null;
         var contextProjectPath = jobRun?.ProjectPath ?? workingDirectory;
+        var launchProjectPath = jobRun?.ProjectPath;
         var userContext = "";
         var contextIncluded = false;
         if (boardCardKey is not null)
@@ -197,6 +198,8 @@ public static class CliLoop
                     boardCardKey),
                 cancellationToken);
             initialPrompt = resolvedPrompt.Prompt;
+            if (!contextIncluded && launchProjectPath is null && !ProjectPathComparer.Matches(resolvedPrompt.WorkingDirectory, workingDirectory))
+                launchProjectPath = await ContextLevels.FindLaunchRepositoryAsync(workingDirectory, cancellationToken);
             workingDirectory = resolvedPrompt.WorkingDirectory;
         }
 
@@ -213,7 +216,7 @@ public static class CliLoop
             onSessionCreated: onSessionCreated,
             authorizeBoardTools: boardCardKey is not null,
             contextBoardId: contextBoardId,
-            contextProjectPath: contextProjectPath,
+            contextProjectPath: launchProjectPath,
             contextIncluded: contextIncluded);
         Environment.ExitCode = exitCode;
         return exitCode;

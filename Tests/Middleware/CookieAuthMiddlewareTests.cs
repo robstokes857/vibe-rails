@@ -169,6 +169,9 @@ public sealed class CookieAuthMiddlewareTests
     [InlineData("PUT", "/api/v1/board/boards/board-a/every-context")]
     [InlineData("GET", "/api/v1/board/app-context")]
     [InlineData("PUT", "/api/v1/board/app-context")]
+    [InlineData("GET", "/api/v1/board/project-context")]
+    [InlineData("PUT", "/api/v1/board/project-context")]
+    [InlineData("PUT", "/api/v1/settings/context-nudge")]
     public async Task ContextLevels_RequireBothDashboardCredentials(string method, string path)
     {
         foreach (var session in new string?[] { null, Auth.GetInstanceToken() })

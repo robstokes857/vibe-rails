@@ -11,6 +11,7 @@ import { RuleController } from './js/modules/rule-controller.js';
 import { CliLauncher } from './js/modules/cli-launcher.js';
 import { TerminalController } from './js/modules/terminal-multitab.js';
 import { SettingsController } from './js/modules/settings-controller.js';
+import { ContextController } from './js/modules/context-controller.js';
 import { SetupAlert } from './js/modules/setup-panel.js';
 import { RemoteAccountLinkPanel } from './js/modules/remote-account-link.js';
 import { AccountNavMenu, accountSummary } from './js/modules/account-nav.js';
@@ -60,6 +61,7 @@ export class VibeControlApp {
         this.cliLauncher = new CliLauncher(this);
         this.terminalController = new TerminalController(this);
         this.settingsController = new SettingsController(this);
+        this.contextController = new ContextController(this);
         this.setupAlert = new SetupAlert(this);
         this.mcpController = new McpController(this);
         this.reviewInboxController = new ReviewInboxController(this);
@@ -613,6 +615,7 @@ export class VibeControlApp {
             'config',
             'sessions',
             'settings',
+            'context',
             'terminal-focus',
             'mcp',
             'ai-agents',
@@ -845,6 +848,7 @@ export class VibeControlApp {
 
     loadView(view, data = {}) {
         this.settingsController?.unload?.();
+        this.contextController?.unload();
         this.ruleController?.unload?.();
         this.jobController?.unload?.();
         this.pythonScriptWorkbench?.unload?.();
@@ -872,6 +876,7 @@ export class VibeControlApp {
             'config': () => this.configController.loadConfiguration(),
             'sessions': () => this.sessionController.loadSessions(),
             'settings': () => this.settingsController.loadSettings(data),
+            'context': () => this.contextController.loadView(data),
             'terminal-focus': () => this.terminalController.loadTerminalFocusView(data),
             'mcp': () => this.mcpController.loadView(),
             // Reviews requested of this account (VB-50 slice D); reached from the account menu.

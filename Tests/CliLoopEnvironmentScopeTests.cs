@@ -192,6 +192,8 @@ public sealed class CliLoopEnvironmentScopeTests
             .ReturnsAsync(new BoardCardRecord("card_23", here, 23, "lane_1", 0, "Task", "Scope", "base:claude", "medium", null, [], false, 0,
                 DateTime.UtcNow, DateTime.UtcNow, Type: "bug", BoardId: "board_1"));
         boardStore.Setup(s => s.GetAppContextSettingsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new AppContextSettingsRecord("APP level", 1));
+        boardStore.Setup(s => s.GetProjectContextSettingsAsync(here, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProjectContextSettingsRecord("PROJECT level", 1));
         boardStore.Setup(s => s.GetEveryContextSettingsAsync(here, "board_1", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BoardEveryContextSettingsRecord("BOARD level", 1));
         boardStore.Setup(s => s.GetContextSettingsAsync(here, "board_1", It.IsAny<CancellationToken>()))
@@ -205,11 +207,11 @@ public sealed class CliLoopEnvironmentScopeTests
             .Setup(s => s.CreateSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<bool>(),
                 It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>()))
             .ReturnsAsync("session-1");
-        Func<Task<IReadOnlyList<ContextLevels.Level>>>? childResolver = () => Task.FromResult<IReadOnlyList<ContextLevels.Level>>([]);
+        Func<bool, Task<IReadOnlyList<ContextLevels.Level>>>? childResolver = _ => Task.FromResult<IReadOnlyList<ContextLevels.Level>>([]);
         Mock.Get(services.GetRequiredService<ICommandService>())
             .Setup(c => c.PrepareSessionAsync(It.IsAny<LLM>(), It.IsAny<string?>(), It.IsAny<string[]?>(), It.IsAny<string?>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<Func<Task<IReadOnlyList<ContextLevels.Level>>>?>()))
-            .Callback<LLM, string?, string[]?, string?, string, string?, bool, Func<Task<IReadOnlyList<ContextLevels.Level>>>?>(
+                It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<Func<bool, Task<IReadOnlyList<ContextLevels.Level>>>?>()))
+            .Callback<LLM, string?, string[]?, string?, string, string?, bool, Func<bool, Task<IReadOnlyList<ContextLevels.Level>>>?>(
                 (_, _, _, _, _, _, _, resolver) => childResolver = resolver)
             .ThrowsAsync(new ReachedThePromptStage());
 
@@ -219,7 +221,8 @@ public sealed class CliLoopEnvironmentScopeTests
 
         const string heading = "Context supplied by the user, broadest first:";
         var cardLevels = "Card context:\nCARD level\n\nCard type context (Bug):\nTYPE level";
-        Assert.Contains(heading + "\n\n" + (customEnvsNudge ? "App context:\nAPP level\n\nBoard context:\nBOARD level\n\n" : "") + cardLevels, template);
+        Assert.Contains(heading + "\n\n" + (customEnvsNudge ? "App context:\nAPP level\n\n" : "") +
+            "Project context:\nPROJECT level\n\n" + (customEnvsNudge ? "Board context:\nBOARD level\n\n" : "") + cardLevels, template);
         Assert.Equal(customEnvsNudge, template!.Contains("APP level", StringComparison.Ordinal));
         Assert.Equal(1, template.Split(heading).Length - 1);
         // The block sits before the Worker's own Initial Message.

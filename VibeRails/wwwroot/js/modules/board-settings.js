@@ -130,38 +130,44 @@ const TYPES = [
 
 // The user's context levels, broadest first (VIBE-229). A launch gets every level that applies to
 // it in one labelled block. App and Board context follow the launch's Vibe Board nudge.
-const NUDGE_NOTE = 'Sent only when the launch\'s Vibe Board nudge is on in Settings (built-in CLIs or Quick Launches).';
+const NUDGE_NOTE = 'Sent when the launch’s Vibe Board Nudge is enabled.';
 export const CONTEXT_LEVELS = [
-    ['app', 'App context', `Every LLM CLI launched from VibeRails: card agents, the Agents page, Automations, continuations and launches with no board, in any project. ${NUDGE_NOTE}`],
-    ['board', 'Board context', `Every LLM CLI launched for this board: card agents, Agents, Automations and continuations. Launches outside a card use the currently selected board. ${NUDGE_NOTE}`],
+    ['app', 'App context', `Applies across all repos and when no repo is open. ${NUDGE_NOTE}`],
+    ['project', 'Project context', 'Sent to every LLM launched from this repo, including launches outside the Board and with the Nudge off.'],
+    ['board', 'Board context', `Applies to launches for this board, including launches outside cards. ${NUDGE_NOTE}`],
     ['card', 'Card context', 'Every agent opened from a card on this board, for work or discussion. Always sent.'],
     ['type', 'Card type context', 'Agents opened from a card of that type. Keep the card context, replace it, or send both (card context first). Always sent.']
 ];
 
-const levelHeader = id => {
-    const [, label, reach] = CONTEXT_LEVELS.find(([level]) => level === id);
-    return `<h6 class="mb-1">${label}</h6><p class="board-editor-muted mb-2" data-context-reach>${reach}</p>`;
-};
-
-const levelSection = (id, body) => `<section class="mb-3" data-context-level="${id}">${levelHeader(id)}${body}</section>`;
 const contextDisclosure = (id, body) => {
     const [, label, reach] = CONTEXT_LEVELS.find(([level]) => level === id);
     return `<details class="mb-3" data-context-level="${id}"${id === 'app' ? ' open' : ''}>
-        <summary>${label}</summary><p class="board-editor-muted mt-2 mb-2" data-context-reach>${reach}</p>${body}
+        <summary>${label}</summary><p class="form-text mt-2 mb-2" data-context-reach>${reach}</p>${body}
     </details>`;
 };
 
-/**
- * One editor for every context level, broadest first. Settings shows App context alone
- * ({ board: false }); a board's settings show all four, so the whole chain an agent from that board
- * receives is visible in one place. Card and Card type context are one saved record.
- */
-export const contextEditorSection = ({ board = true } = {}) => `
+const contextLoading = '<div data-board-settings-content><p role="status">Loading context…</p></div>';
+const boardContextUnits = () => `
+    <div data-context-unit="board">${contextDisclosure('board', contextLoading)}</div>
+    <div data-context-unit="card">${contextLoading}</div>`;
+
+/** The Context workspace displays every scope and saves them together. */
+export const contextEditorSection = ({ project = false } = {}) => `
     <div data-context-editor>
-        <p class="board-editor-muted">A launch gets every level that applies to it, broadest first, in one labelled block. Empty levels send nothing. Each level can contain up to 4,000 characters.</p>
-        <div data-context-unit="app">${contextDisclosure('app', '<div data-board-settings-content>Loading context…</div>')}</div>
-        ${board ? `<div data-context-unit="board">${contextDisclosure('board', '<div data-board-settings-content>Loading context…</div>')}</div>
-        <div data-context-unit="card"><div data-board-settings-content>Loading context…</div></div>` : ''}
+        <p class="form-text mt-0">Launches receive the applicable instructions from broadest to most specific. Each message can contain up to 4,000 characters.</p>
+        ${contextDisclosure('app', `<div data-context-unit="app">${contextLoading}</div><div data-context-unit="nudge">${contextLoading}</div>`)}
+        ${contextDisclosure('project', project ? `<div data-context-unit="project">${contextLoading}</div>`
+            : '<p class="form-text">Open a Git repository to edit Project context.</p>')}
+        <div class="border-top pt-3 mb-3">
+            <label class="form-label" for="context-board-picker">Board to edit</label>
+            <select class="form-select form-select-sm" id="context-board-picker" aria-describedby="context-board-help" data-context-board-picker disabled>
+                <option value="">Loading boards…</option>
+            </select>
+            <p class="form-text" id="context-board-help">Launches outside a card use the currently selected board in the Board view.</p>
+            <p class="form-text mb-0" data-context-boards-status aria-live="polite"></p>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-context-boards-retry hidden>Retry</button>
+        </div>
+        <div data-context-board-units></div>
         <button type="button" class="btn btn-sm btn-primary" data-context-save disabled>Save context</button>
     </div>`;
 
@@ -340,10 +346,14 @@ function mountSettings(app, element, { load, render, read, save, savedMessage, o
             if (alive() && button.isConnected !== false) button.disabled = false;
         }
     };
-    saveGroup?.register({ ready: () => alive() && revision !== null, save: () => persist() });
+    const unregister = saveGroup?.register({
+        ready: () => alive() && revision !== null,
+        dirty: () => alive() && revision !== null && JSON.stringify(read(element)) !== savedDraft,
+        save: () => persist()
+    }, element.dataset?.contextUnit);
     element.addEventListener('click', click);
     void reload();
-    return () => { disposed = true; abort.abort(); disposeWidgets(); element.removeEventListener('click', click); };
+    return () => { disposed = true; unregister?.(); abort.abort(); disposeWidgets(); element.removeEventListener('click', click); };
 }
 
 export const boardManagerSection = () => `
@@ -456,8 +466,57 @@ export function mountAppContext(app, element, _boardId = null, { toastTitle = 'B
     });
 }
 
+function mountProjectContext(app, element, saveGroup) {
+    return mountSettings(app, element, {
+        load: BoardApi.getProjectContextAsync,
+        render: ({ message }) => `
+            <label class="visually-hidden" for="project-context-message">Project context</label>
+            <textarea id="project-context-message" class="form-control form-control-sm mb-2" rows="5" maxlength="4000" spellcheck="true" data-context-message="project">${escapeHtml(message || '')}</textarea>`,
+        read: root => ({ message: root.querySelector('[data-context-message="project"]').value }),
+        save: BoardApi.saveProjectContextAsync,
+        toastTitle: 'Context',
+        saveGroup
+    });
+}
+
+function mountContextNudge(app, element, saveGroup) {
+    const keys = ['createVibeStoryTracking', 'createVibeStoryTrackingCustomEnvs'];
+    const values = settings => ({
+        createVibeStoryTracking: settings.createVibeStoryTracking !== false,
+        createVibeStoryTrackingCustomEnvs: settings.createVibeStoryTrackingCustomEnvs === true
+    });
+    let saved;
+    return mountSettings(app, element, {
+        load: async extra => {
+            saved = values(await app.apiCall('/api/v1/settings', 'GET', null, { showLoading: false, ...extra }));
+            return { ...saved, revision: 0 };
+        },
+        render: settings => `
+            <fieldset class="border-top pt-3 mt-3">
+                <legend class="form-label fs-6 mb-1">Vibe Board Nudge</legend>
+                <p class="form-text mt-0">Includes App and Board context. When a launch has no starting message, it also asks the agent to consider tracking the work as a Vibe Story.</p>
+                ${['Built-in CLIs and Agent presets', 'Legacy custom environments'].map((label, index) => `
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="context-nudge-${index}" ${settings[keys[index]] ? 'checked' : ''}>
+                        <label class="form-check-label" for="context-nudge-${index}">${label}</label>
+                    </div>`).join('')}
+            </fieldset>`,
+        read: root => Object.fromEntries(keys.map((key, index) => [key, root.querySelector(`#context-nudge-${index}`).checked])),
+        save: async draft => {
+            const changes = Object.fromEntries(keys.filter(key => draft[key] !== saved[key]).map(key => [key, draft[key]]));
+            const result = await app.apiCall('/api/v1/settings/context-nudge', 'PUT', changes,
+                { showLoading: false, preferErrorResponseMessage: true });
+            saved = { ...saved, ...changes };
+            app.setAppSettings(values(result));
+            return { revision: 0 };
+        },
+        toastTitle: 'Context',
+        saveGroup
+    });
+}
+
 /** Board context, stored as the board's Every Context message. */
-export function mountBoardLevelContext(app, element, boardId, { saveGroup } = {}) {
+export function mountBoardLevelContext(app, element, boardId, { saveGroup, toastTitle = 'Board' } = {}) {
     const id = `board-level-context-message-${++contextEditorIds}`;
     return mountSettings(app, element, {
         load: extra => BoardApi.getBoardEveryContextAsync(boardId, extra),
@@ -467,12 +526,13 @@ export function mountBoardLevelContext(app, element, boardId, { saveGroup } = {}
         read: root => ({ message: root.querySelector('[data-context-message="board"]').value }),
         save: payload => BoardApi.saveBoardEveryContextAsync(boardId, payload),
         savedMessage: 'Board context saved for this board.',
+        toastTitle,
         saveGroup
     });
 }
 
 /** Card context and Card type context: the board's Agent context record, saved together. */
-export function mountCardContext(app, element, boardId, { saveGroup } = {}) {
+export function mountCardContext(app, element, boardId, { saveGroup, toastTitle = 'Board' } = {}) {
     const id = `card-context-message-${++contextEditorIds}`;
     return mountSettings(app, element, {
         load: extra => BoardApi.getBoardContextAsync(boardId, extra),
@@ -480,7 +540,7 @@ export function mountCardContext(app, element, boardId, { saveGroup } = {}) {
             ${contextDisclosure('card', `
                 <label class="visually-hidden" for="${id}">Card context</label>
                 <textarea id="${id}" class="form-control form-control-sm" rows="4" maxlength="4000" placeholder="Context for every card agent on this board…" spellcheck="true" data-context-card>${escapeHtml(context.defaultMessage)}</textarea>`)}
-            ${levelSection('type', TYPES.map(([type, label]) => {
+            ${contextDisclosure('type', TYPES.map(([type, label]) => {
                 const override = context.typeOverrides.find(item => item.type === type);
                 const mode = override?.mode || 'default';
                 return `<details class="mb-2"><summary>${label}</summary>
@@ -490,7 +550,7 @@ export function mountCardContext(app, element, boardId, { saveGroup } = {}) {
                     </select>
                     <textarea class="form-control form-control-sm" rows="3" maxlength="4000" data-context-message="${type}" aria-label="${label} card type context" spellcheck="true">${escapeHtml(override?.message || '')}</textarea>
                 </details>`;
-            }).join('') + '<p class="board-editor-muted">An empty type-specific-only message sends no Card or Card type context.</p>')}`,
+            }).join('') + '<p class="form-text">A blank type-specific message in replace mode skips both card levels.</p>')}`,
         read: root => ({ context: {
             defaultMessage: root.querySelector('[data-context-card]').value,
             typeOverrides: TYPES.map(([type]) => ({ type,
@@ -500,6 +560,7 @@ export function mountCardContext(app, element, boardId, { saveGroup } = {}) {
         } }),
         save: payload => BoardApi.saveBoardContextAsync(boardId, payload),
         savedMessage: 'Card and Card type context saved.',
+        toastTitle,
         saveGroup
     });
 }
@@ -509,35 +570,66 @@ export function mountCardContext(app, element, boardId, { saveGroup } = {}) {
  * one Save context action saves changed units without replacing any draft.
  * Returns one dispose for all of them.
  */
-export function mountContextEditor(app, root, { boardId = null, toastTitle = 'Board' } = {}) {
-    const button = root?.querySelector('[data-context-save]');
-    const controls = [];
+export function mountContextEditor(app, root) {
+    const button = root.querySelector('[data-context-save]');
+    const controls = new Map();
+    const boardUnits = root.querySelector('[data-context-board-units]');
     let disposed = false;
     let saving = false;
+    let boardDisposers = [];
+    const anyDirty = () => Array.from(controls.values()).some(control => control.dirty());
+    const ready = () => Array.from(controls.values()).every(control => control.ready());
     const saveGroup = {
-        register: control => controls.push(control),
+        register: (control, unit) => {
+            controls.set(unit, control);
+            return () => { controls.delete(unit); saveGroup.refresh(); };
+        },
         refresh: () => {
-            if (!disposed && button) button.disabled = saving || !controls.every(control => control.ready());
+            if (!disposed) button.disabled = saving || !ready() || !anyDirty();
         }
     };
-    const unit = name => root?.querySelector(`[data-context-unit="${name}"]`);
-    const disposers = [mountAppContext(app, unit('app'), null, { toastTitle, saveGroup })];
-    if (boardId) disposers.push(mountBoardLevelContext(app, unit('board'), boardId, { saveGroup }), mountCardContext(app, unit('card'), boardId, { saveGroup }));
+    const unit = name => root.querySelector(`[data-context-unit="${name}"]`);
+    const options = { toastTitle: 'Context', saveGroup };
+    const disposers = [mountAppContext(app, unit('app'), null, options), mountContextNudge(app, unit('nudge'), saveGroup)];
+    if (unit('project')) disposers.push(mountProjectContext(app, unit('project'), saveGroup));
+    const setBoard = boardId => {
+        boardDisposers.forEach(dispose => dispose());
+        boardUnits.innerHTML = boardId ? boardContextUnits() : '';
+        boardDisposers = boardId ? [
+            mountBoardLevelContext(app, unit('board'), boardId, options),
+            mountCardContext(app, unit('card'), boardId, options)
+        ] : [];
+        saveGroup.refresh();
+    };
     const save = async () => {
-        if (disposed || saving || !controls.every(control => control.ready())) return;
+        if (disposed || saving || !ready() || !anyDirty()) return;
         saving = true;
         button.textContent = 'Saving…';
         saveGroup.refresh();
         try {
-            const results = await Promise.all(controls.map(control => control.save()));
-            if (!disposed && results.every(Boolean)) app.showToast(toastTitle, 'Context saved.', 'success');
+            const results = await Promise.all(Array.from(controls.values(), control => control.save()));
+            if (!disposed && results.every(Boolean)) app.showToast('Context', 'Context saved.', 'success');
         } finally {
             saving = false;
             if (!disposed) { button.textContent = 'Save context'; saveGroup.refresh(); }
         }
     };
-    button?.addEventListener('click', save);
-    return () => { disposed = true; button?.removeEventListener('click', save); disposers.forEach(dispose => dispose()); };
+    button.addEventListener('click', save);
+    root.addEventListener('input', saveGroup.refresh);
+    root.addEventListener('change', saveGroup.refresh);
+    return {
+        setBoard,
+        anyDirty,
+        boardDirty: () => controls.get('board')?.dirty() || controls.get('card')?.dirty(),
+        isSaving: () => saving,
+        dispose() {
+            disposed = true;
+            button.removeEventListener('click', save);
+            root.removeEventListener('input', saveGroup.refresh);
+            root.removeEventListener('change', saveGroup.refresh);
+            [...disposers, ...boardDisposers].forEach(dispose => dispose());
+        }
+    };
 }
 
 // Automatic account sync status and an immediate retry.

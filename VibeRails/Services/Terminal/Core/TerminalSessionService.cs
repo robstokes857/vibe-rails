@@ -3,6 +3,7 @@ using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services.Environments;
 using VibeRails.Services.Terminal.Consumers;
+using VibeRails.Utils;
 
 
 namespace VibeRails.Services.Terminal;
@@ -143,6 +144,10 @@ public class TerminalSessionService : ITerminalSessionService
             // Resolve once after owning the slot; rejected starts have no prompt side effects.
             var resolved = resolveInitialPrompt is null ? null : await resolveInitialPrompt();
             var initialPrompt = resolved?.Prompt;
+            // A worktree requested by the starting prompt inherits the originating repository's context.
+            if (!contextIncluded && contextProjectPath is null && resolved is not null &&
+                !ProjectPathComparer.Matches(resolved.WorkingDirectory, workingDirectory))
+                contextProjectPath = await ContextLevels.FindLaunchRepositoryAsync(workingDirectory, CancellationToken.None);
             workingDirectory = resolved?.WorkingDirectory ?? workingDirectory;
 
             var (terminal, sessionId, _) = await _runner.CreateSessionAsync(

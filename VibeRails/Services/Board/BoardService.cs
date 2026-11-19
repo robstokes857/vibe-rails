@@ -15,6 +15,7 @@ public partial interface IBoardService
 {
     // Boards. boardId null = the project's default (first) board everywhere it is optional.
     Task<BoardListResponse> GetBoardsAsync(string projectPath, CancellationToken cancellationToken = default);
+    Task<BoardListResponse> GetExistingBoardsAsync(string projectPath, CancellationToken cancellationToken = default);
     Task<BoardSummaryResponse> CreateBoardAsync(string projectPath, CreateBoardRequest request, CancellationToken cancellationToken = default);
     Task<BoardSummaryResponse?> UpdateBoardAsync(string projectPath, string boardId, UpdateBoardRequest request, CancellationToken cancellationToken = default);
     Task<DeleteBoardResponse?> DeleteBoardAsync(string projectPath, string boardId, CancellationToken cancellationToken = default);
@@ -115,6 +116,11 @@ public sealed partial class BoardService(
     public async Task<BoardListResponse> GetBoardsAsync(string projectPath, CancellationToken cancellationToken = default)
     {
         await EnsureDefaultBoardAsync(projectPath, cancellationToken);
+        return await GetExistingBoardsAsync(projectPath, cancellationToken);
+    }
+
+    public async Task<BoardListResponse> GetExistingBoardsAsync(string projectPath, CancellationToken cancellationToken = default)
+    {
         var boards = await store.GetBoardsAsync(projectPath, cancellationToken);
         return await BoardListAsync(projectPath, boards, cancellationToken);
     }

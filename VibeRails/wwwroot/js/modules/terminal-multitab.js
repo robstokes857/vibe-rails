@@ -1,5 +1,5 @@
 import { ChatHistorySidebar } from './chat-history-sidebar.js';
-import { BOARD_SELECTION_STORAGE_KEY } from './board-selection.js';
+import { getSelectedBoardId } from './board-selection.js';
 import {
     buildLlmSelectionValue,
     parseLlmSelection,
@@ -1946,10 +1946,7 @@ export class TerminalManager {
     }
 
     getContextBoardId() {
-        const selected = this.app.boardController?.state?.boardId;
-        if (selected) return selected;
-        try { return globalThis.localStorage?.getItem(BOARD_SELECTION_STORAGE_KEY) || null; }
-        catch { return null; }
+        return getSelectedBoardId(this.app);
     }
 
     getDefaultWorkingDirectory() {

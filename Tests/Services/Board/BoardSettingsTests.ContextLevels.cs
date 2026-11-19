@@ -106,7 +106,7 @@ public sealed partial class BoardSettingsTests
     }
 
     [Fact]
-    public async Task CardAgentGetsAppBoardCardAndCardTypeContextInOrderInOneBlock_AndGetBoardCardShowsTheSame()
+    public async Task CardAgentGetsContextInOrderInOneBlock_AndGetBoardCardShowsTheSame()
     {
         var (board, lane, _, _) = await Lanes();
         var card = await Card(lane);
@@ -114,9 +114,10 @@ public sealed partial class BoardSettingsTests
         card = (await _boards.FindCardAsync(_root, card.Id, Ct))!;
         var service = new BoardService(_boards, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
         await service.SaveAppContextSettingsAsync(new("APP level", 0), Ct);
+        await service.SaveProjectContextSettingsAsync(_root, new("PROJECT level", 0), Ct);
         await service.SaveEveryContextSettingsAsync(_root, board, new("BOARD level", 0), Ct);
         await service.SaveContextSettingsAsync(_root, board, new(new("CARD level", [new("bug", "append", "TYPE level")]), 0), Ct);
-        var expectedBlock = Heading + "\n\nApp context:\nAPP level\n\nBoard context:\nBOARD level\n\nCard context:\nCARD level\n\nCard type context (Bug):\nTYPE level";
+        var expectedBlock = Heading + "\n\nApp context:\nAPP level\n\nProject context:\nPROJECT level\n\nBoard context:\nBOARD level\n\nCard context:\nCARD level\n\nCard type context (Bug):\nTYPE level";
 
         var nudged = await BoardLaunchService.ComposePromptAsync(_boards, _root, card, "codex", null, "work", Ct, nudgeEnabled: true);
         Assert.Equal(1, Occurrences(nudged.Prompt, expectedBlock));
@@ -127,14 +128,14 @@ public sealed partial class BoardSettingsTests
         var read = await BoardTool.RenderCardAsync(service, _boards, _root, detail, BoardTool.CardReadOptions.Default, Ct, nudgeEnabled: true);
         Assert.EndsWith("\n\n" + expectedBlock, read.Text);
 
-        // Nudge off: Card and Card type context still reach the agent; App and Board do not.
+        // Project and card context still reach the agent with the nudge off.
         var plain = await BoardLaunchService.ComposePromptAsync(_boards, _root, card, "codex", null, "work", Ct, nudgeEnabled: false);
-        var cardOnly = Heading + "\n\nCard context:\nCARD level\n\nCard type context (Bug):\nTYPE level";
-        Assert.Contains(cardOnly, plain.Prompt);
+        var repositoryAndCard = Heading + "\n\nProject context:\nPROJECT level\n\nCard context:\nCARD level\n\nCard type context (Bug):\nTYPE level";
+        Assert.Contains(repositoryAndCard, plain.Prompt);
         Assert.DoesNotContain("APP level", plain.Prompt);
         Assert.DoesNotContain("BOARD level", plain.Prompt);
         read = await BoardTool.RenderCardAsync(service, _boards, _root, detail, BoardTool.CardReadOptions.Default, Ct, nudgeEnabled: false);
-        Assert.EndsWith("\n\n" + cardOnly, read.Text);
+        Assert.EndsWith("\n\n" + repositoryAndCard, read.Text);
 
         // Discussion carries the same block.
         var chat = await BoardLaunchService.ComposePromptAsync(_boards, _root, card, "codex", null, "chat", Ct, nudgeEnabled: true);
@@ -144,6 +145,7 @@ public sealed partial class BoardSettingsTests
         // Replace with an empty type message sends no card level; empty levels send nothing at all.
         await service.SaveContextSettingsAsync(_root, board, new(new("CARD level", [new("bug", "replace", "")]), 1), Ct);
         await service.SaveAppContextSettingsAsync(new("", 1), Ct);
+        await service.SaveProjectContextSettingsAsync(_root, new("", 1), Ct);
         await service.SaveEveryContextSettingsAsync(_root, board, new("", 1), Ct);
         var empty = await BoardLaunchService.ComposePromptAsync(_boards, _root, card, "codex", null, "work", Ct, nudgeEnabled: true);
         Assert.DoesNotContain(Heading, empty.Prompt);
@@ -166,11 +168,29 @@ public sealed partial class BoardSettingsTests
 
         static string Text(IReadOnlyList<ContextLevels.Level> levels) => ContextLevels.Format(levels);
         // The project's board, another project with no board, and no project at all.
-        Assert.Equal(Heading + "\n\nApp context:\nEverywhere\n\nBoard context:\nBoard message", Text(await ContextLevels.ResolveNudgedAsync(_boards, _root, null, Ct)));
-        Assert.Equal(Heading + "\n\nApp context:\nEverywhere", Text(await ContextLevels.ResolveNudgedAsync(_boards, _root + "-other", null, Ct)));
-        Assert.Equal(Heading + "\n\nApp context:\nEverywhere", Text(await ContextLevels.ResolveNudgedAsync(_boards, null, null, Ct)));
+        Assert.Equal(Heading + "\n\nApp context:\nEverywhere\n\nBoard context:\nBoard message", Text(await ContextLevels.ResolveForLaunchAsync(_boards, _root, null, true, Ct)));
+        Assert.Equal(Heading + "\n\nApp context:\nEverywhere", Text(await ContextLevels.ResolveForLaunchAsync(_boards, _root + "-other", null, true, Ct)));
+        Assert.Equal(Heading + "\n\nApp context:\nEverywhere", Text(await ContextLevels.ResolveForLaunchAsync(_boards, null, null, true, Ct)));
         // A foreign board id never leaks its Board context into this project's launch.
-        Assert.Equal(Heading + "\n\nApp context:\nEverywhere", Text(await ContextLevels.ResolveNudgedAsync(_boards, _root + "-other", board, Ct)));
+        Assert.Equal(Heading + "\n\nApp context:\nEverywhere", Text(await ContextLevels.ResolveForLaunchAsync(_boards, _root + "-other", board, true, Ct)));
+    }
+
+    [Fact]
+    public async Task ProjectContextReachesALaunchWithoutABoardAndStaysWithinTheRepository()
+    {
+        var service = new BoardService(_boards, Mock.Of<IBoardCommitService>(), new NullBoardLiveSessionProbe());
+        Assert.Equal(new ProjectContextSettingsRecord("", 0), await service.GetProjectContextSettingsAsync(_root, Ct));
+        Assert.Equal(new ProjectContextSettingsRecord("Local instructions", 1),
+            await service.SaveProjectContextSettingsAsync(_root, new("  Local instructions  ", 0), Ct));
+        await Assert.ThrowsAsync<BoardConflictException>(() => service.SaveProjectContextSettingsAsync(_root, new("stale", 0), Ct));
+        await Assert.ThrowsAsync<BoardValidationException>(() => service.SaveProjectContextSettingsAsync(_root, new(new string('x', 4001), 1), Ct));
+
+        Assert.Empty(await _boards.GetBoardsAsync(_root, Ct));
+        var levels = await ContextLevels.ResolveForLaunchAsync(_boards, _root, null, false, Ct);
+        Assert.Equal(new ContextLevels.Level(ContextLevels.ProjectKey, "Project context", "Local instructions"), Assert.Single(levels));
+        Assert.Empty(await ContextLevels.ResolveForLaunchAsync(_boards, _root + "-other", null, false, Ct));
+        Assert.Empty(await ContextLevels.ResolveForLaunchAsync(_boards, null, null, false, Ct));
+        Assert.EndsWith("then wait for the user to give you a task.", ContextLevels.PrependToPrompt(levels, null));
     }
 
     [Fact]
@@ -195,9 +215,9 @@ public sealed partial class BoardSettingsTests
         var reopened = new BoardStore(_connectionString, _stateConnectionString);
         Assert.Equal(new BoardEveryContextSettingsRecord("", 2), await reopened.GetEveryContextSettingsAsync(_root, board, Ct));
         await service.SaveEveryContextSettingsAsync(_root, other.Id, new("Other board", 0), Ct);
-        Assert.Equal("Other board", BoardLevel(await ContextLevels.ResolveNudgedAsync(_boards, _root, other.Id, Ct)));
-        Assert.Equal("", BoardLevel(await ContextLevels.ResolveNudgedAsync(_boards, _root, board, Ct)));
-        Assert.Null(BoardLevel(await ContextLevels.ResolveNudgedAsync(_boards, _root + "-foreign", other.Id, Ct)));
+        Assert.Equal("Other board", BoardLevel(await ContextLevels.ResolveForLaunchAsync(_boards, _root, other.Id, true, Ct)));
+        Assert.Equal("", BoardLevel(await ContextLevels.ResolveForLaunchAsync(_boards, _root, board, true, Ct)));
+        Assert.Null(BoardLevel(await ContextLevels.ResolveForLaunchAsync(_boards, _root + "-foreign", other.Id, true, Ct)));
 
         static string? BoardLevel(IReadOnlyList<ContextLevels.Level> levels) =>
             levels.SingleOrDefault(level => level.Key == ContextLevels.BoardKey)?.Message;

@@ -222,15 +222,16 @@ test('the New board dialog offers a local board or one connected to Jira or Azur
     assert.match(boardSettingsNavigation(), /aria-label="Board settings" role="tablist"/);
 });
 
-test('the Context tab lists every level broadest first, and Settings reuses it for App context alone', () => {
+test('the Context workspace places Project context between App and the board picker', () => {
     const levels = html => [...html.matchAll(/data-context-unit="([^"]+)"/g)].map(match => match[1]);
-    assert.deepEqual(levels(contextEditorSection()), ['app', 'board', 'card']);
-    assert.deepEqual(levels(contextEditorSection({ board: false })), ['app']);
-    // Each level says which launches it reaches; App and Board follow the nudge, Card always applies.
-    assert.match(contextEditorSection(), /<summary>App context<\/summary><p[^>]*>Every LLM CLI launched from VibeRails[^<]*no board[^<]*nudge/);
-    assert.match(contextEditorSection(), /<summary>Board context<\/summary><p[^>]*>Every LLM CLI launched for this board[^<]*currently selected board[^<]*nudge/);
-    assert.ok(contextEditorSection().indexOf('App context') < contextEditorSection().indexOf('Board context'));
-    assert.doesNotMatch(contextEditorSection({ board: false }), /Board context/);
+    const scope = contextEditorSection({ project: true });
+    assert.deepEqual(levels(scope), ['app', 'nudge', 'project']);
+    assert.deepEqual(levels(contextEditorSection()), ['app', 'nudge']);
+    assert.match(scope, /<summary>App context<\/summary><p[^>]*>Applies across all repos[^<]*Nudge/);
+    assert.match(scope, /<summary>Project context<\/summary><p[^>]*>Sent to every LLM launched from this repo[^<]*Nudge off/);
+    assert.ok(scope.indexOf('App context') < scope.indexOf('Project context'));
+    assert.ok(scope.indexOf('Project context') < scope.indexOf('context-board-picker'));
+    assert.match(contextEditorSection(), /Open a Git repository to edit Project context/);
     assert.doesNotMatch(boardSettingsNavigation(), /App context|Every Context|data-board-settings-tab="every-context"/);
 });
 
@@ -252,7 +253,7 @@ test('Card context is collapsed above card types and all levels share the editor
     assert.match(html, /<option value="append" selected>Card context \+ type-specific<\/option>/);
     assert.match(html, /&lt;b&gt;Bug&lt;\/b&gt;/);
     assert.match(html, /<details[^>]*data-context-level="card">/);
-    assert.equal((html.match(/<details/g) || []).length, 6);
+    assert.equal((html.match(/<details/g) || []).length, 7);
     assert.doesNotMatch(html, /<details[^>]*\bopen\b|data-settings-save/);
     assert.equal((contextEditorSection().match(/data-context-save/g) || []).length, 1);
     assert.match(contextEditorSection(), /data-context-level="app" open/);
@@ -260,25 +261,37 @@ test('Card context is collapsed above card types and all levels share the editor
     dispose();
 });
 
-test('the editor mounts App context alone in Settings and every level for a board, and disposes them together', async () => {
+test('changing boards disposes only the former board requests; leaving disposes every request', () => {
     const calls = [];
-    const units = new Map(['app', 'board', 'card'].map(name => [name, { content: { innerHTML: 'loading' } }]));
+    const units = new Map(['app', 'nudge', 'project', 'board', 'card'].map(name => [name, { content: { innerHTML: 'loading' } }]));
     const unitElement = name => ({
+        dataset: { contextUnit: name },
         isConnected: true,
         querySelector: () => units.get(name).content,
         querySelectorAll: () => [],
         addEventListener() {}, removeEventListener() {}
     });
-    const root = { querySelector: selector => selector === '[data-context-save]' ? null : unitElement(/data-context-unit="([^"]+)"/.exec(selector)[1]) };
+    const button = { addEventListener() {}, removeEventListener() {} };
+    const boardUnits = { innerHTML: '' };
+    const root = {
+        querySelector(selector) {
+            if (selector === '[data-context-save]') return button;
+            if (selector === '[data-context-board-units]') return boardUnits;
+            return unitElement(/data-context-unit="([^"]+)"/.exec(selector)[1]);
+        },
+        addEventListener() {}, removeEventListener() {}
+    };
     const app = { apiCall: (path, method, _body, options) => { calls.push({ path, method, signal: options.signal }); return new Promise(() => {}); } };
     BoardApi.attach(app);
-    const disposeSettings = mountContextEditor(app, root, { toastTitle: 'Settings' });
-    assert.deepEqual(calls.map(call => call.path), ['/api/v1/board/app-context']);
-    const disposeBoard = mountContextEditor(app, root, { boardId: 'board-a' });
-    assert.deepEqual(calls.slice(1).map(call => call.path),
-        ['/api/v1/board/app-context', '/api/v1/board/boards/board-a/every-context', '/api/v1/board/boards/board-a/context']);
-    disposeSettings();
-    disposeBoard();
+    const editor = mountContextEditor(app, root);
+    assert.deepEqual(calls.map(call => call.path), ['/api/v1/board/app-context', '/api/v1/settings', '/api/v1/board/project-context']);
+    editor.setBoard('board-a');
+    assert.deepEqual(calls.slice(3).map(call => call.path),
+        ['/api/v1/board/boards/board-a/every-context', '/api/v1/board/boards/board-a/context']);
+    editor.setBoard('board-b');
+    assert.ok(calls.slice(3, 5).every(call => call.signal.aborted));
+    assert.ok(calls.slice(0, 3).every(call => !call.signal.aborted));
+    editor.dispose();
     assert.ok(calls.every(call => call.signal.aborted));
 });
 
