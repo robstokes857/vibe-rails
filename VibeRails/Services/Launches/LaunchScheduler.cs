@@ -94,10 +94,23 @@ public sealed class LaunchScheduler(IServiceScopeFactory scopes, ILaunchStore st
         }
     }
 
-    /// <summary>Keep terminals in their project's open root; allow closed-project schedules after a grace period.</summary>
+    /// <summary>
+    /// How long every scheduler leaves a queued terminal-picker tab alone. The backend that was asked
+    /// claims it inside the request (<see cref="LaunchDispatcher.DispatchRequestedTabAsync"/>). An older
+    /// version queues it instead and claims it on its own next 2 s tick, so this is three ticks. It is
+    /// a delay, not a ban: a retry queued from outside a root has no backend of its own to open it.
+    /// </summary>
+    internal static readonly TimeSpan RequestedTabGrace = TimeSpan.FromSeconds(6);
+
+    /// <summary>
+    /// Keep terminals in their project's open root; allow closed-project schedules after a grace period.
+    /// Two roots can be open on one project (a VS Code window and the browser, say). A terminal-picker
+    /// tab then belongs in the one whose page asked, so every root waits out <see cref="RequestedTabGrace"/>.
+    /// </summary>
     internal static bool CanDispatchHere(LaunchRun run, string project, IReadOnlyList<string> openProjects, DateTime now) =>
-        Utils.ProjectPathComparer.Matches(project, run.ProjectPath)
-        || run.QueuedUtc <= now.AddSeconds(-30) && !openProjects.Any(open => Utils.ProjectPathComparer.Matches(open, run.ProjectPath));
+        !(run.Snapshot.IsInteractiveTerminal && run.QueuedUtc > now - RequestedTabGrace)
+        && (Utils.ProjectPathComparer.Matches(project, run.ProjectPath)
+            || run.QueuedUtc <= now.AddSeconds(-30) && !openProjects.Any(open => Utils.ProjectPathComparer.Matches(open, run.ProjectPath)));
 
     internal async Task ReconcileAsync(LaunchRun run, IServiceProvider services, CancellationToken ct)
     {

@@ -144,7 +144,14 @@ non-Board presets, including retries. It opens a normal tab outside the robot me
 the saved prompt/options and run history, and exempts interactive sessions from agent idle
 cleanup. The UI remembers its preset selection and name and focuses the tab after its
 session starts without opening the definition editor. Leaving the terminal cancels only
-the UI's launch polling, not an already queued run.
+the UI's launch polling, not an already queued run. Each picker launch is its own tab:
+the same definition can be started again while an earlier tab is open or still starting
+(see the claim rule under Execution and recovery). The root that receives the request
+opens the tab before it answers (`LaunchDispatcher.DispatchRequestedTabAsync`, also on
+`/runs/{id}/retry`), so the response already carries `tabId` and `sessionId`, or the
+failure and its `error`. If a run is still queued after 30 seconds the UI cancels it, so
+a tab cannot open later unasked; a claimed run is followed for two minutes. A launch
+that does not open reports the run's own `error`.
 Other non-Board preset launches, including the catalog, Quick actions, VS Code,
 Quality/Rules fixes, schedules and Git events, use native terminals. UI callers leave the
 current view open and poll for startup or failure. `LaunchService` enforces this default
@@ -251,9 +258,24 @@ execution, including old queued payloads. Supported ordinary substitutions run
 once in the executing child; its exact final prompt is recorded before spawn.
 
 Claims atomically reserve one of three machine-wide slots, with at most one
-active run of a definition per project. Root-only scheduling uses a renewable
+active run of a definition per project. An interactive terminal-picker tab
+(`LaunchSnapshot.IsInteractiveTerminal`) is exempt from both and counts toward neither:
+its run stays active for as long as the user keeps the tab, so under the limits one open
+tab blocked every later start of its definition in that project, and three open tabs
+blocked all launches on the machine. The limits bound work VibeRails starts by itself;
+the tab strip's own limit bounds these. `LaunchStore.ClaimSql` mirrors that property
+with `json_extract`, and `OnlyAnInteractiveTerminalTabIsExemptFromTheAgentLimits`
+keeps the two in step. Root-only scheduling uses a renewable
 SQLite lease. Dispatch prefers a root open on the run's project; another root
 may take over after 30 seconds only when no root for that project remains open.
+Two roots can be open on one project (a VS Code window and the browser, or two
+versions). A terminal-picker tab belongs in the root whose page asked for it: that
+root claims it inside the request, and every scheduler leaves a queued one alone for
+`LaunchScheduler.RequestedTabGrace` (6 seconds). Left to the scheduler, the tab opened
+in whichever root ticked first, and the page that asked got 404 for a tab its own root
+never had and reported that nothing opened. The grace is a delay, not a ban, because an
+older root queues the run and claims it on its own next tick, and a retry queued from
+outside a root has no root of its own.
 Before/after-commit hooks only enqueue; VCA preflight blocking
 remains independent. No daemon or OS registration is added.
 

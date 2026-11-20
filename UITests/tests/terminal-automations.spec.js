@@ -175,15 +175,22 @@ async function openFixture(page, total = 35, presets = []) {
         if (path === '/api/v1/runs' && route.request().method() === 'POST') {
             const body = route.request().postDataJSON();
             launches.push(body);
+            // Every launch is its own run and tab. The first keeps the bare names; later ones are numbered.
+            const suffix = launches.length === 1 ? '' : `-${launches.length}`;
             // The run records its session before the tab host publishes it (BeforeSpawnAsync), so
             // the host first reports no session, as the real child does while the CLI spawns.
-            const tab = { tabId: 'picker-agent', sessionId: 'picker-session', cli: 'codex',
+            const tab = { tabId: `picker-agent${suffix}`, sessionId: `picker-session${suffix}`, cli: 'codex',
                 hasActiveSession: false, startingReads: 1, createdUTC: new Date().toISOString(), workingDirectory: 'C:/fixture' };
             tabs.set(tab.tabId, tab);
-            return route.fulfill({ json: { id: 'picker-run', status: 'queued' } });
+            // The root opens a picker tab before it answers, so the response already names it.
+            return route.fulfill({ json: { id: `picker-run${suffix}`, status: 'running',
+                tabId: tab.tabId, sessionId: tab.sessionId } });
         }
-        if (path === '/api/v1/runs/picker-run')
-            return route.fulfill({ json: { id: 'picker-run', status: 'running', tabId: 'picker-agent', sessionId: 'picker-session' } });
+        if (path.startsWith('/api/v1/runs/picker-run')) {
+            const suffix = path.slice('/api/v1/runs/picker-run'.length);
+            return route.fulfill({ json: { id: `picker-run${suffix}`, status: 'running',
+                tabId: `picker-agent${suffix}`, sessionId: `picker-session${suffix}` } });
+        }
         if (path === '/api/v1/terminal/tabs' && route.request().method() === 'POST') {
             // "+" opens a backend host with no session: the blank "Select a LLM" placeholder.
             const tab = { tabId: `placeholder-${tabs.size}`, sessionId: null, cli: null,
@@ -280,6 +287,24 @@ for (const width of [1280, 390]) test(`terminal picker opens a regular Agent tab
     expect(fixture.deleted).not.toContain('picker-agent'); // Normal tabs retain the close/undo grace period.
 });
 
+test('terminal picker starts the same saved launch again as a second tab', async ({ page }) => {
+    // One active run of a definition per project was the rule for every launch, and a picker
+    // tab's run stays active while the tab is open: the second Start waited 30 seconds and gave up.
+    const fixture = await openFixture(page, 1, [{ id: 'yolo', name: 'codex_yolo', cli: 'codex', initialPrompt: '', revision: 2 }]);
+    await page.locator('#terminal-header-select-ts-control').click();
+    await page.locator('.ts-dropdown .option[data-value="preset:yolo:codex"]').click();
+    await page.locator('#terminal-start-btn').click();
+    await expect.poll(() => page.evaluate(() => window.app.terminalController.manager.activeTabId)).toBe('picker-agent');
+    // The picker keeps the saved launch selected for the next Start.
+    await page.locator('#terminal-start-btn').click();
+    await expect.poll(() => fixture.launches.length).toBe(2);
+    await expect.poll(() => page.evaluate(() => window.app.terminalController.manager.activeTabId)).toBe('picker-agent-2');
+    await expect(page.locator(normalTabs).filter({ hasText: 'codex_yolo' })).toHaveCount(2);
+    await expect(page.locator(normalTabs)).toHaveCount(3);
+    expect(fixture.connections).toEqual(expect.arrayContaining(['picker-agent', 'picker-agent-2']));
+    await expect(page.getByText(/did not start|waiting to start|unusually long/)).toHaveCount(0);
+});
+
 test('terminal picker launched from a blank placeholder tab shows the new Agent tab', async ({ page }) => {
     const fixture = await openFixture(page, 1, [{ id: 'reviewer', name: 'Code review', cli: 'codex',
         initialPrompt: 'Review the changes.', revision: 4 }]);
@@ -288,12 +313,19 @@ test('terminal picker launched from a blank placeholder tab shows the new Agent 
     await expect(page.getByText('Select a LLM to continue')).toBeVisible();
     await page.locator('#terminal-header-select-ts-control').click();
     await page.locator('.ts-dropdown .option[data-value="preset:reviewer:codex"]').click();
+    // The blank tab now holds the pick. It reads as the launch, not as a generic "Saved launch".
+    await expect(page.locator(normalTabs).filter({ hasText: 'Code review' })).toHaveCount(1);
+    await expect(page.locator(normalTabs).filter({ hasText: 'Saved launch' })).toHaveCount(0);
     await page.locator('#terminal-start-btn').click();
     await expect.poll(() => fixture.launches.length).toBe(1);
     await expect.poll(() => page.evaluate(() => window.app.terminalController.manager.activeTabId)).toBe('picker-agent');
-    await expect(page.locator(normalTabs).filter({ hasText: 'Code review' })).toBeVisible();
+    // The run opened its own tab, so the blank one it was picked in has no job left. It used
+    // to stay behind, empty, beside the tab that was running.
+    await expect(page.locator(normalTabs)).toHaveCount(2);
+    await expect(page.locator(normalTabs).filter({ hasText: 'Code review' })).toHaveCount(1);
     await expect(page.getByText('Select a LLM to continue')).toBeHidden();
     expect(fixture.connections).toContain('picker-agent');
+    await expect.poll(() => fixture.deleted.filter(id => id.startsWith('placeholder-')).length).toBe(1);
 });
 
 for (const renderer of ['webgl', 'canvas']) test(`${renderer} renderer fonts survive the strict canvas font parser in VS Code webviews`, async ({ page }) => {

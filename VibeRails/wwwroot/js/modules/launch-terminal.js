@@ -12,10 +12,20 @@ export async function waitForNativeLaunch(api, initial, { signal } = {}) {
     return run;
 }
 
-/** Follow a queued launch without keeping a timer or request alive after dismissal. */
-export async function openLaunchTerminal(app, api, initial, { signal, metadata } = {}) {
+/** One-second polls a run may spend queued, and may spend starting once a root has claimed it. */
+export const QUEUED_POLLS = 30;
+export const STARTING_POLLS = 120;
+
+/**
+ * Follow a queued launch until its tab is on screen, without keeping a timer or request alive
+ * after dismissal. Resolves `{ opened, run }`: `run` is the last state read, so a caller can say
+ * why nothing opened. A run nobody has claimed is given up on after QUEUED_POLLS. A claimed one
+ * is already starting its tab, so it is followed for STARTING_POLLS: giving up sooner left a
+ * live agent in a tab the page never showed.
+ */
+export async function followLaunchTerminal(app, api, initial, { signal, metadata } = {}) {
     let run = initial;
-    for (let attempt = 0; attempt < 30 && !signal?.aborted; attempt++) {
+    for (let polls = 0; !signal?.aborted; polls++) {
         const ended = isRunFinished(run) || run.status === 'uncertain';
         // The run records its session before the tab host spawns and publishes it
         // (LaunchExecution.BeforeSpawnAsync). Adopting on the run row alone added the tab
@@ -24,11 +34,11 @@ export async function openLaunchTerminal(app, api, initial, { signal, metadata }
             if (metadata) app.terminalController.rememberTabLaunch(run.tabId, metadata);
             if (!(await app.terminalController.adoptLaunchedTab(run.tabId)))
                 app.navigate('terminal-focus', { tabId: run.tabId });
-            return true;
+            return { opened: true, run };
         }
-        if (ended) return false;
+        if (ended || polls >= (run.status === 'queued' ? QUEUED_POLLS : STARTING_POLLS)) break;
         await waitForPoll(signal);
-        if (signal?.aborted) return false;
+        if (signal?.aborted) break;
         run = await api.call(
             `runs/${encodeURIComponent(run.id)}`,
             'GET',
@@ -36,7 +46,12 @@ export async function openLaunchTerminal(app, api, initial, { signal, metadata }
             { signal }
         );
     }
-    return false;
+    return { opened: false, run };
+}
+
+/** Whether followLaunchTerminal put the run's tab on screen. */
+export async function openLaunchTerminal(app, api, initial, options) {
+    return (await followLaunchTerminal(app, api, initial, options)).opened;
 }
 
 /** Whether the run's tab host already reports the run's own session as live. */

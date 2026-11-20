@@ -5,8 +5,9 @@ import { LaunchApi } from '../../../VibeRails/wwwroot/js/modules/launch-api.js';
 import { TerminalManager } from '../../../VibeRails/wwwroot/js/modules/terminal-multitab.js';
 import { LlmPickerController } from '../../../VibeRails/wwwroot/js/modules/llm-picker-controller.js';
 
-function fixture({ prompt = 'Review the changes.', status = 'running', tabStatuses = [] } = {}) {
-    const requests = [], adopted = [], toasts = [], remembered = [], statusReads = [];
+function fixture({ prompt = 'Review the changes.', status = 'running', tabStatuses = [], error = null,
+    later = { status: 'running', tabId: 'tab', sessionId: 'session' }, cancelFails = false } = {}) {
+    const requests = [], adopted = [], toasts = [], remembered = [], statusReads = [], cancels = [];
     const app = {
         data: {}, showToast: (...args) => toasts.push(args),
         async apiCall(path, method, body) {
@@ -16,11 +17,18 @@ function fixture({ prompt = 'Review the changes.', status = 'running', tabStatus
                 // Scripted host replies first, then the run's session is live.
                 return tabStatuses.length ? tabStatuses.shift() : { hasActiveSession: true, sessionId: 'session' };
             }
-            if (path === '/api/v1/runs/run') return { id: 'run', status: 'running', tabId: 'tab', sessionId: 'session' };
+            // `later` is what every read after the enqueue reports.
+            if (path === '/api/v1/runs/run') return { id: 'run', ...later };
+            if (path === '/api/v1/runs/run/cancel') {
+                assert.equal(method, 'POST');
+                cancels.push(path);
+                if (cancelFails) throw new Error('Not found');
+                return null;
+            }
             assert.equal(path, '/api/v1/runs');
             assert.equal(method, 'POST');
             requests.push(body);
-            return { id: 'run', status, ...(status === 'running' ? { tabId: 'tab', sessionId: 'session' } : {}) };
+            return { id: 'run', status, ...(error ? { error } : {}), ...(status === 'running' ? { tabId: 'tab', sessionId: 'session' } : {}) };
         },
         terminalController: {
             rememberTabLaunch(id, metadata) { remembered.push({ id, ...metadata }); },
@@ -36,7 +44,16 @@ function fixture({ prompt = 'Review the changes.', status = 'running', tabStatus
         app, getActiveTab: () => ({ state: { hasActiveSession: true } }),
         getSelectionMeta: () => ({ cli: 'codex' })
     });
-    return { controller, manager, requests, adopted, toasts, remembered, statusReads };
+    return { controller, manager, requests, adopted, toasts, remembered, statusReads, cancels };
+}
+
+const settle = () => new Promise(resolve => setImmediate(resolve));
+/** Lets `seconds` one-second polls elapse on mocked timers. */
+async function elapse(t, seconds) {
+    for (let i = 0; i < seconds; i++) {
+        t.mock.timers.tick(1000);
+        await settle();
+    }
 }
 
 test('a picker launch waits until its tab host reports the run session before adopting the tab', async () => {
@@ -68,6 +85,20 @@ test('terminal picker opens Agents and Quick Launches as normal tabs with saved 
     }
 });
 
+test('a picker launch says it is opening before the backend is asked', async () => {
+    // The backend opens the tab before it answers, so a message after the answer comes too late.
+    const f = fixture();
+    const app = f.controller.app, answer = app.apiCall;
+    let toastsWhenAsked = null;
+    app.apiCall = async function (path, method, body) {
+        if (path === '/api/v1/runs' && method === 'POST') toastsWhenAsked = f.toasts.map(t => t[1]);
+        return answer.call(this, path, method, body);
+    };
+    await f.manager.startFromSelection('preset:agent:codex');
+    assert.deepEqual(toastsWhenAsked, ['Opening Reviewer…']);
+    assert.deepEqual(f.toasts.map(t => t[1]), ['Opening Reviewer…'], 'a tab that opened needs no second message');
+});
+
 test('catalog and legacy focus requests continue to open native windows', async () => {
     for (const options of [{}, { focusTerminal: true, nativeTerminal: false }]) {
         const f = fixture();
@@ -94,11 +125,98 @@ test('Manage quick launches uses the same ordinary terminal destination', async 
     assert.deepEqual(f.adopted, ['tab']);
 });
 
-test('failed tab launches stay on the terminal surface and point to run history', async () => {
-    const f = fixture({ status: 'failed' });
+test('a failed tab launch stays on the terminal surface and gives the reason the run recorded', async () => {
+    const f = fixture({ status: 'failed', error: 'The terminal could not be created.' });
     await f.manager.startFromSelection('preset:agent:codex');
     assert.deepEqual(f.adopted, []);
-    assert.match(f.toasts.at(-1)[1], /Check Run history/);
+    assert.deepEqual(f.cancels, []);
+    assert.deepEqual(f.toasts.at(-1), ['AI Agents', 'Reviewer did not start. The terminal could not be created.', 'error']);
+
+    // A run that ended without recording a reason still points somewhere useful.
+    const silent = fixture({ status: 'interrupted' });
+    await silent.manager.startFromSelection('preset:agent:codex');
+    assert.deepEqual(silent.toasts.at(-1), ['AI Agents', 'Reviewer did not start. Check Run history for details.', 'error']);
+});
+
+test('the same saved launch opens again while its first tab is still starting', async t => {
+    // Each picker launch is its own tab. The first run is claimed and its tab host has not
+    // reported a session yet, which used to swallow every further Start for that launch.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const f = fixture({ status: 'claimed', later: { status: 'claimed' } });
+    const leave = new AbortController();
+    const start = () => f.controller.launch('agent', 'preset', { terminalTab: true, signal: leave.signal });
+    const first = start();
+    await settle();
+    assert.equal(f.requests.length, 1);
+    const second = start();
+    await settle();
+    assert.equal(f.requests.length, 2, 'the second Start queued its own run');
+    leave.abort();
+    await Promise.all([first, second]);
+    assert.equal(f.toasts.some(toast => toast[2] !== 'info'), false, 'leaving the terminal is not a failure');
+});
+
+test('a double click queues one run', async () => {
+    const f = fixture();
+    await Promise.all([
+        f.manager.startFromSelection('preset:agent:codex'),
+        f.manager.startFromSelection('preset:agent:codex')
+    ]);
+    assert.equal(f.requests.length, 1);
+    assert.deepEqual(f.adopted, ['tab']);
+});
+
+test('a launch nothing picks up is cancelled after 30 seconds and says so', async t => {
+    // Left queued, the run would open a tab whenever something finally claimed it.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const f = fixture({ status: 'queued', later: { status: 'queued' } });
+    const launching = f.manager.startFromSelection('preset:agent:codex');
+    await settle();
+    await elapse(t, 29);
+    assert.deepEqual(f.cancels, [], 'still inside the wait');
+    await elapse(t, 1);
+    await launching;
+    assert.deepEqual(f.cancels, ['/api/v1/runs/run/cancel']);
+    assert.deepEqual(f.adopted, []);
+    assert.deepEqual(f.toasts.at(-1),
+        ['AI Agents', 'Reviewer was still waiting to start after 30 seconds, so it was cancelled.', 'warning']);
+});
+
+test('a queued launch that cannot be cancelled says where to cancel it', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const f = fixture({ status: 'queued', later: { status: 'queued' }, cancelFails: true });
+    const launching = f.manager.startFromSelection('preset:agent:codex');
+    await settle();
+    await elapse(t, 30);
+    await launching;
+    assert.match(f.toasts.at(-1)[1], /Cancel it in Run history/);
+});
+
+test('a claimed launch is followed past 30 seconds and its tab is adopted when it starts', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const later = { status: 'claimed' };
+    const f = fixture({ status: 'queued', later });
+    const launching = f.manager.startFromSelection('preset:agent:codex');
+    await settle();
+    await elapse(t, 45);
+    assert.deepEqual(f.adopted, []);
+    assert.deepEqual(f.cancels, [], 'a run that is starting is never cancelled');
+    Object.assign(later, { status: 'running', tabId: 'tab', sessionId: 'session' });
+    await elapse(t, 1);
+    await launching;
+    assert.deepEqual(f.adopted, ['tab']);
+    assert.equal(f.toasts.some(toast => toast[2] !== 'info'), false);
+});
+
+test('a launch that never finishes starting stops being followed after two minutes', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const f = fixture({ status: 'claimed', later: { status: 'claimed' } });
+    const launching = f.manager.startFromSelection('preset:agent:codex');
+    await settle();
+    await elapse(t, 120);
+    await launching;
+    assert.deepEqual(f.cancels, []);
+    assert.match(f.toasts.at(-1)[1], /^Reviewer is taking unusually long to start/);
     assert.equal(f.toasts.at(-1)[2], 'warning');
 });
 

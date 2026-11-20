@@ -25,6 +25,11 @@ public interface ILaunchStore
     Task<IReadOnlyList<LaunchRun>> GetBoardRunsAsync(string project, string cardId, int offset = 0, string? runId = null, string? sessionId = null, CancellationToken ct = default);
     Task<bool> RecordVerdictAsync(LaunchClaim claim, string verdict, string? evidenceId, CancellationToken ct = default);
     Task<bool> RecordProcessAsync(LaunchClaim claim, int pid, DateTime startedUtc, CancellationToken ct = default);
+    /// <summary>
+    /// Claims a queued run when one of <paramref name="capacity"/> machine-wide slots is free and no
+    /// other run of its definition is active in its project. An interactive terminal tab
+    /// (<see cref="LaunchSnapshot.IsInteractiveTerminal"/>) is always claimed and counts toward neither limit.
+    /// </summary>
     Task<LaunchClaim?> TryClaimAsync(string id, int capacity, int ownerPid, DateTime ownerStartedUtc, CancellationToken ct = default);
     Task<bool> SetTabAsync(LaunchClaim claim, string tabId, CancellationToken ct = default);
     Task<bool> StartAsync(LaunchClaim claim, string? sessionId, string? prompt, string workingDirectory,

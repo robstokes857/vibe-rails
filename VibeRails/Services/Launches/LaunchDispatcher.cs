@@ -16,6 +16,18 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
 {
     public const int Capacity = 3;
 
+    /// <summary>
+    /// Opens a terminal-picker tab in this backend, in the request that asked for it. The page that
+    /// asked is attached to this backend, and it waits for the tab in this backend's tab strip.
+    /// Left queued, the run went to whichever root open on the project ticked first; in another
+    /// window's root the tab opened where nobody was looking and the page reported that nothing
+    /// had opened. Any other run is returned as it is: the scheduler places it.
+    /// </summary>
+    /// <param name="run">The run the request just queued or found.</param>
+    /// <param name="ct">The host's stopping token, not the request's: a page that navigates away must not abandon a tab that is half open.</param>
+    public Task<LaunchRun> DispatchRequestedTabAsync(LaunchRun run, CancellationToken ct = default) =>
+        run.Status == "queued" && run.Snapshot.IsInteractiveTerminal ? DispatchAsync(run.Id, ct) : Task.FromResult(run);
+
     public async Task<LaunchRun> DispatchAsync(string id, CancellationToken ct = default)
     {
         var run = await store.GetRunAsync(id, ct) ?? throw new LaunchValidationException("Run not found.");

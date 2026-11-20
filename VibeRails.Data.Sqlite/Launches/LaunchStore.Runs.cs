@@ -151,19 +151,38 @@ public sealed partial class LaunchStore
         return await cmd.ExecuteNonQueryAsync(ct) == 1;
     }
 
+    /// <summary>
+    /// <see cref="LaunchSnapshot.IsInteractiveTerminal"/> for the Runs row named <paramref name="row"/>.
+    /// Every comparison uses IS, so a missing property is false and never NULL: a NULL here would
+    /// drop the row from the active count below instead of counting it.
+    /// </summary>
+    private static string InteractiveTab(string row) =>
+        $"({row}.DefinitionType='preset' AND json_extract({row}.Snapshot,'$.context.terminalTab') IS 1"
+        + $" AND json_extract({row}.Snapshot,'$.context.triggerKind') IS 'manual'"
+        + $" AND json_extract({row}.Snapshot,'$.context.cardId') IS NULL)";
+
+    /// <summary>
+    /// A tab the user opened from the terminal picker stays open, and its run active, for as long
+    /// as they keep it. It therefore neither waits for nor holds a machine slot or its
+    /// definition's one active run: both limits exist to bound work VibeRails starts by itself.
+    /// </summary>
+    private static readonly string ClaimSql = $"""
+        UPDATE Runs SET Status='claimed',ClaimToken=$token,OwnerPid=$pid,OwnerStartedUTC=$started,ClaimedUTC=$now
+        WHERE Id=$id AND Status='queued' AND CancelRequested=0 AND ({InteractiveTab("Runs")} OR (
+            (SELECT count(*) FROM Runs active WHERE active.Status IN ('claimed','running','uncertain')
+                AND NOT {InteractiveTab("active")})<$capacity
+            AND NOT EXISTS(SELECT 1 FROM Runs active WHERE active.DefinitionId=Runs.DefinitionId
+                AND active.ProjectPath=Runs.ProjectPath AND active.Status IN ('claimed','running','uncertain')
+                AND NOT {InteractiveTab("active")})));
+        """;
+
     public async Task<LaunchClaim?> TryClaimAsync(string id, int capacity, int ownerPid, DateTime ownerStartedUtc, CancellationToken ct = default)
     {
         if (capacity < 1) throw new ArgumentOutOfRangeException(nameof(capacity));
         using var db = Open();
         using var tx = db.BeginTransaction(deferred: false);
         var token = Guid.NewGuid().ToString("N");
-        using var cmd = Command(db, """
-            UPDATE Runs SET Status='claimed',ClaimToken=$token,OwnerPid=$pid,OwnerStartedUTC=$started,ClaimedUTC=$now
-            WHERE Id=$id AND Status='queued' AND CancelRequested=0
-                AND (SELECT count(*) FROM Runs WHERE Status IN ('claimed','running','uncertain'))<$capacity
-                AND NOT EXISTS(SELECT 1 FROM Runs active WHERE active.DefinitionId=Runs.DefinitionId
-                    AND active.ProjectPath=Runs.ProjectPath AND active.Status IN ('claimed','running','uncertain'));
-            """, tx, ("$token", token), ("$pid", ownerPid), ("$started", Stamp(ownerStartedUtc)),
+        using var cmd = Command(db, ClaimSql, tx, ("$token", token), ("$pid", ownerPid), ("$started", Stamp(ownerStartedUtc)),
             ("$now", Stamp(DateTime.UtcNow)), ("$id", id), ("$capacity", capacity));
         if (await cmd.ExecuteNonQueryAsync(ct) != 1) return null;
         tx.Commit();

@@ -28,7 +28,21 @@ run history; it does not open the definition editor. `openLaunchTerminal` adopts
 only once `/terminal/tabs/{tabId}/status` reports the run's own session as active (or the run
 has ended): the run records `sessionId` in `BeforeSpawnAsync`, before the child spawns and
 publishes it, and a tab adopted in that window had no session, showed "Select a LLM to
-continue" and never connected. Other non-Board preset launches,
+continue" and never connected. Each picker launch is its own tab: `launch()` holds its
+per-definition guard only until the request returns, so the same Agent or Quick Launch can
+be started again while an earlier tab is open, and the server claims picker
+tabs outside the agent limits ([Launches README](../Services/Launches/README.md)).
+The backend opens the tab before it answers `POST /runs`, so `launch()` shows "Opening
+<name>…" before the request, not after. The tab the launch was picked in is not the
+tab that runs it: a sessionless tab holding a `preset:` selection counts as a blank
+placeholder (`selectBlankPlaceholderTabIds`, `startsHere`) and is pruned once the run's
+tab is live, and until then it is labelled with the launch's name
+(`LlmPickerController.savedLaunchName`), never the generic "Saved launch".
+`followLaunchTerminal` returns `{ opened, run }`; `openLaunchTerminal` is its boolean form.
+It gives up on a run still `queued` after 30 one-second polls, and `followTerminalTab` then
+cancels that run so no tab opens later unasked. A claimed run is followed for 120 polls.
+When no tab opens, the toast names the launch and gives the run's own `error`; do not go
+back to a generic "has not opened". Other non-Board preset launches,
 including VS Code and Quality/Rules, use native terminals. Legacy `focusTerminal:true`
 and `nativeTerminal:false` alone do not change that default. Board launches stay in-app;
 script/check presentation and signed library script windows retain their existing flow.

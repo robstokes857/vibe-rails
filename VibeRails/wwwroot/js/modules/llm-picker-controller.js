@@ -309,6 +309,14 @@ export class LlmPickerController {
         return catalog.filter((item) => item.inProject !== false && matcher(item, this._launchKind(item)));
     }
 
+    /** The name a saved Agent or Quick Launch is listed under; null when the catalog does not hold it. */
+    savedLaunchName(key) {
+        const catalog = this.usingFallbackCatalog
+            ? this._buildFallbackCatalog()
+            : (this.catalog || this._buildFallbackCatalog());
+        return catalog.find((item) => item.key === key)?.label || null;
+    }
+
     /** The classification is supplied by the shared server catalog. */
     _launchKind(item) {
         return ['agent', 'quick-launch'].includes(item.kind) ? item.kind : 'base';

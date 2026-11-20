@@ -8,7 +8,10 @@ The current launch model uses global presets and single typed Actions in
 claims, and `LaunchScheduler` runs only in an open root backend. Board launches
 use in-app terminals. The terminal picker explicitly requests `terminalTab:true` for
 ordinary interactive preset tabs; retries retain that presentation and these sessions
-have no agent idle deadline. Other non-Board preset admissions and retries use native
+have no agent idle deadline and hold no execution slot, so the same saved launch can be
+open in several tabs. The root that receives the request opens the tab itself, because
+another root open on the same project has a different tab strip. Other non-Board preset
+admissions and retries use native
 terminals. Script/check presentation is unchanged. Assignments
 and ordered entries remain behind `IBoardStore`; recordings stay in the session
 store. Retired Environment/Job definitions are retained without adoption or

@@ -4,6 +4,7 @@ import { launchProjectField, mountLaunchProjects } from './launch-project-picker
 import {
     LaunchApi,
     attachmentForEditor,
+    isRunFinished,
     retiredStepMessage
 } from './launch-api.js';
 import { cardEditorLayout, configureCardEditorDialog } from './card-editor.js';
@@ -28,7 +29,7 @@ import { mountLlmPicker } from './pickers/llm-picker.js';
 import { runHistorySection, mountRunHistory } from './launch-history.js';
 import { bindingSection, mountBindings, bindingTrigger } from './launch-bindings.js';
 import { PythonScriptsController } from './python-scripts-controller.js';
-import { openLaunchTerminal, waitForNativeLaunch } from './launch-terminal.js';
+import { QUEUED_POLLS, followLaunchTerminal, openLaunchTerminal, waitForNativeLaunch } from './launch-terminal.js';
 import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
 import { promptVariableHelp, bindPromptVariableHelp } from './prompt-variable-help.js';
 import { bindPromptReferenceHighlights } from './prompt-reference-highlights.js';
@@ -232,6 +233,12 @@ export class AiAgentsController {
         if (type === 'preset') nativeTerminal = !terminalTab;
         if (this.launching.has(id)) return;
         this.launching.add(id);
+        // The guard covers composing and queuing one run, so a double click queues it once.
+        let composing = true;
+        const composed = () => {
+            if (composing) this.launching.delete(id);
+            composing = false;
+        };
         try {
             let initialPrompt = null,
                 expectedRevision = null,
@@ -255,6 +262,9 @@ export class AiAgentsController {
                     title: preset.name
                 };
             }
+            // This backend opens a picker tab before it answers, so the request takes as long
+            // as the tab does: say what is happening first.
+            if (terminalTab) this.app.showToast('AI Agents', `Opening ${terminalMetadata.label}…`, 'info');
             const run = await this.api.run(id, type, {
                 promptPrefix,
                 initialPrompt,
@@ -264,14 +274,10 @@ export class AiAgentsController {
                 terminalTab
             });
             if (terminalTab) {
-                this.app.showToast('AI Agents', 'Opening terminal tab…', 'info');
-                try {
-                    if (!(await openLaunchTerminal(this.app, this.api, run, { signal, metadata: terminalMetadata })) && !signal?.aborted)
-                        this.app.showToast('AI Agents', 'Terminal has not opened. Check Run history before running again.', 'warning');
-                } catch (error) {
-                    if (error.name !== 'AbortError')
-                        this.app.showToast('AI Agents', 'Run queued, but its terminal could not be opened. Check Run history before retrying.', 'warning');
-                }
+                // Each picker launch is its own ordinary tab, so the same Agent or Quick
+                // Launch can be started again as soon as this one has been asked for.
+                composed();
+                await this.followTerminalTab(run, terminalMetadata, signal);
                 return run;
             }
             if (nativeTerminal) {
@@ -311,8 +317,38 @@ export class AiAgentsController {
             if (error.name !== 'AbortError')
                 this.app.showToast('AI Agents', error.message, 'error');
         } finally {
-            this.launching.delete(id);
+            composed();
         }
+    }
+    /**
+     * Follows a picker launch to its tab. A tab that opens needs no message; anything else says
+     * what the run actually did, because "has not opened" sent the user to Run history to find out.
+     */
+    async followTerminalTab(run, metadata, signal) {
+        const name = metadata.label;
+        let outcome;
+        try {
+            outcome = await followLaunchTerminal(this.app, this.api, run, { signal, metadata });
+        } catch (error) {
+            if (error.name !== 'AbortError')
+                this.app.showToast('AI Agents', `${name} was queued, but its status could not be read. Check Run history before starting it again.`, 'warning');
+            return;
+        }
+        if (outcome.opened || signal?.aborted) return;
+        const last = outcome.run;
+        if (last.status === 'queued') {
+            // Nothing picked the run up. Left queued it would open a tab later, unasked.
+            let cancelled = true;
+            try { await this.api.runAction(last.id, 'cancel'); } catch { cancelled = false; }
+            this.app.showToast('AI Agents', cancelled
+                ? `${name} was still waiting to start after ${QUEUED_POLLS} seconds, so it was cancelled.`
+                : `${name} is still waiting to start. Cancel it in Run history if you no longer want it.`, 'warning');
+        } else if (last.status === 'cancelled')
+            this.app.showToast('AI Agents', `${name} was cancelled before its terminal opened.`, 'warning');
+        else if (isRunFinished(last) || last.status === 'uncertain')
+            this.app.showToast('AI Agents', `${name} did not start. ${last.error || 'Check Run history for details.'}`, 'error');
+        else
+            this.app.showToast('AI Agents', `${name} is taking unusually long to start. Check Run history before starting it again.`, 'warning');
     }
     launchFromNav(id) {
         const item = this.items.find((item) => item.id === id);

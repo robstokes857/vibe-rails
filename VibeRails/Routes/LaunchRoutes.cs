@@ -86,19 +86,24 @@ public static class LaunchRoutes
             http.Response.Headers.ContentSecurityPolicy = "sandbox; default-src 'none'";
             return Results.File(file.Content, "application/octet-stream", file.Attachment.Name);
         });
-        api.MapPost("/runs", async (LaunchRequest request, LaunchService service, IBoardProjectResolver projects, CancellationToken ct) =>
+        // A terminal-picker tab is opened by this backend before the response: see DispatchRequestedTabAsync.
+        api.MapPost("/runs", async (LaunchRequest request, LaunchService service, LaunchDispatcher dispatcher,
+            IBoardProjectResolver projects, IHostApplicationLifetime lifetime, CancellationToken ct) =>
         {
             var project = await projects.ResolveAsync(ct);
-            return Results.Ok(await service.EnqueueAsync(request.DefinitionType, request.DefinitionId,
+            var run = await service.EnqueueAsync(request.DefinitionType, request.DefinitionId,
                 new(project, project, "manual", "manual:" + (request.OccurrenceId ?? Guid.NewGuid().ToString("N")),
                     PromptPrefix: request.PromptPrefix, PromptOverride: request.InitialPrompt,
                     NativeTerminal: request.NativeTerminal, UserMessage: request.UserMessage,
-                    TerminalTab: request.TerminalTab), ct, request.ExpectedRevision));
+                    TerminalTab: request.TerminalTab), ct, request.ExpectedRevision);
+            return Results.Ok(await dispatcher.DispatchRequestedTabAsync(run, lifetime.ApplicationStopping));
         });
         api.MapPost("/runs/{id}/resolve", async (string id, ResolveUncertainLaunchRequest request, LaunchService service, IBoardProjectResolver projects, CancellationToken ct) =>
             Results.Ok(await service.ResolveUncertainAsync(await projects.ResolveAsync(ct), id, request.ConfirmedStopped, ct)));
-        api.MapPost("/runs/{id}/retry", async (string id, LaunchService service, IBoardProjectResolver projects, CancellationToken ct) =>
-            Results.Ok(await service.RetryAsync(await projects.ResolveAsync(ct), id, ct)));
+        api.MapPost("/runs/{id}/retry", async (string id, LaunchService service, LaunchDispatcher dispatcher,
+            IBoardProjectResolver projects, IHostApplicationLifetime lifetime, CancellationToken ct) =>
+            Results.Ok(await dispatcher.DispatchRequestedTabAsync(
+                await service.RetryAsync(await projects.ResolveAsync(ct), id, ct), lifetime.ApplicationStopping)));
         api.MapPost("/runs/{id}/cancel", async (string id, ILaunchStore store, IBoardProjectResolver projects, CancellationToken ct) =>
             await store.CancelAsync(id, LaunchService.ProjectKey(await projects.ResolveAsync(ct)), ct) ? Results.NoContent() : Results.NotFound());
 

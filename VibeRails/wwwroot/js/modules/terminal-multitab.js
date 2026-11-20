@@ -83,11 +83,14 @@ export function shouldCreateFreshTab(options, activeTab, tabCount, maxTabs) {
 // with so an empty panel has something to show (initialize / _commitClose).
 // It is a real server-side tab, so it outlives navigation and lands beside a
 // Board-launched or restored live session, where it is dead weight
-// (VB-6Q8ZS-68). Returns the ids to drop: no session, no CLI picked, nothing
-// the user named or pinned, not an Automation viewer, not already closing —
-// and only once some ordinary tab has a live session, because with nothing
-// running the placeholder is the panel's only surface.
-export function selectBlankPlaceholderTabIds(states, { hasCli, isPendingClose = () => false } = {}) {
+// (VB-6Q8ZS-68). Returns the ids to drop: no session, no pick that would
+// start in this tab, nothing the user named or pinned, not an Automation
+// viewer, not already closing — and only once some ordinary tab has a live
+// session, because with nothing running the placeholder is the panel's only
+// surface. `startsHere(selection)` says whether the tab's pick would start a
+// session in the tab itself: a CLI does, a saved Agent or Quick Launch never
+// does, because its run always opens a tab of its own.
+export function selectBlankPlaceholderTabIds(states, { startsHere, isPendingClose = () => false } = {}) {
     const list = Array.isArray(states) ? states.filter(Boolean) : [];
     const hasLiveSession = list.some((state) => state.hasActiveSession === true && !isAutomationTab(state));
     if (!hasLiveSession) return [];
@@ -97,7 +100,7 @@ export function selectBlankPlaceholderTabIds(states, { hasCli, isPendingClose = 
             && state.pinned !== true
             && state.customLabel !== true
             && !isPendingClose(state.id)
-            && !hasCli(state.selection))
+            && !startsHere(state.selection))
         .map((state) => state.id);
 }
 
@@ -1318,7 +1321,10 @@ export class TerminalManager {
         const states = this.tabOrder.map((id) => this.tabs.get(id)?.state);
         // A tab an overlapping prune (or a commit) is already removing is not picked again.
         const doomed = selectBlankPlaceholderTabIds(states, {
-            hasCli: (selection) => !!this.getSelectionMeta(selection).cli,
+            // The tab a saved launch was picked in stayed behind as an empty "Saved launch"
+            // tab beside the tab its run opened.
+            startsHere: (selection) => !String(selection || '').startsWith('preset:')
+                && !!this.getSelectionMeta(selection).cli,
             isPendingClose: (id) => this._pendingCloses.has(id) || this._removingTabs.has(id)
         });
         if (doomed.length === 0) {
@@ -1963,7 +1969,9 @@ export class TerminalManager {
             cli: parsed.cli,
             envId: parsed.envId,
             environmentName: parsed.environmentName,
-            displayName: parsed.displayName
+            // A saved launch is listed under its own name; the parser only knows its id.
+            displayName: (parsed.kind === 'preset'
+                && this.app.llmPickerController?.savedLaunchName?.(parsed.value)) || parsed.displayName
         };
     }
 

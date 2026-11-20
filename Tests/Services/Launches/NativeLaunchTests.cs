@@ -149,6 +149,158 @@ public sealed class NativeLaunchTests : IDisposable
     }
 
     [Fact]
+    public async Task StartingTheSameSavedLaunchTwiceFromThePickerOpensTwoTabs()
+    {
+        await using var services = Services();
+        var service = new LaunchService(store, scripts.Object);
+        var preset = (await service.SavePresetAsync(null, new("codex_yolo", "", "codex"), Ct)).Preset;
+        var created = 0;
+        var tabs = new Mock<ITerminalTabHostService>(MockBehavior.Strict);
+        tabs.Setup(t => t.CreateTabAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new TerminalTabStatusResponse("tab-" + ++created, DateTime.UtcNow, false));
+        tabs.Setup(t => t.StartSessionAsync(It.IsAny<string>(), It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string tab, StartTerminalRequest request, CancellationToken token) =>
+            {
+                // The session stays open: nothing completes the first run before the second starts.
+                await store.StartAsync(request.LaunchClaim!, "session-" + tab, null, root, Environment.ProcessId, DateTime.UtcNow, ct: token);
+                return new TerminalStatusResponse(true, "session-" + tab, "codex", root);
+            });
+        var dispatcher = new LaunchDispatcher(store, service, tabs.Object,
+            services.GetRequiredService<IServiceScopeFactory>(), services.GetRequiredService<IBoardStore>(),
+            Mock.Of<IJobProcessLauncher>(MockBehavior.Strict));
+
+        var first = await dispatcher.DispatchAsync((await service.EnqueueAsync("preset", preset.Id,
+            new(root, root, "manual", "first", TerminalTab: true), Ct)).Id, Ct);
+        var second = await dispatcher.DispatchAsync((await service.EnqueueAsync("preset", preset.Id,
+            new(root, root, "manual", "second", TerminalTab: true), Ct)).Id, Ct);
+
+        Assert.Equal(("running", "tab-1"), (first.Status, first.TabId));
+        Assert.Equal(("running", "tab-2"), (second.Status, second.TabId));
+    }
+
+    private LaunchDispatcher PickerDispatcher(ServiceProvider services, LaunchService service, Mock<ITerminalTabHostService> tabs)
+    {
+        tabs.Setup(t => t.StartSessionAsync(It.IsAny<string>(), It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string tab, StartTerminalRequest request, CancellationToken token) =>
+            {
+                await store.StartAsync(request.LaunchClaim!, "session-" + tab, null, root, Environment.ProcessId, DateTime.UtcNow, ct: token);
+                return new TerminalStatusResponse(true, "session-" + tab, "codex", root);
+            });
+        // A strict native launcher: nothing here may open a native window.
+        return new LaunchDispatcher(store, service, tabs.Object, services.GetRequiredService<IServiceScopeFactory>(),
+            services.GetRequiredService<IBoardStore>(), Mock.Of<IJobProcessLauncher>(MockBehavior.Strict));
+    }
+
+    [Fact]
+    public async Task ATabAskedForFromAPageOpensInTheBackendThatWasAsked()
+    {
+        await using var services = Services();
+        var service = new LaunchService(store, scripts.Object);
+        var preset = (await service.SavePresetAsync(null, new("codex_yolo", "", "codex"), Ct)).Preset;
+        var tabs = new Mock<ITerminalTabHostService>(MockBehavior.Strict);
+        tabs.Setup(t => t.CreateTabAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TerminalTabStatusResponse("tab-here", DateTime.UtcNow, false));
+        var dispatcher = PickerDispatcher(services, service, tabs);
+
+        // Two roots can be open on one project (a VS Code window and the browser). Left queued,
+        // the run went to whichever ticked first: the tab opened in the other window and the
+        // page that asked polled a tab its own backend never had. No root's scheduler takes it
+        // while the backend that was asked can still claim it.
+        var asked = await service.EnqueueAsync("preset", preset.Id, new(root, root, "manual", "picker", TerminalTab: true), Ct);
+        Assert.False(LaunchScheduler.CanDispatchHere(asked, root, [asked.ProjectPath], asked.QueuedUtc));
+        Assert.False(LaunchScheduler.CanDispatchHere(asked, root, [asked.ProjectPath],
+            asked.QueuedUtc + LaunchScheduler.RequestedTabGrace - TimeSpan.FromMilliseconds(1)));
+
+        var opened = await dispatcher.DispatchRequestedTabAsync(asked, Ct);
+        Assert.Equal(("running", "tab-here", "session-tab-here"), (opened.Status, opened.TabId, opened.SessionId));
+        // A repeated delivery of the same request finds the open run and starts nothing more.
+        Assert.Equal("running", (await dispatcher.DispatchRequestedTabAsync(opened, Ct)).Status);
+        tabs.Verify(t => t.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Once);
+
+        // A tab no backend claimed (queued by an older version's root, or retried from outside a
+        // root) is not stranded: any root on the project opens it once the grace has passed.
+        var unclaimed = await service.EnqueueAsync("preset", preset.Id, new(root, root, "manual", "unclaimed", TerminalTab: true), Ct);
+        Assert.True(LaunchScheduler.CanDispatchHere(unclaimed, root, [unclaimed.ProjectPath],
+            unclaimed.QueuedUtc + LaunchScheduler.RequestedTabGrace));
+
+        // Every other run is still placed by the scheduler, at once: the request starts nothing.
+        var native = await service.EnqueueAsync("preset", preset.Id, new(root, root, "manual", "native"), Ct);
+        Assert.Equal("queued", (await dispatcher.DispatchRequestedTabAsync(native, Ct)).Status);
+        Assert.True(LaunchScheduler.CanDispatchHere(native, root, [native.ProjectPath], native.QueuedUtc));
+    }
+
+    [Fact]
+    public async Task ATabThatCannotBeCreatedAnswersTheRequestWithItsReason()
+    {
+        await using var services = Services();
+        var service = new LaunchService(store, scripts.Object);
+        var preset = (await service.SavePresetAsync(null, new("codex_yolo", "", "codex"), Ct)).Preset;
+        var tabs = new Mock<ITerminalTabHostService>(MockBehavior.Strict);
+        tabs.Setup(t => t.CreateTabAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("Tab limit reached."));
+        var dispatcher = PickerDispatcher(services, service, tabs);
+
+        var run = await dispatcher.DispatchRequestedTabAsync(
+            await service.EnqueueAsync("preset", preset.Id, new(root, root, "manual", "picker", TerminalTab: true), Ct), Ct);
+
+        // The page shows this in its message instead of waiting on a run that will never open.
+        Assert.Equal(("failed", "The terminal could not be created."), (run.Status, run.Error));
+    }
+
+    [Fact]
+    public async Task TerminalPickerTabsOpenBesideEachOtherAndLeaveAgentSlotsFree()
+    {
+        var service = new LaunchService(store, scripts.Object);
+        var preset = (await service.SavePresetAsync(null, new("Agent", "", "codex", InitialPrompt: "Work"), Ct)).Preset;
+        Task<LaunchRun> Tab(string occurrence) => service.EnqueueAsync("preset", preset.Id,
+            new(root, root, "manual", occurrence, TerminalTab: true), Ct);
+        // A picker tab's run stays active for as long as the user keeps the tab. The same saved
+        // launch must still open again beside it, and past the limit on automatic agents.
+        for (var i = 0; i <= LaunchDispatcher.Capacity; i++)
+        {
+            var tab = await store.TryClaimAsync((await Tab("tab-" + i)).Id, LaunchDispatcher.Capacity, 11, DateTime.UtcNow, Ct);
+            Assert.NotNull(tab);
+            Assert.True(await store.StartAsync(tab, "session-" + i, null, root, 11, DateTime.UtcNow, ct: Ct));
+        }
+
+        // Those open tabs hold neither a machine slot nor their definition, so other work still starts.
+        var native = await service.EnqueueAsync("preset", preset.Id, new(root, root, "manual", "native"), Ct);
+        Assert.NotNull(await store.TryClaimAsync(native.Id, 1, 11, DateTime.UtcNow, Ct));
+
+        // Everything else keeps both limits: one active run per definition and project, and the slots.
+        var repeat = await service.EnqueueAsync("preset", preset.Id, new(root, root, "manual", "native-again"), Ct);
+        Assert.Null(await store.TryClaimAsync(repeat.Id, LaunchDispatcher.Capacity, 11, DateTime.UtcNow, Ct));
+        var other = (await service.SavePresetAsync(null, new("Other", "", "codex", InitialPrompt: "Work"), Ct)).Preset;
+        var blocked = await service.EnqueueAsync("preset", other.Id, new(root, root, "manual", "other"), Ct);
+        Assert.Null(await store.TryClaimAsync(blocked.Id, 1, 11, DateTime.UtcNow, Ct));
+
+        // A tab is not held up by that occupied slot or by the active run of its own definition.
+        Assert.NotNull(await store.TryClaimAsync((await Tab("tab-late")).Id, 1, 11, DateTime.UtcNow, Ct));
+    }
+
+    [Theory]
+    [InlineData("manual", null)]
+    [InlineData("schedule", null)]
+    [InlineData("before-commit", null)]
+    [InlineData("board", null)]
+    [InlineData("board-lane", "card")]
+    [InlineData("manual", "card")]
+    public async Task OnlyAnInteractiveTerminalTabIsExemptFromTheAgentLimits(string trigger, string? card)
+    {
+        var service = new LaunchService(store, scripts.Object);
+        var holder = (await service.SavePresetAsync(null, new("Holder", "", "codex", InitialPrompt: "Work"), Ct)).Preset;
+        var held = await service.EnqueueAsync("preset", holder.Id, new(root, root, "manual", "holder"), Ct);
+        Assert.NotNull(await store.TryClaimAsync(held.Id, 1, 11, DateTime.UtcNow, Ct));
+
+        var preset = (await service.SavePresetAsync(null, new("Agent", "", "codex", InitialPrompt: "Work"), Ct)).Preset;
+        var run = await service.EnqueueAsync("preset", preset.Id,
+            new(root, root, trigger, "candidate", CardId: card, TerminalTab: true), Ct);
+
+        // The claim's SQL must agree with the snapshot's own definition of an interactive tab.
+        var claim = await store.TryClaimAsync(run.Id, 1, 11, DateTime.UtcNow, Ct);
+        Assert.Equal(run.Snapshot.IsInteractiveTerminal, claim is not null);
+    }
+
+    [Fact]
     public void NativeQuickLaunchDoesNotGetCompletionGuidance()
     {
         var preset = new LaunchPreset("preset", "Quick Launch", "", LLM.Codex, new(), [], null,

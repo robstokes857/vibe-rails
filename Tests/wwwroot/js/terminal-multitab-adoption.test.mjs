@@ -232,18 +232,20 @@ test('Automation terminal events refresh the lazy list without adding viewers or
 });
 
 // VB-6Q8ZS-68: the blank "Select LLM to launch." tab is dead weight once a live
-// session is on screen. hasCli mirrors getSelectionMeta(selection).cli.
-const hasCli = (selection) => typeof selection === 'string' && selection.length > 0;
+// session is on screen. startsHere mirrors pruneBlankPlaceholderTabs: a picked CLI
+// starts in the tab itself, a saved launch always opens a tab of its own.
+const startsHere = (selection) => typeof selection === 'string' && selection.length > 0
+    && !selection.startsWith('preset:');
 
 test('selectBlankPlaceholderTabIds keeps the placeholder while nothing is running', () => {
     const states = [
         { id: 'blank', hasActiveSession: false, selection: null },
         { id: 'picked', hasActiveSession: false, selection: 'base:codex' }
     ];
-    assert.deepEqual(selectBlankPlaceholderTabIds(states, { hasCli }), []);
+    assert.deepEqual(selectBlankPlaceholderTabIds(states, { startsHere }), []);
     // An Automation viewer is not the live session that makes the placeholder redundant.
     states.push({ id: 'automation', hasActiveSession: true, jobRunId: 'run-1', selection: 'base:shell' });
-    assert.deepEqual(selectBlankPlaceholderTabIds(states, { hasCli }), []);
+    assert.deepEqual(selectBlankPlaceholderTabIds(states, { startsHere }), []);
 });
 
 test('selectBlankPlaceholderTabIds drops only blank placeholders once an ordinary tab is live', () => {
@@ -257,14 +259,16 @@ test('selectBlankPlaceholderTabIds drops only blank placeholders once an ordinar
         { id: 'closing', hasActiveSession: false, selection: null },
         { id: 'automation', hasActiveSession: false, jobRunId: 'run-2', selection: null },
         null,
-        { id: 'second-blank', hasActiveSession: false, selection: '' }
+        { id: 'second-blank', hasActiveSession: false, selection: '' },
+        { id: 'saved-pick', hasActiveSession: false, selection: 'preset:preset_1:codex' },
+        { id: 'saved-named', hasActiveSession: false, selection: 'preset:preset_1:codex', customLabel: true }
     ];
     const ids = selectBlankPlaceholderTabIds(states, {
-        hasCli,
+        startsHere,
         isPendingClose: (id) => id === 'closing'
     });
-    assert.deepEqual(ids, ['blank', 'second-blank']);
-    assert.deepEqual(selectBlankPlaceholderTabIds(undefined, { hasCli }), []);
+    assert.deepEqual(ids, ['blank', 'second-blank', 'saved-pick']);
+    assert.deepEqual(selectBlankPlaceholderTabIds(undefined, { startsHere }), []);
 });
 
 function createPruningManager({ live }) {
@@ -349,6 +353,30 @@ test('overlapping automatic prunes delete and dispose each placeholder once', as
     assert.equal(log.deletes.length, 2);
     assert.deepEqual(manager.tabOrder, ['live']);
     assert.equal(manager._removingTabs.size, 0);
+});
+
+// A saved launch opens its own tab, so the tab it was picked in used to stay behind, empty,
+// labelled "Saved launch", beside the tab the run opened.
+test('the tab a saved launch was picked in goes once its run has a live tab', async () => {
+    const { manager, add, log } = pruneManager();
+    add('picked-saved', { selection: 'preset:preset_1:codex', label: 'Saved launch' });
+    add('picked-cli', { selection: 'base:codex' });
+    assert.deepEqual(await manager.pruneBlankPlaceholderTabs(), ['picked-saved']);
+    assert.deepEqual(log.disposed, ['picked-saved']);
+    assert.deepEqual(manager.tabOrder, ['live', 'picked-cli'], 'a picked CLI would start in its own tab, so that tab stays');
+});
+
+test('a tab holding a saved launch shows the launch name, not a generic label', () => {
+    const manager = Object.create(TerminalManager.prototype);
+    manager.app = { data: { environments: [] }, llmPickerController: {
+        savedLaunchName: (key) => key === 'preset:preset_1:codex' ? 'codex_yolo' : null
+    } };
+    assert.deepEqual(manager.getSelectionMeta('preset:preset_1:codex'),
+        { cli: 'codex', envId: null, environmentName: null, displayName: 'codex_yolo' });
+    assert.equal(manager.getSelectionMeta('preset:retired:codex').displayName, 'Saved launch');
+    assert.equal(manager.getSelectionMeta('base:codex').displayName, 'Codex');
+    manager.app.llmPickerController = undefined;
+    assert.equal(manager.getSelectionMeta('preset:preset_1:codex').displayName, 'Saved launch');
 });
 
 test('a refused automatic prune stays off screen, while a close the user asked for still reports', async (t) => {

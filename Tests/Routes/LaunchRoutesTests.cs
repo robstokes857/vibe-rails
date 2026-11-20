@@ -14,6 +14,7 @@ using VibeRails.Routes;
 using VibeRails.Services.Board;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.Launches;
+using VibeRails.Services.Terminal;
 using Xunit;
 
 namespace Tests.Routes;
@@ -124,6 +125,18 @@ public class LaunchRoutesTests
         projects.Setup(p => p.ResolveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(root);
         builder.Services.AddSingleton(projects.Object);
         builder.Services.AddScoped<LaunchService>();
+        // The tab host a terminal-picker launch is opened in by the root that receives the request.
+        var tabHost = new Mock<ITerminalTabHostService>(MockBehavior.Strict);
+        tabHost.Setup(t => t.CreateTabAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TerminalTabStatusResponse("picker-tab", DateTime.UtcNow, false));
+        tabHost.Setup(t => t.StartSessionAsync("picker-tab", It.IsAny<StartTerminalRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, StartTerminalRequest request, CancellationToken token) =>
+            {
+                await launches.StartAsync(request.LaunchClaim!, "picker-session", null, root, Environment.ProcessId, DateTime.UtcNow, ct: token);
+                return new TerminalStatusResponse(true, "picker-session", "codex", root);
+            });
+        builder.Services.AddSingleton(tabHost.Object);
+        builder.Services.AddScoped<LaunchDispatcher>();
         // Other Board launch routes bind it; this test never resolves it.
         builder.Services.AddScoped<BoardLaunchWorkflow>(_ => throw new InvalidOperationException("Not used by this test."));
         await using var app = builder.Build();
@@ -198,6 +211,12 @@ public class LaunchRoutesTests
             var tabRun = (await tabResponse.Content.ReadFromJsonAsync<LaunchRun>(ct))!;
             Assert.True(tabRun.Snapshot.IsInteractiveTerminal);
             Assert.False(tabRun.Snapshot.Context.NativeTerminal);
+            // The root that was asked opens the picker tab before it answers. Left queued, another
+            // root open on the project could take it, and the page would wait on a tab it cannot see.
+            Assert.Equal(("running", "picker-tab", "picker-session"), (tabRun.Status, tabRun.TabId, tabRun.SessionId));
+            // Every other run is only queued by the request; the scheduler places it.
+            Assert.Equal(("queued", null), (nativeRun.Status, nativeRun.TabId));
+            tabHost.Verify(t => t.CreateTabAsync(It.IsAny<CancellationToken>()), Times.Once);
             Assert.Equal(root, tabRun.Snapshot.Context.WorkingDirectory);
             Assert.Equal(root, nativeRun.Snapshot.Context.WorkingDirectory);
             using var prefixed = await SendAsync(HttpMethod.Post, url + "/api/v1/runs",
