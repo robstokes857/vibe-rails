@@ -909,9 +909,14 @@ already running. Script and check execution keeps its existing presentation.
 
 #### Top bar account
 
-Application Settings opens from **Account settings** in the account dropdown. The desktop
-top bar has no standalone Settings icon. When signed out, a text **Settings** link stays
-visible beside **Sign in / Sign up**.
+Settings are two pages. **App settings** (General, LLMs, Context, Setup and AI board manager)
+opens from the gear button at the right end of the top bar, which stays visible signed in and
+signed out. It is a 32px circle (30px in terminal focus) with the account chip's fill, ring and
+hover, a 16px Lucide `settings` icon and the accessible name "App settings", and it carries
+`aria-current="page"` on App settings. **Account settings** (the viberails.ai account, remote
+access password, API key and signing keys) opens from **Account settings** in the account
+dropdown. Each page's header links to the other, which is how a signed-out user reaches Account
+settings. Launch context is the Context tab of App settings, not a section-bar link.
 
 Signed in, the desktop top bar shows the viberails.ai account as a chip beside Exit, with a popover (VB-0U0SI-331). Signed out, the existing **Sign in / Sign up** accent pill stays the only account control, with no popup, toast or repeated reminder.
 
@@ -929,7 +934,7 @@ Signed in, the desktop top bar shows the viberails.ai account as a chip beside E
 
 The popover is a simple popover of ordinary buttons (`role="dialog"`, `aria-label="viberails.ai account"`), not an ARIA menu. The chip carries `aria-haspopup`, `aria-expanded` and `aria-controls`; opening focuses the first action, Tab moves through the rest, and Escape or an outside click closes it, with Escape returning focus to the chip. The chip's accessible name states the account and any organization ("Account menu. Signed in as rob@example.com, managed by Contoso"). Email and organization names are set as text, never markup. The component uses inline Lucide icons only.
 
-The managed state is a placeholder: nothing supplies an organization yet. The Settings Account card follows it ("Logged in {email}, managed by {organization}", **Switch account** disabled). Implemented by `VibeRails/wwwroot/js/modules/account-nav.js`, the `data-account-menu-host` markup in `index.html` and the `.app-account*` rules in `style.css`; the data contract is in `VibeRails/wwwroot/AGENTS.md`.
+The managed state is a placeholder: nothing supplies an organization yet. The Account card in Account settings follows it ("Logged in {email}, managed by {organization}", **Switch account** disabled). Implemented by `VibeRails/wwwroot/js/modules/account-nav.js`, the `data-account-menu-host` markup in `index.html` and the `.app-account*` rules in `style.css`; the data contract is in `VibeRails/wwwroot/AGENTS.md`.
 
 ## Decisions made while merging
 

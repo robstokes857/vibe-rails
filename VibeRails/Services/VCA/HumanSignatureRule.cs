@@ -9,7 +9,7 @@ public sealed record SignedApprovalSpecification(string RelativePath, IReadOnlyL
 
 /// <summary>
 /// Syntax and wording for the two rules a person satisfies by signing the commit in the Git Guard
-/// popup with a Settings &gt; KEYS signing key:
+/// popup with an Account settings &gt; Keys signing key:
 /// <list type="bullet">
 /// <item><c>Human verified</c>: every commit in scope needs a signature from any signing key
 /// registered on viberails.ai to an account with a verified email.</item>
@@ -36,12 +36,12 @@ public static class HumanSignatureRule
 
     public const string Guidance =
         "A person signs the commit in the Git Guard popup, which opens when commit-msg runs on Windows: "
-        + "choose a Settings > KEYS signing key synced to viberails.ai and type its password. The popup "
+        + "choose an Account settings > Keys signing key synced to viberails.ai and type its password. The popup "
         + "adds a vibe-signature: line to the commit message. Agents cannot create this signature, and "
         + "Git Guard does not open the popup in CI.";
 
     public const string HumanVerifiedDescription =
-        "Requires a person to approve each commit by signing it in the Git Guard popup with a Settings > KEYS "
+        "Requires a person to approve each commit by signing it in the Git Guard popup with an Account settings > Keys "
         + "signing key registered on viberails.ai. Git Guard verifies the signature with viberails.ai at "
         + "commit-msg. The signature covers the exact staged content, so changing anything after signing "
         + "needs a new signature. Use STOP: at COMMIT an acknowledgment can replace the signature. "
@@ -49,7 +49,7 @@ public static class HumanSignatureRule
 
     public const string SignedApprovalDescription =
         "When the file or directory changes, requires a signature from a listed approver. The approver signs "
-        + "in the Git Guard popup with a Settings > KEYS key, and viberails.ai must report one of the listed "
+        + "in the Git Guard popup with an Account settings > Keys key, and viberails.ai must report one of the listed "
         + "emails as the key's verified account email. Format: Signed Approval('path/to/file', 'approver@example.com'). "
         + "Use STOP: at COMMIT an acknowledgment can replace the approval. It applies from the commit after the one that "
         + "adds it; removing it, or changing its path or approvers, needs a listed approver's signature.";

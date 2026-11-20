@@ -43,14 +43,19 @@ async function installFixture(page, { isInGit = true, boards = [] } = {}) {
     return { writes, states };
 }
 
-test('nav opens the Context workspace and saves both nudge choices independently', async ({ page }) => {
+test('the gear opens App settings, whose Context tab saves both nudge choices independently', async ({ page }) => {
     const { writes, states } = await installFixture(page);
     await page.goto('/?view=settings', { waitUntil: 'domcontentloaded' });
-    const nav = page.getByRole('navigation').getByRole('link', { name: 'Context', exact: true });
-    await expect(page.getByRole('link', { name: 'Launch context and Vibe Board Nudge' })).toBeVisible();
-    await nav.click();
-    await expect(nav).toHaveAttribute('aria-current', 'page');
-    const root = page.locator('#app-content [data-view="context"]');
+    const nav = page.getByRole('navigation');
+    const gear = nav.getByRole('button', { name: 'App settings', exact: true });
+    await expect(nav.getByRole('button', { name: 'Context', exact: true })).toHaveCount(0);
+    await expect(gear).toHaveAttribute('aria-current', 'page');
+    const tab = page.getByRole('tab', { name: 'Context', exact: true });
+    await tab.click();
+    await expect(tab).toHaveAttribute('aria-selected', 'true');
+    // Context saves with its own button; the settings bar only returns for unsaved settings.
+    await expect(page.locator('[data-settings-save-bar]')).toBeHidden();
+    const root = page.locator('#app-content #settings-panel-context');
     const base = root.getByRole('checkbox', { name: 'Built-in CLIs and Agent presets' });
     const custom = root.getByRole('checkbox', { name: 'Legacy custom environments' });
     const save = root.getByRole('button', { name: 'Save context' });
@@ -74,15 +79,24 @@ test('nav opens the Context workspace and saves both nudge choices independently
     ]);
     expect(states['/api/v1/settings'].computerName).toBe('Fixture machine');
 
+    // The retired Context page URL opens the tab.
     await page.goto('/?view=context', { waitUntil: 'domcontentloaded' });
+    await expect(tab).toHaveAttribute('aria-selected', 'true');
+    await expect(gear).toHaveAttribute('aria-current', 'page');
     await expect(base).not.toBeChecked();
     await expect(custom).toBeChecked();
     await expect(save).toBeDisabled();
 
+    // A draft survives switching tabs, and leaving the page asks once.
     await base.check();
-    await page.getByRole('navigation').getByRole('button', { name: 'Settings', exact: true }).click();
-    await expect(page.getByRole('alertdialog').getByText('Discard unsaved context?')).toBeVisible();
-    await page.getByRole('button', { name: 'Keep editing' }).click();
+    await page.getByRole('tab', { name: 'General', exact: true }).click();
+    await tab.click();
+    await expect(base).toBeChecked();
+    await nav.getByRole('button', { name: 'Board', exact: true }).click();
+    const prompt = page.getByRole('alertdialog');
+    await expect(prompt.getByText('You have unsaved context changes that will be lost.')).toBeVisible();
+    await page.getByRole('button', { name: 'Stay', exact: true }).click();
+    await expect(prompt).toHaveCount(0);
     await expect(base).toBeChecked();
     await expect(save).toBeEnabled();
 });
@@ -116,10 +130,10 @@ for (const width of [390, 1280]) {
     });
 }
 
-test('outside a repository the Settings shortcut opens Context with App context available', async ({ page }) => {
+test('outside a repository the Context tab offers App context', async ({ page }) => {
     await installFixture(page, { isInGit: false });
     await page.goto('/?view=settings', { waitUntil: 'domcontentloaded' });
-    await page.getByRole('link', { name: 'Launch context and Vibe Board Nudge' }).click();
+    await page.getByRole('tab', { name: 'Context', exact: true }).click();
     const editor = page.locator('[data-context-editor]');
     await expect(page.locator('[data-context-project]')).toHaveText('No Git repository open');
     await editor.locator('[data-context-level="project"] > summary').click();

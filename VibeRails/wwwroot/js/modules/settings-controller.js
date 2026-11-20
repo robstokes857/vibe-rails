@@ -5,6 +5,18 @@ import { SetupPanel, refreshSetupStatus } from './setup-panel.js';
 import { SetupInstallWindow } from './setup-install-window.js';
 import { AiBoardManagerSettingsPanel } from './settings-ai-board-manager.js';
 import { applyGatewaySettings, gatewayCredentialEdits, initGatewaySettings } from './settings-enterprise-gateway.js';
+import { ContextController } from './context-controller.js';
+
+// Settings are two pages (DESIGN_SYSTEM.md, Top bar account). App settings is everything that is
+// not the account; Account settings holds the account, the remote access password, the API key and
+// the signing keys. `context` is the retired Context page's view name: it opens App settings on its
+// Context tab.
+const SETTINGS_PAGES = {
+    app: { template: 'settings-template', view: 'settings', form: '#app-settings-form' },
+    account: { template: 'account-settings-template', view: 'account-settings', form: '#account-settings-form' }
+};
+const SETTINGS_VIEWS = new Set(['settings', 'account-settings', 'context']);
+const REMOTE_PASSWORD_NEEDED = 'Create a remote access password in Account settings before enabling remote access.';
 
 export class SettingsController {
     constructor(app) {
@@ -22,6 +34,10 @@ export class SettingsController {
         // Outlives the Setup panel (see _mountSetupPanel), so it is never cleared on unload.
         this._setupInstallWindow = null;
         this._selectSettingsTab = null;
+        this._activeTab = '';
+        this._viewData = {};
+        // The App settings Context tab, mounted the first time it opens.
+        this._contextPanel = null;
         this._linkedKeyVersion = 0;
         // In-app leave-confirm (window.confirm is a silent no-op in the VS Code
         // webview). A field so tests can substitute a resolved value.
@@ -30,8 +46,20 @@ export class SettingsController {
         this._leaveSettingsConfirmed = false;
     }
 
-    async loadSettings(data = {}) {
+    /** App settings: preferences, LLMs, launch context, setup and the AI board manager. */
+    loadSettings(data = {}) {
+        return this._loadPage('app', data);
+    }
+
+    /** Account settings: the viberails.ai account, remote access password, API key and signing keys. */
+    loadAccountSettings(data = {}) {
+        return this._loadPage('account', data);
+    }
+
+    async _loadPage(pageName, data = {}) {
         this.unload();
+        const page = SETTINGS_PAGES[pageName];
+        this._viewData = { ...data };
 
         const content = document.getElementById('app-content');
         if (!content) return;
@@ -61,18 +89,17 @@ export class SettingsController {
             console.error('Failed to fetch settings:', error);
         }
         content.innerHTML = '';
-        const fragment = this.app.cloneTemplate('settings-template');
-        const root = fragment.querySelector('[data-view="settings"]');
+        const fragment = this.app.cloneTemplate(page.template);
+        const root = fragment.querySelector(`[data-view="${page.view}"]`);
 
         if (root) {
             this._settingsRoot = root;
             this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
-            this.app.bindAction(root, '[data-open-context]', event => {
-                event.preventDefault();
-                this.app.navigate('context');
-            });
-            this._initSettingsTabs(root);
-            if (data.tab) this._selectSettingsTab?.(data.tab);
+            this.app.bindAction(root, '[data-open-account-settings]', () =>
+                this.app.navigate('account-settings', {}, { resetStack: true }));
+            this.app.bindAction(root, '[data-open-app-settings]', () =>
+                this.app.navigate('settings', {}, { resetStack: true }));
+            this._initSettingsTabs(root, data.tab);
             const projectIdentityCard = root.querySelector('[data-project-identity-card]');
             if (projectIdentityCard && this.app.data.isInGit) {
                 projectIdentityCard.hidden = false;
@@ -114,7 +141,7 @@ export class SettingsController {
                 remoteAccessToggle.addEventListener('change', () => {
                     if (remoteAccessToggle.checked && !this._pinIsSet) {
                         remoteAccessToggle.checked = false;
-                        this.app.showToast('Remote Access', 'Create a remote access password before enabling remote access.', 'warning');
+                        this.app.showToast('Remote Access', REMOTE_PASSWORD_NEEDED, 'warning');
                         this._updateDirtyState(root);
                     }
                 });
@@ -181,8 +208,13 @@ export class SettingsController {
                 grokTokenSaverToggle.checked = settings.grokTokenSaverEnabled !== false;
             }
 
-            const form = root.querySelector('#app-settings-form');
-            if (form) {
+            const form = root.querySelector(page.form);
+            if (form && pageName === 'account') {
+                form.addEventListener('submit', event => {
+                    event.preventDefault();
+                    void this._submitAccountSettings(root, apiKeyInput);
+                });
+            } else if (form) {
                 form.addEventListener('submit', async (e) => {
                     e.preventDefault();
                     if (!this._settingsDirty || this._settingsSaving) {
@@ -191,7 +223,7 @@ export class SettingsController {
 
                     const wantsRemote = remoteAccessToggle?.checked || false;
                     if (wantsRemote && !this._pinIsSet) {
-                        this.app.showToast('Remote Access', 'Create a remote access password before enabling remote access.', 'warning');
+                        this.app.showToast('Remote Access', REMOTE_PASSWORD_NEEDED, 'warning');
                         if (remoteAccessToggle) remoteAccessToggle.checked = false;
                         this._updateDirtyState(root);
                         return;
@@ -311,7 +343,66 @@ export class SettingsController {
         }
     }
 
+    // Account settings saves only the API key. The settings route always writes remoteAccess and
+    // useVsCodeTheme, so they repeat the values saved now; every other field is omitted, which the
+    // route reads as unchanged. Sending the App settings form from here would overwrite them.
+    async _submitAccountSettings(root, apiKeyInput) {
+        if (!apiKeyInput || !this._settingsDirty || this._settingsSaving) return;
+        const apiKeyValue = apiKeyInput.value || '';
+        const savedApiKey = apiKeyInput.dataset.originalValue || '';
+        // Emptying a populated box is the "remove my key" gesture (see the App settings save).
+        const clearApiKey = apiKeyValue.trim().length === 0 && savedApiKey.length > 0;
+        this._settingsSaving = true;
+        const linkedKeyVersion = this._linkedKeyVersion;
+        this._updateSaveBar(root);
+        try {
+            const savedSettings = await this.saveAccountKey(clearApiKey ? '' : apiKeyValue, clearApiKey);
+            if (!savedSettings) return;
+            await this._reconcileSavedApiKey(savedSettings, linkedKeyVersion);
+            if (this._settingsRoot !== root) return;
+            this.app.setAppSettings({
+                apiKey: savedSettings.apiKey, remoteAccountEmail: savedSettings.remoteAccountEmail,
+                remoteAccountOrganization: savedSettings.remoteAccountOrganization ?? null
+            });
+            apiKeyInput.value = savedSettings.apiKey || '';
+            apiKeyInput.dataset.originalValue = savedSettings.apiKey || '';
+            this._markSettingsClean(root);
+            // A pasted key or clear can supersede the linked identity.
+            this.app.updateAccountNav?.();
+        } finally {
+            this._settingsSaving = false;
+            this._updateSaveBar(root);
+        }
+    }
+
+    async saveAccountKey(apiKey, clearApiKey) {
+        try {
+            const previous = this.app.appSettings || {};
+            const sensitive = clearApiKey || (!!apiKey && !apiKey.includes('•') && apiKey !== previous.apiKey);
+            const presenceProof = sensitive ? await this._requestPresenceProof() : null;
+            if (sensitive && presenceProof === null) return null;
+            const current = await this.app.apiCall('/api/v1/settings', 'GET', null, { showLoading: false });
+            const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
+                presenceProof,
+                remoteAccess: current?.remoteAccess === true,
+                apiKey,
+                useVsCodeTheme: current?.useVsCodeTheme === true,
+                mcpEnabled: true,
+                clearApiKey,
+                dataExportOptIn: true
+            }, { preferErrorResponseMessage: true });
+            this.app.setAppSettings(savedSettings);
+            this.app.showToast('Settings', 'Settings saved successfully', 'success');
+            return savedSettings;
+        } catch (error) {
+            this.app.showError('Failed to save settings: ' + error.message);
+            return null;
+        }
+    }
+
     unload() {
+        this._contextPanel?.unload();
+        this._contextPanel = null;
         this._aiBoardManagerPanel?.unload();
         this._aiBoardManagerPanel = null;
         this._keysPanel?.unload();
@@ -333,6 +424,7 @@ export class SettingsController {
         this._settingsSaving = false;
         this._settingsSnapshot = '';
         this._settingsRoot = null;
+        this._activeTab = '';
     }
 
     _initEnterpriseProxyTests(root) {
@@ -407,7 +499,7 @@ export class SettingsController {
             payload => this._guardSettingsNavigation(payload)) || null;
 
         this._beforeUnloadHandler = (event) => {
-            if (!this._settingsDirty) {
+            if (!this._settingsDirty && !this._contextPanel?.anyDirty()) {
                 return undefined;
             }
 
@@ -422,24 +514,34 @@ export class SettingsController {
     // silent no-op in the VS Code webview — it used to force a bypass here that
     // silently discarded webview edits). So: block the navigation now, ask, and
     // replay the exact navigation via `retry` if the user opts to leave.
+    // The Context tab has no guard of its own: one prompt covers both, so leaving never asks twice.
     _guardSettingsNavigation({ from, retry }) {
-        if (from !== 'settings' || !this._settingsDirty) {
+        if (!SETTINGS_VIEWS.has(from)) {
+            return true;
+        }
+        // A context save or its board-switch prompt is still settling.
+        if (this._contextPanel?.isBusy()) {
+            return false;
+        }
+        const contextDirty = this._contextPanel?.anyDirty() === true;
+        if (!this._settingsDirty && !contextDirty) {
             return true;
         }
         if (this._leaveSettingsConfirmed) {
             return true;
         }
-        void this._confirmLeaveSettings(retry);
+        void this._confirmLeaveSettings(retry, contextDirty);
         return false;
     }
 
-    async _confirmLeaveSettings(retry) {
+    async _confirmLeaveSettings(retry, contextDirty = false) {
         if (this._leaveConfirmPending) return;
         this._leaveConfirmPending = true;
+        const unsaved = [this._settingsDirty && 'settings', contextDirty && 'context'].filter(Boolean).join(' and ');
         try {
             const leave = await this.confirmLeave({
                 title: 'Leave Settings?',
-                message: 'You have unsaved settings changes that will be lost.',
+                message: `You have unsaved ${unsaved} changes that will be lost.`,
                 confirmLabel: 'Leave without saving',
                 cancelLabel: 'Stay',
                 danger: true
@@ -557,6 +659,9 @@ export class SettingsController {
 
         if (saveBar) {
             saveBar.classList.toggle('is-dirty', this._settingsDirty);
+            // Context saves with its own button, so the page's bar would claim "All changes saved"
+            // over an unsaved context draft. Unsaved settings still show it there.
+            saveBar.hidden = this._activeTab === 'context' && !this._settingsDirty && !this._settingsSaving;
         }
 
         if (saveState) {
@@ -639,7 +744,7 @@ export class SettingsController {
     // Panels (and every input inside them) stay in the DOM; only visibility
     // changes. Dirty tracking, the save bar, and form submission therefore keep
     // reading controls that live on a hidden tab.
-    _initSettingsTabs(root) {
+    _initSettingsTabs(root, initialTab = '') {
         const tablist = root.querySelector('.settings-tabs');
         if (!tablist) return;
 
@@ -647,8 +752,13 @@ export class SettingsController {
         if (tabs.length === 0) return;
 
         const panelFor = (tab) => root.querySelector(`#${tab.getAttribute('aria-controls')}`);
+        const hasTab = (id) => tabs.some((tab) => tab.dataset.settingsTab === id);
 
         const selectTab = (id, focusTab = false) => {
+            // A tab from the other settings page (or a stale link) leaves the current tab selected.
+            if (!hasTab(id)) return;
+            this._activeTab = id;
+            this._rememberViewData({ tab: id });
             tabs.forEach((tab) => {
                 const selected = tab.dataset.settingsTab === id;
                 tab.setAttribute('aria-selected', String(selected));
@@ -682,8 +792,20 @@ export class SettingsController {
                     void this._aiBoardManagerPanel.load();
                 }
             }
+            if (id === 'context' && !this._contextPanel) {
+                const container = root.querySelector('#settings-panel-context');
+                if (container) {
+                    this._contextPanel = new ContextController(this.app);
+                    this._contextPanel.mount(container, {
+                        boardId: this._viewData.boardId,
+                        onBoardChange: boardId => this._rememberViewData({ boardId })
+                    });
+                }
+            }
+            this._updateSaveBar(root);
         };
         this._selectSettingsTab = selectTab;
+        selectTab(hasTab(initialTab) ? initialTab : tabs[0].dataset.settingsTab);
 
         tablist.addEventListener('click', (event) => {
             const tab = event.target.closest('[data-settings-tab]');
@@ -702,6 +824,13 @@ export class SettingsController {
             event.preventDefault();
             selectTab(tabs[next].dataset.settingsTab, true);
         });
+    }
+
+    // Keeps the open tab (and the Context board) in the navigation entry, so Back and a retried
+    // navigation return to it.
+    _rememberViewData(patch) {
+        this._viewData = { ...this._viewData, ...patch };
+        if (SETTINGS_VIEWS.has(this.app.currentView)) this.app.updateCurrentViewData?.({ ...this._viewData });
     }
 
     // Leaving Settings drops the panel but not an install in progress: every panel shares one
@@ -738,6 +867,8 @@ export class SettingsController {
         }
 
         this._pinIsSet = pinIsSet;
+        // App settings only needs the status, for the Remote Access switch.
+        if (!badge || !btnSet || !btnClear) return;
         this._updatePinUI(badge, btnSet, btnClear, pinIsSet);
 
         btnSet.addEventListener('click', async () => {
@@ -764,12 +895,10 @@ export class SettingsController {
                 this._pinIsSet = false;
                 this._updatePinUI(badge, btnSet, btnClear, false);
                 this.app.showToast('Remote access', 'Password cleared', 'success');
-                // Revert remote access toggle if it was enabled
-                const remoteToggle = root.querySelector('#setting-remote-access');
-                if (remoteToggle?.checked) {
-                    remoteToggle.checked = false;
-                    this._updateDirtyState(root);
-                    this.app.showToast('Remote Access', 'Remote access disabled because the password was cleared.', 'warning');
+                // Remote access needs a password (RemoteConfig.IsEnabled), so it stops here even
+                // though the App settings switch keeps its saved value.
+                if (this.app.appSettings?.remoteAccess) {
+                    this.app.showToast('Remote Access', 'Remote access is off until you create a new password.', 'warning');
                 }
             } catch (error) {
                 this.app.showError('Failed to clear password: ' + error.message);

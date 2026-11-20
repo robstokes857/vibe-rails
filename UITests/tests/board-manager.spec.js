@@ -234,7 +234,7 @@ test('the chip offers set up when the board has no manager, and opens the Manage
 
 test('Settings > AI board manager saves at once and the board follows', async ({ page }) => {
     const { state, requests } = await openBoard(page, { enabled: false });
-    // Signed out, Settings is the text link in the top navigation.
+    // The top-bar gear opens App settings, which holds the AI board manager tab.
     await page.locator('[data-settings-nav]').click();
     await page.getByRole('tab', { name: 'AI board manager', exact: true }).click();
     const toggle = page.getByRole('switch', { name: 'AI board manager' });

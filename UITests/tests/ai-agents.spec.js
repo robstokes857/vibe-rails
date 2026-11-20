@@ -1167,13 +1167,13 @@ test('lane picker says what each choice does, escaped, and Add only stages the e
     await expect(page.locator('.launch-lane-add .ts-control .launch-lane-choice-detail')).toHaveCount(0);
     const about = page.locator('[data-lane-about]');
     await expect(about).toContainText('What this does: Checks the card’s code against this repository’s rules in vc.rules.md');
-    await expect(about.getByRole('link', { name: 'Open Rules', exact: true })).toHaveAttribute('href', '?view=dashboard');
+    await expect(about.getByRole('button', { name: 'Open Rules', exact: true })).toHaveAttribute('data-lane-open-view', 'dashboard');
     await expect(about.getByRole('combobox', { name: 'Check scope', exact: true })).toBeVisible();
     await page.locator('[data-lane-add-choice]').evaluate(node => node.tomselect.setValue('new:code-quality'));
-    await expect(about.getByRole('link', { name: 'Open Quality', exact: true })).toHaveAttribute('href', '?view=code-quality');
+    await expect(about.getByRole('button', { name: 'Open Quality', exact: true })).toHaveAttribute('data-lane-open-view', 'code-quality');
     await page.locator('[data-lane-add-choice]').evaluate(node => node.tomselect.setValue('p1'));
     await expect(about).toContainText('What this does: <b>Reviews</b> the diff & reports');
-    await expect(about.getByRole('link')).toHaveCount(0);
+    await expect(about.getByRole('button')).toHaveCount(0);
     await expect(page.getByRole('combobox', { name: 'Check scope', exact: true })).toBeHidden();
     const add = page.getByRole('button', { name: 'Add to run order', exact: true });
     await expect(add).toHaveAccessibleDescription(/Nothing runs until you save lane settings, and then only when a card enters this lane/);
@@ -1187,7 +1187,7 @@ test('lane picker says what each choice does, escaped, and Add only stages the e
     expect(state.runs).toHaveLength(0);
     // The page links use guarded navigation: unsaved lane changes still ask first.
     await page.locator('[data-lane-add-choice]').evaluate(node => node.tomselect.setValue('new:vca'));
-    await about.getByRole('link', { name: 'Open Rules', exact: true }).click();
+    await about.getByRole('button', { name: 'Open Rules', exact: true }).click();
     await expect(page.getByRole('alertdialog')).toContainText('Discard lane changes?');
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(page.locator('.launch-lane-editor')).toBeVisible();

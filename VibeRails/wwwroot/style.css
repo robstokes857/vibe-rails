@@ -9120,6 +9120,23 @@ input.form-control:disabled {
     transition: opacity 0.15s;
 }
 
+/* The App settings Context tab is wider than the other settings columns. */
+.context-settings {
+    max-width: 52rem;
+    margin-inline: auto;
+}
+
+.context-settings-project {
+    margin: 0 0 var(--space-3);
+    color: var(--color-text-muted, #94a3b8);
+    overflow-wrap: anywhere;
+}
+
+.context-settings-project strong {
+    color: var(--color-text);
+    font-weight: 600;
+}
+
 .context-workspace {
     --bs-border-color: var(--color-border);
     max-width: 52rem;
@@ -9237,6 +9254,10 @@ input.form-control:disabled {
     backdrop-filter: blur(14px) saturate(135%);
     -webkit-backdrop-filter: blur(14px) saturate(135%);
     transform: translateX(-50%);
+}
+
+.settings-save-bar[hidden] {
+    display: none;
 }
 
 .settings-save-bar.is-dirty {
@@ -10899,6 +10920,46 @@ kbd:not(.ch-search-kbd) {
 }
 
 body.vb-terminal-focus-active .app-subnav .app-account-chip {
+    height: 30px;
+}
+
+/* App settings gear (DESIGN_SYSTEM.md, Top bar account): the account chip's round treatment. */
+.app-settings-button {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    margin-inline-end: 0.5rem;
+    padding: 0;
+    color: var(--color-text);
+    background: var(--color-bg-surface-hover);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-round, 50%);
+    cursor: pointer;
+    transition: background-color var(--transition-speed), border-color var(--transition-speed), color var(--transition-speed);
+}
+
+.app-settings-button svg {
+    width: 16px;
+    height: 16px;
+}
+
+.app-settings-button:hover,
+.app-settings-button[aria-current="page"] {
+    color: var(--color-accent);
+    background: var(--action-secondary-hover);
+    border-color: var(--color-accent);
+}
+
+.app-settings-button:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+body.vb-terminal-focus-active .app-subnav .app-settings-button {
+    width: 30px;
     height: 30px;
 }
 
@@ -20045,7 +20106,7 @@ body.performance-mode .brand-text-sm {
 .launch-lane-about[hidden] { display: none; }
 .launch-lane-about-text { margin: 0; color: var(--color-text-muted); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
 .launch-lane-about-text strong { color: var(--color-text); font-weight: 600; }
-.launch-lane-about-link { color: var(--color-accent); white-space: nowrap; }
+.launch-lane-about-link.btn { --bs-btn-color: var(--color-accent); --bs-btn-hover-color: var(--color-accent); --bs-btn-active-color: var(--color-accent); padding: 0; border: 0; font-size: inherit; line-height: inherit; vertical-align: baseline; white-space: nowrap; }
 .launch-lane-stage { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-width: 0; }
 .launch-lane-stage .form-text { flex: 1 1 14rem; min-width: 0; margin: 0; }
 .launch-lane-picker-empty { display: grid; justify-items: center; gap: var(--space-2); }

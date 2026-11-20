@@ -472,7 +472,7 @@ test('Quality opens its report separately and preserves it across Rules visits',
 
 test('project naming is available from Settings', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'App settings', exact: true }).click();
 
   const projectCard = page.locator('[data-project-identity-card]');
   await expect(projectCard).toBeVisible();

@@ -273,7 +273,7 @@ for (const width of [1920, 1492, 1210, 1100, 1000, 768, 390]) {
         const settings = nav.getByRole('button', { name: 'Account settings', exact: true });
         await expect(settings).toBeFocused();
         await settings.press('Enter');
-        await expect(page.getByRole('heading', { name: 'Application Settings', exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Account settings', exact: true })).toBeVisible();
     });
 }
 

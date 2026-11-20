@@ -168,11 +168,16 @@ boards/lanes and a card search, confirms the destination and lane Automation cou
 to replace an editor with unsaved drafts. Dispose it on close/replacement/unload. The existing
 navbar **Sign in** opens the device approval flow when signed out. The top navigation is the
 only application navigation. Quality is third and Rules fourth; they are separate destinations.
-AI Agents follows Rules, then Context and MCP. The account menu opens **Review requests**, the
+AI Agents follows Rules, then MCP. The account menu opens **Review requests**, the
 separate pre-commit inbox. The standalone play button opens
-Quick actions for eligible Agents, Quick Launches and Actions. Application Settings opens from
-**Account settings** in the account dropdown; when signed out, a text **Settings** link
-stays visible beside **Sign in / Sign up**. There is no standalone Settings icon.
+Quick actions for eligible Agents, Quick Launches and Actions. Settings are two pages
+(DESIGN_SYSTEM.md, Top bar account). The gear beside Exit opens **App settings** (`settings`:
+General, LLMs, Context, Setup, AI board manager), signed in or out. **Account settings** in the
+account dropdown opens `account-settings` (Account, with the remote access password and API key,
+then Keys). Each page's header links to the other, so a signed-out user reaches Account settings
+from App settings. In-app navigation is a `<button>`, never an anchor with a `?view=` href: the VS
+Code webview opens every clicked anchor as a URI even after `preventDefault()`
+(`in-app-navigation-links.test.mjs`).
 Its footer opens **Manage AI Agents**.
 `launch-menu.js` renders each eligible item with the same provider logo or fallback icon,
 name and saved description as the AI Agents catalog, plus a matching secondary **Run** button.
@@ -265,10 +270,10 @@ Use microtasks, not short-delay `setTimeout` batching, for webview activity even
 |------|---------|
 | [app.js](app.js) | Central controller, routing, API layer |
 | [js/modules/internal-tools-modal.js](js/modules/internal-tools-modal.js) | Triple-click the brand icon to open Internal tools: About/version, retained upload attempts, and filterable application/Demon logs and feature journal; lazy loaded with bounded pages and no polling |
-| [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings, split into General / LLMs / KEYS section tabs (panels stay in the DOM so dirty tracking and the save bar keep reading hidden-tab controls; `_initSettingsTabs` owns click + arrow-key switching). Git Guard trailer cleanup and completed-session sharing are always on (no switches). The one-shot Export Data button and its progress modal are gone; smaller complete backups stay. |
+| [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings (`loadSettings`: General / LLMs / Context / Setup / AI board manager) and Account settings (`loadAccountSettings`: Account / Keys), each with section tabs (panels stay in the DOM so dirty tracking and the save bar keep reading hidden-tab controls; `_initSettingsTabs` owns click + arrow-key switching). Account settings saves only the API key: it repeats `remoteAccess` and `useVsCodeTheme`, which the settings route always writes, and omits every other field. The Context tab mounts `context-controller.js` the first time it opens; one navigation guard covers settings and context drafts. Git Guard trailer cleanup and completed-session sharing are always on (no switches). The one-shot Export Data button and its progress modal are gone; smaller complete backups stay. |
 | [js/modules/remote-account-link.js](js/modules/remote-account-link.js) | Navigation account modal: user code, external browser link, countdown, polling and cancellation over the protected local `settings/remote-link` API. |
 | [js/modules/account-nav.js](js/modules/account-nav.js) | Signed-in account chip and popover in the top bar: email, key ending, Account settings, viberails.ai account page, Switch account; the managed-organization placeholder. |
-| [js/modules/settings-keys.js](js/modules/settings-keys.js) | Lazy KEYS panel: create password-protected RSA-4096 keys, sync public keys to the saved API-key account, download public/encrypted private PEMs, and sign a message/file into public-verification JSON. Independent of the settings save bar. |
+| [js/modules/settings-keys.js](js/modules/settings-keys.js) | Lazy Keys panel in Account settings: create password-protected RSA-4096 keys, sync public keys to the saved API-key account, download public/encrypted private PEMs, and sign a message/file into public-verification JSON. Independent of the settings save bar. |
 | [js/modules/terminal-multitab.js](js/modules/terminal-multitab.js) | Reusable xterm.js terminal manager with per-tab lifecycle and environment picker |
 | [js/modules/llm-picker-controller.js](js/modules/llm-picker-controller.js) | Shared launch-picker catalog, Tom Select lifecycle, customization modal, and live preference refresh |
 | [js/modules/terminal-token-compression.js](js/modules/terminal-token-compression.js) | Persistent token-savings meter and per-tab pause-badge display (the per-tab on/off toggle was removed 2026-07-19; the saver is now per-LLM in Settings) |
@@ -378,8 +383,9 @@ preserve unrelated Settings drafts and must not call `_markSettingsClean` on the
 
 ## Settings signing keys
 
-KEYS initializes and fetches only when selected. Its create, backup, and sign forms are separate
-from `app-settings-form` and excluded from settings dirty tracking. Reopening KEYS refreshes the
+Keys (Account settings) initializes and fetches only when selected. Its create, backup, and sign
+forms are separate from `account-settings-form` and excluded from settings dirty tracking. Reopening
+Keys refreshes the
 saved API-key status. Public keys sync on creation when that credential exists; existing keys have
 an explicit Sync public key action, which asks for the key password so the backend can prove
 possession with a registration challenge. The account link opens `https://viberails.ai/Keys` for stored
@@ -462,7 +468,9 @@ GitHub PR/commit URLs; canonical links are separate from the saved local commit/
 
 Desktop MCP work leaves a monitor icon on the tile for the card’s lifetime. Its tooltip and
 accessible name use `desktopAppName` and say whether the app is working or worked on the card.
-When there is no saved assignee, the chip shows the app’s display name. The assignment menu
+When there is no saved assignee, the chip shows the app’s display name, with the CLI’s logo when
+a word in the name is one the server matches in MCP handshakes (`Codex`, `Claude Desktop`,
+`ChatGPT`) and initials otherwise (`desktopAppInfo`). The assignment menu
 and launch actions continue to use the saved CLI or environment selection. Refresh the name
 and `hasActiveDesktopAgent` through the activity poll. Only current desktop-only activity
 gets the purple marching border. A live terminal keeps its cyan border and green dot alongside
@@ -620,8 +628,9 @@ Lane cards have an 11rem minimum height and keep activity and assignment at the 
 The thumbtack button pins a card's slot during automatic activity promotion. Its narrow save
 preserves other fields, focus and the open editor; failures keep the previous pin state. Explicit
 dragging still moves pinned cards, and ordinary polling reads the saved marker from card summaries.
-The top navigation opens **Context** (`context-controller.js`). Settings links there, and the
-Board settings link preselects the board. The workspace shows the open repository and lists
+**Context** is the App settings Context tab (`context-controller.js`, mounted the first time the
+tab opens). The retired `?view=context` URL opens it, and the Board settings link preselects the
+board. The tab shows the open repository and lists
 existing editable boards without creating one or changing the active Board selection. The editor
 mounts App, Project, Board, Card and Card type disclosures in that order; only App starts open.
 Project context requires a Git repository. Board and card levels require an editable board.
@@ -629,7 +638,8 @@ Each changed unit saves through the same **Save context** action. Card and Card 
 record; the App disclosure's Nudge switches send only changed fields to
 `PUT /api/v1/settings/context-nudge`. A partial save keeps drafts and advances successful units'
 revisions. Changing boards keeps App and Project drafts and confirms discarding board drafts.
-The navigation guard also protects unsaved context when leaving the workspace.
+App settings' single navigation guard also protects unsaved context when leaving the page, and
+switching tabs keeps drafts.
 The picker footer's **Manage boards** opens an up/down order editor. **Save order** persists the
 complete project-scoped order through `PUT /api/v1/board/boards/order`; the first board opens
 on each Board view load, regardless of the last selection. Explicit card navigation still opens

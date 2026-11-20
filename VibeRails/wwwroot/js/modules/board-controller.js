@@ -3374,7 +3374,7 @@ export class BoardController {
                     <section id="board-settings-ado" role="tabpanel" aria-labelledby="board-settings-tab-ado" data-board-settings-panel="ado" hidden>${boardAdoSection()}</section>
                     ${manager ? `<section id="board-settings-manager" role="tabpanel" aria-labelledby="board-settings-tab-manager" data-board-settings-panel="manager" hidden>${boardManagerSection()}</section>` : ''}
                     <section id="board-settings-context" role="tabpanel" aria-labelledby="board-settings-tab-context" data-board-settings-panel="context" hidden>
-                        <a href="?view=context" data-open-context>Edit launch context for this board</a>
+                        <button type="button" class="btn btn-link p-0" data-open-context>Edit launch context for this board</button>
                     </section>
                     <section id="board-settings-history" role="tabpanel" aria-labelledby="board-settings-tab-history" data-board-settings-panel="history" hidden>${historySection()}</section>
                 ` : source ? `
@@ -3390,7 +3390,7 @@ export class BoardController {
         if (board) {
             this.app.bindAction(editor, '[data-open-context]', event => {
                 event.preventDefault();
-                this.app.navigate('context', { boardId: board.id });
+                this.app.navigate('settings', { tab: 'context', boardId: board.id });
             });
             const disposeManager = manager ? mountBoardManager(this.app, editor.querySelector('[data-board-manager-settings]'), board.id,
                 { onSaved: () => { void this.managerChip?.refresh(); } }) : () => {};

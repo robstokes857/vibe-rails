@@ -92,11 +92,6 @@
                 <i class="fa-solid fa-robot me-1"></i>
                 <span>AI Agents</span>
             </button>
-            <a href="?view=context" class="app-subnav-link" data-action="navigate" data-view="context" title="Context">
-                <i class="fa-solid fa-layer-group me-1" aria-hidden="true"></i>
-                <span>Context</span>
-            </a>
-
             <button class="app-subnav-link" data-action="navigate" data-view="mcp"
                 title="MCP Explorer — inspect and call tools on the local MCP server">
                 <i class="fa-solid fa-plug me-1"></i>
@@ -110,9 +105,6 @@
         </div>
 
         <div class="app-subnav-actions d-flex align-items-center ms-auto">
-            <button type="button" class="app-subnav-link" data-action="navigate" data-view="settings" data-settings-nav hidden>
-                Settings
-            </button>
             <button type="button" class="app-subnav-link app-subnav-account-prompt" data-action="remote-account" data-account-nav hidden
                 title="Sign in, or create a free viberails.ai account" aria-label="Sign in or sign up to viberails.ai">
                 <i class="fa-solid fa-user-plus" aria-hidden="true"></i><span data-account-label>Sign in / Sign up</span>
@@ -180,6 +172,10 @@
                     </div>
                 </div>
             </div>
+            <button type="button" class="app-settings-button" data-action="navigate" data-view="settings" data-settings-nav
+                title="App settings" aria-label="App settings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
             <button class="nav-exit-btn-sm" title="Close VibeRails and stop backend">
                 <svg class="nav-exit-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -668,7 +664,7 @@
                 </div>
                 <div class="card-body">
                     <div data-agent-rules></div>
-                    <p class="rules-files-detail-foot">Enforcement: <strong>WARN</strong> reports it · <strong>COMMIT</strong> needs a reason in the commit message, which Git Guard asks for · <strong>STOP</strong> blocks the commit until it is fixed or a person signs an exception with a reason and a Settings &gt; KEYS key.</p>
+                    <p class="rules-files-detail-foot">Enforcement: <strong>WARN</strong> reports it · <strong>COMMIT</strong> needs a reason in the commit message, which Git Guard asks for · <strong>STOP</strong> blocks the commit until it is fixed or a person signs an exception with a reason and an Account settings &gt; Keys key.</p>
                 </div>
             </section>
 
@@ -1099,34 +1095,27 @@
         </div>
     </template>
 
-    <template id="context-template">
-        <div class="view context-view" data-view="context">
-            <header class="vb-page-header">
-                <div class="vb-page-heading">
-                    <h1 class="vb-page-title">Context</h1>
-                    <p class="vb-page-subtitle" data-context-project></p>
-                </div>
-            </header>
-            <section class="context-workspace mx-auto" aria-label="Launch instructions" data-context-workspace></section>
-        </div>
-    </template>
-
+    <!-- App settings: everything that is not the account (see Account settings below). -->
     <template id="settings-template">
         <div class="view settings-view" data-view="settings">
             <header class="vb-page-header">
                 <div class="vb-page-heading">
-                    <h1 class="vb-page-title">Application Settings</h1>
+                    <h1 class="vb-page-title">App settings</h1>
+                    <p class="vb-page-description">How Vibe Rails runs on this computer: preferences, LLMs, launch context and setup.</p>
+                </div>
+                <div class="vb-page-actions">
+                    <button type="button" class="btn btn-secondary btn-sm" data-open-account-settings>Account settings</button>
                 </div>
             </header>
             <div class="row justify-content-center mb-4">
                 <div class="col-md-8 col-lg-6">
-                    <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+                    <div class="settings-tabs" role="tablist" aria-label="App settings sections">
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-general"
                             aria-controls="settings-panel-general" aria-selected="true" data-settings-tab="general">General</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-llm"
                             aria-controls="settings-panel-llm" aria-selected="false" tabindex="-1" data-settings-tab="llm">LLMs</button>
-                        <button type="button" class="settings-tab" role="tab" id="settings-tab-keys"
-                            aria-controls="settings-panel-keys" aria-selected="false" tabindex="-1" data-settings-tab="keys">KEYS</button>
+                        <button type="button" class="settings-tab" role="tab" id="settings-tab-context"
+                            aria-controls="settings-panel-context" aria-selected="false" tabindex="-1" data-settings-tab="context">Context</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-setup"
                             aria-controls="settings-panel-setup" aria-selected="false" tabindex="-1" data-settings-tab="setup">Setup</button>
                         <button type="button" class="settings-tab" role="tab" id="settings-tab-ai-board-manager"
@@ -1382,6 +1371,145 @@
             </div>
             <div class="settings-panel" id="settings-panel-general" role="tabpanel" aria-labelledby="settings-tab-general"
                 tabindex="0">
+            <div class="row justify-content-center" data-project-identity-card hidden>
+                <div class="col-md-8 col-lg-6 mb-4">
+                    <div class="sandbox-item-card project-identity-card text-start">
+                        <div class="project-identity-icon" aria-hidden="true">
+                            <i class="fa-solid fa-folder-tree"></i>
+                        </div>
+                        <div class="project-identity-copy">
+                            <span class="sandbox-item-name">Project identity</span>
+                            <strong data-project-display-name>Project</strong>
+                            <small data-project-root-path></small>
+                            <p>Choose the friendly name used in VibeRails tabs and project labels.</p>
+                        </div>
+                        <button class="btn btn-sm btn-outline-primary" type="button" data-action="rename-project">
+                            <i class="fa-solid fa-pen-to-square me-1" aria-hidden="true"></i>
+                            Change name
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="row justify-content-center">
+                <div class="col-md-8 col-lg-6">
+                    <div class="sandbox-item-card text-start">
+                        <div class="mb-3">
+                            <span class="sandbox-item-name">Preferences</span>
+                        </div>
+                        <form id="app-settings-form">
+                            <div class="mb-4">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="setting-remote-access">
+                                    <label class="form-check-label" for="setting-remote-access">Turn on Remote
+                                        Access</label>
+                                </div>
+                                <small class="form-text text-muted">Allow remote connections to this Vibe Rails
+                                    instance. Needs a remote access password, set in Account settings.</small>
+                            </div>
+                            <div class="mb-4">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="setting-performance-mode">
+                                    <label class="form-check-label" for="setting-performance-mode">Performance
+                                        Mode</label>
+                                </div>
+                                <small class="form-text text-muted">Disable background animations to reduce CPU
+                                    usage</small>
+                            </div>
+                            <div class="mb-4">
+                                <label class="form-label" for="setting-computer-name">Computer Name</label>
+                                <input type="text" class="form-control" id="setting-computer-name"
+                                    maxlength="80" autocomplete="off" placeholder="This computer">
+                                <small class="form-text text-muted">Used in terminal push notifications</small>
+                            </div>
+                            <div class="mb-4">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="setting-enable-mcp">
+                                    <label class="form-check-label" for="setting-enable-mcp">MCP Server</label>
+                                </div>
+                                <small class="form-text text-muted">Register the VibeRails MCP server with your agent
+                                    CLIs (Claude, Codex, Antigravity, Copilot). Always on for managed launches.</small>
+                            </div>
+                            <div class="mb-4" id="setting-use-vscode-theme-row">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="setting-use-vscode-theme">
+                                    <label class="form-check-label" for="setting-use-vscode-theme">Follow VS Code
+                                        Theme</label>
+                                </div>
+                                <small class="form-text text-muted">Use VS Code colors in the embedded terminal</small>
+                            </div>
+                            <div class="mb-4">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="setting-vscode-spell-check"
+                                        aria-describedby="setting-vscode-spell-check-help">
+                                    <label class="form-check-label" for="setting-vscode-spell-check">VS Code Spell Check</label>
+                                </div>
+                                <small class="form-text text-muted" id="setting-vscode-spell-check-help">Enable offline English spelling suggestions in Board titles, descriptions and comments, including in VS Code. Off by default. Applies after saving.</small>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            </div>
+            <div class="settings-panel" id="settings-panel-context" role="tabpanel" aria-labelledby="settings-tab-context"
+                tabindex="0" hidden>
+                <div class="context-settings">
+                    <p class="context-settings-project">Project: <strong data-context-project></strong></p>
+                    <section class="context-workspace" aria-label="Launch instructions" data-context-workspace>
+                        <p class="text-muted mb-0" role="status">Open Context to edit launch instructions.</p>
+                    </section>
+                </div>
+            </div>
+            <div class="settings-panel" id="settings-panel-setup" role="tabpanel" aria-labelledby="settings-tab-setup"
+                tabindex="0" hidden>
+                <div class="row justify-content-center">
+                    <div class="col-lg-10 col-xl-8 mb-4" data-settings-setup>
+                        <p class="text-muted" role="status">Open Setup to check what this machine has installed.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="settings-save-bar" data-settings-save-bar>
+                <div class="settings-save-copy">
+                    <div class="settings-save-title">Settings</div>
+                    <div class="settings-save-state" id="settings-save-state">All changes saved</div>
+                </div>
+                <button type="submit" form="app-settings-form" class="btn btn-primary d-flex align-items-center gap-2"
+                    id="settings-save-button" disabled>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                        viewBox="0 0 16 16">
+                        <path d="M11 2H9v3h2z" />
+                        <path
+                            d="M1.5 0h11.586a1.5 1.5 0 0 1 1.06.44l1.415 1.414A1.5 1.5 0 0 1 16 2.914V14.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 14.5v-13A1.5 1.5 0 0 1 1.5 0M1 1.5v13a.5.5 0 0 0 .5.5H2v-4.5A1.5 1.5 0 0 1 3.5 9h9a1.5 1.5 0 0 1 1.5 1.5V15h.5a.5.5 0 0 0 .5-.5V2.914a.5.5 0 0 0-.146-.353l-1.415-1.415A.5.5 0 0 0 13.086 1H13v4.5A1.5 1.5 0 0 1 11.5 7h-7A1.5 1.5 0 0 1 3 5.5V1H1.5a.5.5 0 0 0-.5.5m3 4a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V1H4zM3 15h10v-4.5a.5.5 0 0 0-.5-.5h-9a.5.5 0 0 0-.5.5z" />
+                    </svg>
+                    Save Settings
+                </button>
+            </div>
+        </div>
+    </template>
+
+    <!-- Account settings: the viberails.ai account and the credentials that act for you. -->
+    <template id="account-settings-template">
+        <div class="view settings-view" data-view="account-settings">
+            <header class="vb-page-header">
+                <div class="vb-page-heading">
+                    <h1 class="vb-page-title">Account settings</h1>
+                    <p class="vb-page-description">Your viberails.ai account, remote access password, API key and signing keys.</p>
+                </div>
+                <div class="vb-page-actions">
+                    <button type="button" class="btn btn-secondary btn-sm" data-open-app-settings>App settings</button>
+                </div>
+            </header>
+            <div class="row justify-content-center mb-4">
+                <div class="col-md-8 col-lg-6">
+                    <div class="settings-tabs" role="tablist" aria-label="Account settings sections">
+                        <button type="button" class="settings-tab" role="tab" id="settings-tab-account"
+                            aria-controls="settings-panel-account" aria-selected="true" data-settings-tab="account">Account</button>
+                        <button type="button" class="settings-tab" role="tab" id="settings-tab-keys"
+                            aria-controls="settings-panel-keys" aria-selected="false" tabindex="-1" data-settings-tab="keys">Keys</button>
+                    </div>
+                </div>
+            </div>
+            <div class="settings-panel" id="settings-panel-account" role="tabpanel" aria-labelledby="settings-tab-account"
+                tabindex="0">
             <div class="row justify-content-center">
                 <div class="col-md-8 col-lg-6 mb-4">
                     <section class="sandbox-item-card text-start" aria-labelledby="settings-account-heading">
@@ -1437,87 +1565,18 @@
                     </div>
                 </div>
             </div>
-            <div class="row justify-content-center" data-project-identity-card hidden>
-                <div class="col-md-8 col-lg-6 mb-4">
-                    <div class="sandbox-item-card project-identity-card text-start">
-                        <div class="project-identity-icon" aria-hidden="true">
-                            <i class="fa-solid fa-folder-tree"></i>
-                        </div>
-                        <div class="project-identity-copy">
-                            <span class="sandbox-item-name">Project identity</span>
-                            <strong data-project-display-name>Project</strong>
-                            <small data-project-root-path></small>
-                            <p>Choose the friendly name used in VibeRails tabs and project labels.</p>
-                        </div>
-                        <button class="btn btn-sm btn-outline-primary" type="button" data-action="rename-project">
-                            <i class="fa-solid fa-pen-to-square me-1" aria-hidden="true"></i>
-                            Change name
-                        </button>
-                    </div>
-                </div>
-            </div>
             <div class="row justify-content-center">
                 <div class="col-md-8 col-lg-6">
                     <div class="sandbox-item-card text-start">
                         <div class="mb-3">
-                            <span class="sandbox-item-name">Application Settings</span>
+                            <span class="sandbox-item-name" id="settings-api-key-heading">API key</span>
                         </div>
-                        <form id="app-settings-form">
-                            <div class="mb-4">
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="setting-remote-access">
-                                    <label class="form-check-label" for="setting-remote-access">Turn on Remote
-                                        Access</label>
-                                </div>
-                                <small class="form-text text-muted">Allow remote connections to this VibeRails
-                                    instance</small>
-                            </div>
-                            <div class="mb-4">
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="setting-performance-mode">
-                                    <label class="form-check-label" for="setting-performance-mode">Performance
-                                        Mode</label>
-                                </div>
-                                <small class="form-text text-muted">Disable background animations to reduce CPU
-                                    usage</small>
-                            </div>
-                            <div class="mb-4"><a href="?view=context" data-open-context>Launch context and Vibe Board Nudge</a></div>
-                            <div class="mb-4">
-                                <label class="form-label" for="setting-api-key">API Key</label>
-                                <input type="text" class="form-control" id="setting-api-key"
-                                    placeholder="Enter API key">
-                                <small class="form-text text-muted">API key for authenticating remote requests</small>
-                            </div>
-                            <div class="mb-4">
-                                <label class="form-label" for="setting-computer-name">Computer Name</label>
-                                <input type="text" class="form-control" id="setting-computer-name"
-                                    maxlength="80" autocomplete="off" placeholder="This computer">
-                                <small class="form-text text-muted">Used in terminal push notifications</small>
-                            </div>
-                            <div class="mb-4">
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="setting-enable-mcp">
-                                    <label class="form-check-label" for="setting-enable-mcp">MCP Server</label>
-                                </div>
-                                <small class="form-text text-muted">Register the VibeRails MCP server with your agent
-                                    CLIs (Claude, Codex, Antigravity, Copilot). Always on for managed launches.</small>
-                            </div>
-                            <div class="mb-4" id="setting-use-vscode-theme-row">
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="setting-use-vscode-theme">
-                                    <label class="form-check-label" for="setting-use-vscode-theme">Follow VS Code
-                                        Theme</label>
-                                </div>
-                                <small class="form-text text-muted">Use VS Code colors in the embedded terminal</small>
-                            </div>
-                            <div class="mb-4">
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" role="switch" id="setting-vscode-spell-check"
-                                        aria-describedby="setting-vscode-spell-check-help">
-                                    <label class="form-check-label" for="setting-vscode-spell-check">VS Code Spell Check</label>
-                                </div>
-                                <small class="form-text text-muted" id="setting-vscode-spell-check-help">Enable offline English spelling suggestions in Board titles, descriptions and comments, including in VS Code. Off by default. Applies after saving.</small>
-                            </div>
+                        <form id="account-settings-form">
+                            <label class="visually-hidden" for="setting-api-key">API key</label>
+                            <input type="text" class="form-control" id="setting-api-key" placeholder="Enter API key"
+                                aria-describedby="setting-api-key-help">
+                            <small class="form-text text-muted" id="setting-api-key-help">Your viberails.ai API key. Signing in
+                                saves it for you, or paste a key here.</small>
                         </form>
                     </div>
                 </div>
@@ -1527,15 +1586,7 @@
                 tabindex="0" hidden>
                 <div class="row justify-content-center">
                     <div class="col-md-8 col-lg-6 mb-4" data-settings-keys>
-                        <p class="text-muted" role="status">Open KEYS to manage your signing keys.</p>
-                    </div>
-                </div>
-            </div>
-            <div class="settings-panel" id="settings-panel-setup" role="tabpanel" aria-labelledby="settings-tab-setup"
-                tabindex="0" hidden>
-                <div class="row justify-content-center">
-                    <div class="col-lg-10 col-xl-8 mb-4" data-settings-setup>
-                        <p class="text-muted" role="status">Open Setup to check what this machine has installed.</p>
+                        <p class="text-muted" role="status">Open Keys to manage your signing keys.</p>
                     </div>
                 </div>
             </div>
@@ -1544,7 +1595,7 @@
                     <div class="settings-save-title">Settings</div>
                     <div class="settings-save-state" id="settings-save-state">All changes saved</div>
                 </div>
-                <button type="submit" form="app-settings-form" class="btn btn-primary d-flex align-items-center gap-2"
+                <button type="submit" form="account-settings-form" class="btn btn-primary d-flex align-items-center gap-2"
                     id="settings-save-button" disabled>
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
                         viewBox="0 0 16 16">

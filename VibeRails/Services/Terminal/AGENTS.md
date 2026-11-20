@@ -177,7 +177,7 @@ backend assembly). Update that file using the model-update checklist in
 `vibe-books/custom_envs/CLI_OPTIONS.md`. Speed is optional JSON in existing Board options;
 older cards need no migration. Account eligibility remains enforced by Codex.
 
-The Context workspace's **Vibe Board Nudge** defaults on for default/base LLM launches and Agent
+The App settings Context tab's **Vibe Board Nudge** defaults on for default/base LLM launches and Agent
 presets. The independent
 **Vibe Board Nudge - Custom Envs** defaults off for saved/custom environments. The existing
 `CreateVibeStoryTracking` saved key controls base launches, and `CreateVibeStoryTrackingCustomEnvs`

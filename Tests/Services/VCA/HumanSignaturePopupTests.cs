@@ -55,7 +55,7 @@ public sealed class HumanSignaturePopupTests : IDisposable
         var exit = await Popup(output, new ScriptedConsole(), new FakeSigner(), Verifier("a@example.com")).RunAsync(Request([]), Ct);
 
         Assert.Equal(1, exit);
-        Assert.Contains("Settings > KEYS", output.ToString());
+        Assert.Contains("Account settings > Keys", output.ToString());
         Assert.Equal("Subject\n", await File.ReadAllTextAsync(_messagePath, Ct));
     }
 

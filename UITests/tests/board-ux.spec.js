@@ -2667,7 +2667,7 @@ for (const width of [1440, 390]) {
         });
         await page.getByRole('button', { name: 'Board settings', exact: true }).click();
         await page.getByRole('tab', { name: 'Context', exact: true }).click();
-        await page.getByRole('link', { name: 'Edit launch context for this board' }).click();
+        await page.getByRole('button', { name: 'Edit launch context for this board' }).click();
 
         const editor = page.locator('[data-context-editor]');
         await expect(editor.locator('[data-context-board-picker]')).toHaveValue('brd_main');
@@ -2710,7 +2710,8 @@ for (const width of [1440, 390]) {
         expect(appState.revision).toBe(4);
         expect(cardState.revision).toBe(1);
 
-        await page.getByRole('navigation').getByRole('link', { name: 'Context', exact: true }).click();
+        await page.getByRole('navigation').getByRole('button', { name: 'App settings', exact: true }).click();
+        await page.getByRole('tab', { name: 'Context', exact: true }).click();
         await editor.locator('[data-context-level="board"] > summary').click();
         await expect(boardMessage).toHaveValue(text);
         expect(await page.evaluate(() => window.__everyContextXss)).toBeUndefined();
@@ -2737,7 +2738,8 @@ test('Context save waits for loading and preserves edits made during an in-fligh
         }
         return route.fulfill({ json: saved });
     });
-    await page.getByRole('navigation').getByRole('link', { name: 'Context', exact: true }).click();
+    await page.getByRole('navigation').getByRole('button', { name: 'App settings', exact: true }).click();
+    await page.getByRole('tab', { name: 'Context', exact: true }).click();
     const save = page.locator('[data-context-save]');
     await expect(save).toBeDisabled();
     await expect.poll(() => Boolean(finishLoad)).toBe(true);
@@ -2768,7 +2770,8 @@ test('Switching Context boards preserves wider drafts and protects board-specifi
         route.fulfill({ json: { message: 'Sprint instructions', revision: 1 } }));
     await page.route('**/api/v1/board/boards/brd_sprint/context', route =>
         route.fulfill({ json: { context: { defaultMessage: '', typeOverrides: [] }, revision: 1 } }));
-    await page.getByRole('navigation').getByRole('link', { name: 'Context', exact: true }).click();
+    await page.getByRole('navigation').getByRole('button', { name: 'App settings', exact: true }).click();
+    await page.getByRole('tab', { name: 'Context', exact: true }).click();
     const editor = page.locator('[data-context-editor]');
     const appMessage = editor.getByLabel('App context', { exact: true });
     const boardMessage = editor.getByLabel('Board context', { exact: true });

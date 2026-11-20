@@ -864,7 +864,7 @@ Normal terminal statuses continue independently. Comment attention metadata surv
 merge; local alert attribution stays local. See `BoardStore.Attention.cs` and the Board guide.
 
 Lane agent buttons include the first lane and open the destination lane's Automation settings.
-The top navigation's Context workspace uses native disclosures, opens only App context initially
+The App settings Context tab uses native disclosures, opens only App context initially
 and saves changed levels from one action while retaining their separate revision checks. The board
 picker changes the editing target, and App contains the launch Nudge switches. Base-LLM option
 editors share a **Make Default For LLM** action for model, speed, effort, mode and YOLO.

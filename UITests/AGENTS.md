@@ -67,11 +67,12 @@ The file-details cases exercise the real Monaco reader, finding-line navigation,
 excerpts, source fallbacks, ignore/cancel/rescan, file-scoped fix prompts, launch failure,
 picker placement inside the native dialog, cleanup and 320–1440px layouts.
 
-### Focused Context Workspace Tests (No Backend Required)
+### Focused Context Tab Tests (No Backend Required)
 
 From `UITests`, run `npx playwright test --config playwright.board-nudge.config.js`.
-This opens the production Context workspace with simulated API responses and checks top navigation,
-Settings entry, independent Nudge updates and project editing with or without a repository.
+This opens the App settings Context tab with simulated API responses and checks the gear entry, the
+retired `?view=context` URL, drafts kept across tabs, the single leave prompt, independent Nudge
+updates and project editing with or without a repository.
 The focused Board UX suite also checks board switching, partial saves and in-flight edits.
 
 ### Focused Page Header Tests (No Backend Required)
@@ -193,8 +194,8 @@ It never reads or changes real scripts, signing state, terminals or application 
 From `UITests`, run `npx playwright test --config playwright.remote-link.config.js`.
 This serves the real frontend with local API fixtures and an intercepted sign-in page. It covers
 browser popup behavior, copy code, the VS Code bridge, narrow layout, completion alongside unsaved
-settings, cancellation, and unavailable/denied/expired requests. It also checks the signed-out top-navigation link, the Settings account summary after reload, cross-tab completion and escaped
-emails, signed-out Settings access from 320px to desktop widths, and the signed-in account chip: its popover's personal, key-only and managed-organization
+settings, cancellation, and unavailable/denied/expired requests. It also checks the App settings gear, the Account settings summary after reload, cross-tab completion and escaped
+emails, the key-only Account settings save, signed-out access to both settings pages from 320px to desktop widths, and the signed-in account chip: its popover's personal, key-only and managed-organization
 states, Escape and outside-click closing, drafts kept by **Account settings**, the compact bar at
 1280px and a 375px window. It opens no application database
 and creates no account or API key.

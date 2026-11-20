@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
-async function openSettings(page, credential = null) {
+async function openSettings(page, credential = null, view = 'account-settings') {
     await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'password-fixture'));
     await page.routeWebSocket('**/api/v1/events/ws*', () => {});
     const writes = [];
@@ -29,8 +29,8 @@ async function openSettings(page, credential = null) {
         };
         return route.fulfill({ json: payloads[path] || {} });
     });
-    await page.goto('/?view=settings', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('#btn-set-pin')).toBeVisible();
+    await page.goto(`/?view=${view}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator(view === 'settings' ? '#setting-computer-name' : '#btn-set-pin')).toBeVisible();
     return { writes, failSave: value => { failSave = value; } };
 }
 
@@ -102,7 +102,7 @@ test('failed change is recoverable; Escape clears secrets and restores focus at 
 });
 
 test('unrelated settings save preserves a legacy PIN without asking to replace it', async ({ page }) => {
-    const { writes } = await openSettings(page, '1234');
+    const { writes } = await openSettings(page, '1234', 'settings');
     await page.locator('#setting-computer-name').fill('Changed name');
     await page.locator('#settings-save-button').click();
     await expect(page.locator('#settings-save-button')).toBeDisabled();

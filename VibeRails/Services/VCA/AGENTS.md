@@ -213,7 +213,7 @@ that does not exist yet. The commit-msg hook is where it is enforced.
 MCP `request_stop_bypass(reason, commitMessage)` captures the current STOP violations and opens
 the separate human signing popup. `get_stop_bypass_status` reports pending/approved/stale/failure.
 The agent never receives the key or password. A person approves the displayed snapshot, exact
-rules and reason with a synced Settings > KEYS key; explicitly named approvers still apply.
+rules and reason with a synced Account settings > Keys key; explicitly named approvers still apply.
 Installed hooks verify the exception and record readable `VCA-STOP-Reason` / `VCA-STOP-Rule`
 trailers plus signed `VCA-STOP-Bypass` evidence. Ordinary tree signatures do not bypass STOP.
 Full format, lifetime and security contract: [STOP_BYPASS.md](STOP_BYPASS.md).
@@ -243,7 +243,7 @@ never suggest `--no-verify`, which skips every hook (`HookScriptGuidanceTests`).
 
 ## Signed commits: `Human verified` and `Signed Approval` (2026-10-20)
 
-Two rules a person satisfies by signing the commit with a Settings > KEYS signing key
+Two rules a person satisfies by signing the commit with an Account settings > Keys signing key
 (`HumanSignatureRule`, `CommitSignatureFormat`):
 
 - `Human verified` needs, for every commit in scope, a signature from a key registered on

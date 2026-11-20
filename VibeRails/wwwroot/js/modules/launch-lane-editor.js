@@ -202,14 +202,14 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}, { befor
                 <section class="launch-lane-manage" id="${manageId}" data-lane-manage-list aria-label="Manage list" hidden></section>
                 <div class="launch-lane-picker" data-lane-picker-slot></div>
                 <div class="launch-lane-about" data-lane-about hidden>
-                    <p class="launch-lane-about-text"><strong>What this does:</strong> <span data-lane-about-text></span> <a class="launch-lane-about-link" href="?view=dashboard" data-lane-about-link hidden></a></p>
+                    <p class="launch-lane-about-text"><strong>What this does:</strong> <span data-lane-about-text></span> <button type="button" class="btn btn-link launch-lane-about-link" data-lane-about-link hidden></button></p>
                     <div class="launch-lane-check" data-lane-check-options hidden><label>Check scope<select class="form-select" data-lane-check-scope aria-describedby="${scopeHelpId}">${LANE_CHECK_SCOPES
         .map(([value, label]) => `<option value="${value}"${value === DEFAULT_LANE_CHECK_SCOPE ? ' selected' : ''}>${label}</option>`)
         .join('')}</select></label><p class="form-text" id="${scopeHelpId}" data-lane-check-help>${escapeHtml(scopeHelp(DEFAULT_LANE_CHECK_SCOPE))}</p>
                         <div class="launch-lane-check" data-lane-check-minimum-options hidden><label>Findings<select class="form-select" data-lane-check-minimum aria-describedby="${minimumHelpId}">${checkMinimumOptions('')}</select></label><p class="form-text" id="${minimumHelpId}">${escapeHtml(CHECK_MINIMUM_HELP)}</p></div></div>
                 </div>
                 <div class="launch-lane-stage"><button type="button" class="btn btn-secondary" data-lane-add disabled aria-describedby="${stagingId}">Add to run order</button><p class="form-text" id="${stagingId}">Add puts it in the run order above. Nothing runs until you save lane settings, and then only when a card enters this lane.</p></div>
-            </div><div><a href="?view=ai-agents" class="btn btn-link btn-sm px-0" data-lane-manage-agents>Create an agent in AI Agents</a></div><div class="launch-lane-footer"><p class="launch-lane-unsaved" data-lane-unsaved role="status"></p><button class="btn btn-primary" data-lane-save>Save lane settings</button></div><p data-lane-error role="alert"></p>`;
+            </div><div><button type="button" class="btn btn-link btn-sm px-0" data-lane-manage-agents>Create an agent in AI Agents</button></div><div class="launch-lane-footer"><p class="launch-lane-unsaved" data-lane-unsaved role="status"></p><button class="btn btn-primary" data-lane-save>Save lane settings</button></div><p data-lane-error role="alert"></p>`;
         renderPicker();
         if (manageOpen) setManage(true, false);
         syncDirty();
@@ -259,7 +259,6 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}, { befor
         if (item) about.querySelector('[data-lane-about-text]').textContent = laneChoiceDetail(item);
         if (check) {
             link.textContent = check.link;
-            link.href = `?view=${check.view}`;
             link.dataset.laneOpenView = check.view;
         }
         const builtIn = LANE_BUILT_IN_CHECKS.find(check => check.id === value);

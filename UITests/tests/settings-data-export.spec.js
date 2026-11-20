@@ -85,9 +85,10 @@ async function installSettingsApi(
 }
 
 async function openSettings(page) {
-    await page.goto('/?view=settings');
+    // The API key lives in Account settings.
+    await page.goto('/?view=account-settings');
 
-    const root = page.locator('.view[data-view="settings"]');
+    const root = page.locator('.view[data-view="account-settings"]');
     await expect(root).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('#loading-overlay')).toHaveClass(/\bd-none\b/);
 

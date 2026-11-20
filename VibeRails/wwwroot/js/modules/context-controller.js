@@ -3,21 +3,32 @@ import { getSelectedBoardId } from './board-selection.js';
 import { contextEditorSection, mountContextEditor } from './board-settings.js';
 import { confirmDialog } from './utils.js';
 
+/**
+ * The Context tab of App settings: App, Project and board launch context plus the Vibe Board
+ * Nudge. It registers no navigation guard; App settings asks once for the whole page using
+ * {@link ContextController#anyDirty} and {@link ContextController#isBusy}.
+ */
 export class ContextController {
     constructor(app) {
         this.app = app;
+        this.dispose = null;
+        this.anyDirty = () => false;
+        this.isBusy = () => false;
     }
 
-    loadView({ boardId } = {}) {
-        const fragment = this.app.cloneTemplate('context-template');
-        const root = fragment.querySelector('[data-view="context"]');
+    /**
+     * Renders into `root`, which holds `[data-context-project]` and `[data-context-workspace]`.
+     * `boardId` preselects a board (Board settings opens Context for its board); `onBoardChange`
+     * hears every board the picker shows.
+     */
+    mount(root, { boardId, onBoardChange } = {}) {
+        this.unload();
         const hasProject = this.app.data.isInGit;
         const project = root.querySelector('[data-context-project]');
         project.textContent = hasProject ? this.app.data.projectDisplayName : 'No Git repository open';
         if (hasProject) project.title = this.app.data.configs.rootPath;
         const editorHost = root.querySelector('[data-context-workspace]');
         editorHost.innerHTML = contextEditorSection({ project: hasProject });
-        document.getElementById('app-content').replaceChildren(fragment);
 
         const editor = mountContextEditor(this.app, editorHost.firstElementChild);
         const picker = root.querySelector('[data-context-board-picker]');
@@ -26,11 +37,10 @@ export class ContextController {
         const lifetime = new AbortController();
         let selected = '';
         let confirming = false;
-        let discardConfirmed = false;
         const choose = id => {
             selected = picker.value = id;
             editor.setBoard(id);
-            this.app.updateCurrentViewData({ boardId: id });
+            onBoardChange?.(id);
         };
         const loadBoards = async () => {
             status.textContent = 'Loading boards…';
@@ -76,19 +86,10 @@ export class ContextController {
             if (!lifetime.signal.aborted) choose(next);
         });
         retry.addEventListener('click', loadBoards);
-        const removeGuard = this.app.registerNavigationGuard(({ retry: navigate }) => {
-            if (editor.isSaving() || confirming) return false;
-            if (!editor.anyDirty() || discardConfirmed) return true;
-            void confirmDiscard('context').then(discard => {
-                if (!discard || lifetime.signal.aborted) return;
-                discardConfirmed = true;
-                try { navigate?.(); } finally { discardConfirmed = false; }
-            });
-            return false;
-        });
+        this.anyDirty = () => editor.anyDirty();
+        this.isBusy = () => editor.isSaving() || confirming;
         this.dispose = () => {
             lifetime.abort();
-            removeGuard();
             editor.dispose();
         };
         void loadBoards();
@@ -97,5 +98,7 @@ export class ContextController {
     unload() {
         this.dispose?.();
         this.dispose = null;
+        this.anyDirty = () => false;
+        this.isBusy = () => false;
     }
 }

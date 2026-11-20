@@ -11,7 +11,6 @@ import { RuleController } from './js/modules/rule-controller.js';
 import { CliLauncher } from './js/modules/cli-launcher.js';
 import { TerminalController } from './js/modules/terminal-multitab.js';
 import { SettingsController } from './js/modules/settings-controller.js';
-import { ContextController } from './js/modules/context-controller.js';
 import { SetupAlert } from './js/modules/setup-panel.js';
 import { RemoteAccountLinkPanel } from './js/modules/remote-account-link.js';
 import { AccountNavMenu, accountSummary } from './js/modules/account-nav.js';
@@ -61,7 +60,6 @@ export class VibeControlApp {
         this.cliLauncher = new CliLauncher(this);
         this.terminalController = new TerminalController(this);
         this.settingsController = new SettingsController(this);
-        this.contextController = new ContextController(this);
         this.setupAlert = new SetupAlert(this);
         this.mcpController = new McpController(this);
         this.reviewInboxController = new ReviewInboxController(this);
@@ -615,6 +613,7 @@ export class VibeControlApp {
             'config',
             'sessions',
             'settings',
+            'account-settings',
             'context',
             'terminal-focus',
             'mcp',
@@ -782,14 +781,17 @@ export class VibeControlApp {
     updateActiveSubNav(view) {
         // Rule editors retain the Rules highlight; Quality has its own destination.
         // The Python workbench and legacy launch URLs belong to AI Agents.
+        // The retired Context page is the App settings Context tab.
         const highlightView = ['agents', 'rule-files', 'agent-edit', 'agent-create'].includes(view)
             ? 'dashboard'
             : view === 'python-script'
                     ? 'ai-agents'
                     : ['jobs', 'automations'].includes(view)
                         ? 'ai-agents'
-                        : view;
-        document.querySelectorAll('.app-subnav-link').forEach(link => {
+                        : view === 'context'
+                            ? 'settings'
+                            : view;
+        document.querySelectorAll('.app-subnav-link, .app-settings-button').forEach(link => {
             const linkView = link.getAttribute('data-view') || (link.getAttribute('data-action') === 'navigate-home' ? 'dashboard' : '');
 
             if (linkView === highlightView) {
@@ -848,7 +850,6 @@ export class VibeControlApp {
 
     loadView(view, data = {}) {
         this.settingsController?.unload?.();
-        this.contextController?.unload();
         this.ruleController?.unload?.();
         this.jobController?.unload?.();
         this.pythonScriptWorkbench?.unload?.();
@@ -876,7 +877,9 @@ export class VibeControlApp {
             'config': () => this.configController.loadConfiguration(),
             'sessions': () => this.sessionController.loadSessions(),
             'settings': () => this.settingsController.loadSettings(data),
-            'context': () => this.contextController.loadView(data),
+            'account-settings': () => this.settingsController.loadAccountSettings(data),
+            // The retired Context page: old links and duplicated tabs open its App settings tab.
+            'context': () => this.settingsController.loadSettings({ ...data, tab: 'context' }),
             'terminal-focus': () => this.terminalController.loadTerminalFocusView(data),
             'mcp': () => this.mcpController.loadView(),
             // Reviews requested of this account (VB-50 slice D); reached from the account menu.
@@ -1150,9 +1153,6 @@ export class VibeControlApp {
         const account = accountSummary(this.appSettings);
         const managed = account.state === 'managed';
         for (const link of document.querySelectorAll('[data-account-nav]')) {
-            link.hidden = hasKey;
-        }
-        for (const link of document.querySelectorAll('[data-settings-nav]')) {
             link.hidden = hasKey;
         }
         for (const status of document.querySelectorAll('[data-account-status]')) {

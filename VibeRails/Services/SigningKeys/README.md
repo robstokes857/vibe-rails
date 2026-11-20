@@ -1,6 +1,6 @@
 # Signing keys
 
-Settings → KEYS creates RSA-4096 key pairs using the platform-neutral .NET cryptography
+Account settings → Keys creates RSA-4096 key pairs using the platform-neutral .NET cryptography
 APIs. This uses the same code on Windows 11, supported modern macOS, and Linux, including
 Native AOT; it needs no shell, OpenSSL executable, or Windows-only key provider. RSA-4096
 is not post-quantum cryptography. The wire algorithm is explicitly `RSA-PSS-SHA256` so
@@ -20,7 +20,7 @@ are owner-only; Windows inherits user-profile ACLs. A link or reparse point in p
 signing-keys folder or a key file is refused; ancestors such as a relocated profile or
 macOS's `/var` symlink are allowed. Writes are atomic, and a filesystem lock prevents
 concurrent root dashboards from losing changes. Up to 50 keys are retained locally. A
-stray or damaged `*.json` in the folder is skipped and reported by name in the KEYS list
+stray or damaged `*.json` in the folder is skipped and reported by name in the Keys list
 (`warnings`) rather than failing the list; single-key operations on a damaged file still
 fail with a storage error.
 

@@ -5,7 +5,8 @@ const VIEWS = [
     ['agents', 'Rules'],
     ['code-quality', 'Code quality'],
     ['mcp', 'MCP Explorer'],
-    ['settings', 'Application Settings']
+    ['settings', 'App settings'],
+    ['account-settings', 'Account settings']
 ];
 
 test.beforeEach(async ({ page }) => {
@@ -76,8 +77,12 @@ for (const width of [1440, 768, 390]) {
                 await header.getByRole('button', { name: 'Local', exact: true }).click();
                 await expect(page.locator('[data-mcp-local]')).toBeVisible();
             } else if (view === 'settings') {
+                await expect(header.getByRole('button', { name: 'Account settings', exact: true })).toBeVisible();
                 await page.getByRole('tab', { name: 'LLMs', exact: true }).click();
                 await expect(page.locator('#settings-panel-llm')).toBeVisible();
+            } else if (view === 'account-settings') {
+                await expect(header.getByRole('button', { name: 'App settings', exact: true })).toBeVisible();
+                await expect(page.getByRole('tab', { name: 'Keys', exact: true })).toBeVisible();
             }
             await header.screenshot({ path: testInfo.outputPath(`${view}-header.png`) });
         }
@@ -103,7 +108,7 @@ test('Settings no longer exposes or requests PR Reviewer', async ({ page }) => {
     const requests = [];
     page.on('request', request => requests.push(new URL(request.url()).pathname));
     await page.goto('/?view=settings', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'Application Settings' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'App settings' })).toBeVisible();
     await expect(page.getByRole('tab', { name: 'PR Reviewer', exact: true })).toHaveCount(0);
     await expect(page.locator('[data-view="pr-reviews"]')).toHaveCount(0);
     await page.getByRole('tab', { name: 'AI board manager', exact: true }).click();

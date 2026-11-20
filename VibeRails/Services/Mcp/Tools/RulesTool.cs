@@ -1348,8 +1348,8 @@ public class RulesTool(IGitStagedSnapshotProvider snapshotProvider, CodeQualityE
                 : $"{fixHint} Or include the shown acknowledgment token and a meaningful reason in the final commit message.",
             VcaRuleFindingKind.Blocked =>
                 $"{fix} For a deliberate change, edit or lower the rule at {location ?? sourcePath} (COMMIT lets a commit "
-                    + "through with a reason in its message), or have a person sign an exception with a reason using a "
-                    + "Settings > KEYS key; an agent requests one with request_stop_bypass. A plain acknowledgment cannot bypass STOP.",
+                    + "through with a reason in its message), or have a person sign an exception with a reason using an "
+                    + "Account settings > Keys key; an agent requests one with request_stop_bypass. A plain acknowledgment cannot bypass STOP.",
             _ => "Review this finding before committing."
         };
     }

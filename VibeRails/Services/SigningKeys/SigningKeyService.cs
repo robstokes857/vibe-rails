@@ -110,7 +110,7 @@ public sealed class SigningKeyService(HttpClient cloudClient, SigningKeyStore st
         using var lease = await store.LockAsync(ct);
         var key = store.Read(id);
         var cloudKeyId = PublicInfo(key, apiKey()).CloudKeyId
-            ?? throw new ArgumentException("Sync this key to viberails.ai in Settings > KEYS before signing commits with it.");
+            ?? throw new ArgumentException("Sync this key to viberails.ai in Account settings > Keys before signing commits with it.");
         using var rsa = Unlock(key, password);
         var signature = rsa.SignData(payload, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
         return new CommitSignature(cloudKeyId, key.Fingerprint, treeId, Convert.ToBase64String(signature));

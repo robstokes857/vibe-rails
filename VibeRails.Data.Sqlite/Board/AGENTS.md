@@ -106,7 +106,7 @@ of the existing Agent context JSON/revision. Older Agent context writers omit an
 Message, Revision) for App context.
 `project-context/1` adds `ProjectContextSettings`, keyed by the normalized Git project path
 with the Board store's project path collation and an independent revision. It has no board foreign key.
-It is in `UnstampedTables`: the Context workspace fetches it independently of Board polling.
+It is in `UnstampedTables`: the App settings Context tab fetches it independently of Board polling.
 No existing row is read, converted or moved. Every Context and
 Agent context stay where they are and are read as the Board, Card and Card type levels.
 `board-card-pins/1` adds nullable BoardCards.Pinned; old rows read as false. Automatic promotion

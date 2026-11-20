@@ -132,29 +132,74 @@ test('saving settings omits retired options and preserves following arguments', 
     assert.equal(calls[1].body.clearApiKey, false);
 });
 
-test('settings page groups its cards under a section tab bar', () => {
-    const html = readFileSync(indexPath, 'utf8');
+const templateOf = (html, id) => {
+    const start = html.indexOf(`<template id="${id}">`);
+    assert.ok(start >= 0, `${id} exists`);
+    return html.slice(start, html.indexOf('</template>', start));
+};
 
-    assert.match(html, /class="settings-tabs" role="tablist" aria-label="Settings sections"/);
-    for (const id of ['general', 'llm', 'keys']) {
-        assert.match(html, new RegExp(`id="settings-tab-${id}"`));
-        assert.match(html, new RegExp(`id="settings-panel-${id}" role="tabpanel"`));
+test('settings are two pages, each grouping its cards under a section tab bar', () => {
+    const html = readFileSync(indexPath, 'utf8');
+    const app = templateOf(html, 'settings-template');
+    const account = templateOf(html, 'account-settings-template');
+
+    assert.match(app, /<h1 class="vb-page-title">App settings<\/h1>/);
+    assert.match(app, /class="settings-tabs" role="tablist" aria-label="App settings sections"/);
+    for (const id of ['general', 'llm', 'context', 'setup', 'ai-board-manager']) {
+        assert.match(app, new RegExp(`id="settings-tab-${id}"`));
+        assert.match(app, new RegExp(`id="settings-panel-${id}" role="tabpanel"`));
     }
-    // General is the default tab; the other panels start hidden.
-    assert.match(html, /id="settings-tab-general"[\s\S]{0,120}aria-selected="true"/);
-    assert.match(html, /id="settings-tab-llm"[\s\S]{0,120}aria-selected="false"/);
-    assert.match(html, /id="settings-panel-llm"[\s\S]{0,120}hidden/);
-    // Like settings stay on their own tabs.
-    assert.match(html, /id="settings-panel-llm"[\s\S]*?Codex Settings[\s\S]*?Token Saver/);
-    assert.match(html, /id="settings-panel-general"[\s\S]*?Remote access password[\s\S]*?Application Settings/);
+    assert.match(account, /<h1 class="vb-page-title">Account settings<\/h1>/);
+    assert.match(account, /class="settings-tabs" role="tablist" aria-label="Account settings sections"/);
+    for (const id of ['account', 'keys']) {
+        assert.match(account, new RegExp(`id="settings-tab-${id}"`));
+        assert.match(account, new RegExp(`id="settings-panel-${id}" role="tabpanel"`));
+    }
+    // The first tab is the default; the other panels start hidden.
+    assert.match(app, /id="settings-tab-general"[\s\S]{0,120}aria-selected="true"/);
+    assert.match(app, /id="settings-tab-llm"[\s\S]{0,120}aria-selected="false"/);
+    assert.match(app, /id="settings-panel-llm"[\s\S]{0,120}hidden/);
+    assert.match(account, /id="settings-tab-account"[\s\S]{0,120}aria-selected="true"/);
+    assert.match(account, /id="settings-panel-keys"[\s\S]{0,120}hidden/);
+    // Like settings stay on their own tabs, and each page links to the other.
+    assert.match(app, /id="settings-panel-llm"[\s\S]*?Codex Settings[\s\S]*?Token Saver/);
+    assert.match(account, /id="settings-panel-account"[\s\S]*?Account[\s\S]*?Remote access password[\s\S]*?id="setting-api-key"/);
+    assert.doesNotMatch(app, /Remote access password|id="setting-api-key"|data-account-settings-action|data-settings-keys/);
+    assert.doesNotMatch(account, /id="setting-remote-access"|id="setting-computer-name"|Codex Settings/);
+    assert.match(app, /data-open-account-settings>Account settings</);
+    assert.match(account, /data-open-app-settings>App settings</);
+    // Each page's save bar submits its own form.
+    assert.match(app, /form="app-settings-form"/);
+    assert.match(account, /form="account-settings-form"/);
 });
 
-test('Settings links to the shared Context workspace', () => {
+test('Context is an App settings tab, not a page of its own', () => {
     const html = readFileSync(indexPath, 'utf8');
     const source = readFileSync(modulePath, 'utf8');
-    assert.match(html, /<a href="\?view=context" data-open-context>Launch context and Vibe Board Nudge<\/a>/);
-    assert.match(source, /this\.app\.navigate\('context'\)/);
-    assert.doesNotMatch(html, /settings-panel-context|setting-create-vibe-story-tracking/);
+    const appSource = readFileSync(path.resolve('VibeRails/wwwroot/app.js'), 'utf8');
+    const app = templateOf(html, 'settings-template');
+
+    assert.match(app, /id="settings-panel-context"[\s\S]*?data-context-project[\s\S]*?data-context-workspace/);
+    assert.doesNotMatch(html, /id="context-template"|data-view="context"|data-open-context/);
+    assert.match(source, /new ContextController\(this\.app\)/);
+    // Old links and Board settings open the tab, keeping the board they asked for.
+    assert.match(appSource, /'context': \(\) => this\.settingsController\.loadSettings\(\{ \.\.\.data, tab: 'context' \}\)/);
+    assert.match(readFileSync(path.resolve('VibeRails/wwwroot/js/modules/board-controller.js'), 'utf8'),
+        /navigate\('settings', \{ tab: 'context', boardId: board\.id \}\)/);
+    assert.doesNotMatch(html, /setting-create-vibe-story-tracking/);
+});
+
+test('the account menu opens Account settings and the gear opens App settings', () => {
+    const html = readFileSync(indexPath, 'utf8');
+    const accountNav = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/account-nav.js'), 'utf8');
+    const appSource = readFileSync(path.resolve('VibeRails/wwwroot/app.js'), 'utf8');
+
+    assert.match(accountNav, /navigate\('account-settings', \{ tab: 'account' \}, \{ resetStack: true \}\)/);
+    const gear = html.match(/<button\b[^>]*data-settings-nav[^>]*>/)[0];
+    assert.match(gear, /data-view="settings"/);
+    assert.match(gear, /aria-label="App settings"/);
+    assert.doesNotMatch(gear, /\shidden/, 'the gear stays visible signed in and signed out');
+    assert.doesNotMatch(appSource, /\[data-settings-nav\]/);
 });
 
 test('every tracked settings control survives the tabbed layout', () => {
@@ -218,6 +263,8 @@ test('settings tabs switch panels without removing any controls', () => {
     };
     controller._initSettingsTabs(root);
     assert.equal(keysActivations, 0, 'keys are not fetched when settings initializes');
+    // Opening the page selects its first tab, which clears nothing that was ever entered.
+    const clearsAtOpen = secretClears;
 
     // Clicking the LLMs tab (delegated through the tablist) shows only its panel.
     tablist.listeners.click.forEach(fn => fn({ target: tabs[1] }));
@@ -244,7 +291,7 @@ test('settings tabs switch panels without removing any controls', () => {
     assert.equal(tabs[2].focusCount, 2);
     assert.equal(keysActivations, 2);
     tablist.listeners.click.forEach(fn => fn({ target: tabs[0] }));
-    assert.equal(secretClears, 2, 'leaving KEYS clears key passwords');
+    assert.equal(secretClears - clearsAtOpen, 2, 'leaving KEYS clears key passwords');
 });
 
 test('a dirty settings form blocks navigation, asks in-app, and replays on yes', async () => {

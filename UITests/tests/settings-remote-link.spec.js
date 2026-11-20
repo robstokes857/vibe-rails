@@ -13,7 +13,7 @@ async function confirmPresence(page) {
     await page.locator('#settings-presence-confirm').click();
 }
 
-async function openSettings(page, { bridge = false, signedIn = false, email = 'rob@example.com', organization } = {}) {
+async function openSettings(page, { bridge = false, signedIn = false, email = 'rob@example.com', organization, view = 'account-settings' } = {}) {
     await page.addInitScript(({ bridge }) => {
         sessionStorage.setItem('viberails_tab', 'remote-link-fixture');
         if (bridge) {
@@ -63,10 +63,10 @@ async function openSettings(page, { bridge = false, signedIn = false, email = 'r
         };
         return route.fulfill({ json: payloads[pathname] || {} });
     });
-    await page.goto('/?view=settings', { waitUntil: 'domcontentloaded' });
-    const root = page.locator('#app-content [data-view="settings"]');
+    await page.goto(`/?view=${view}`, { waitUntil: 'domcontentloaded' });
+    const root = page.locator(`#app-content [data-view="${view}"]`);
     await expect(root).toBeVisible();
-    await expect(root.locator('[data-account-settings-action]')).toBeVisible();
+    if (view === 'account-settings') await expect(root.locator('[data-account-settings-action]')).toBeVisible();
     return {
         root, calls,
         approve: () => {
@@ -90,7 +90,7 @@ test('account menu keeps pre-commit review requests accessible', async ({ page }
 test('browser sign-in opens from an explicit click and saves only the linked key alongside a settings draft', async ({ page, context }, testInfo) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await context.route(LINK_URL, route => route.fulfill({ contentType: 'text/html', body: '<h1>Enter your VibeRails code</h1>' }));
-    const { root, calls, approve } = await openSettings(page);
+    const { root, calls, approve } = await openSettings(page, { view: 'settings' });
     await root.locator('#setting-computer-name').fill('Unsaved laptop name');
     await page.locator('[data-account-nav]:visible').click();
     await page.locator('[data-remote-link-start]').click();
@@ -114,11 +114,7 @@ test('browser sign-in opens from an explicit click and saves only the linked key
     await page.getByRole('button', { name: 'Close dialog' }).click();
     await expect(page.locator('[data-account-nav]:visible')).toHaveCount(0);
     await expect(page.locator('[data-action="account-menu"]')).toHaveAccessibleName('Account menu. Signed in as rob@example.com');
-    await expect(root.locator('[data-account-status]')).toHaveText('Logged in rob@example.com');
-    await expect(root.locator('[data-account-settings-action]')).toHaveText('Switch account');
-    const key = root.locator('#setting-api-key');
-    await expect(key).toHaveValue(MASK);
-    expect(await key.getAttribute('data-original-value')).toBe(MASK);
+    // App settings keeps its draft, and saving it leaves the linked key alone.
     await expect(root.locator('#setting-computer-name')).toHaveValue('Unsaved laptop name');
     await expect(root.locator('#settings-save-button')).toBeEnabled();
     await root.locator('#settings-save-button').click();
@@ -128,13 +124,27 @@ test('browser sign-in opens from an explicit click and saves only the linked key
     expect(save.body.computerName).toBe('Unsaved laptop name');
     expect(save.body.clearApiKey).toBe(false);
     expect(save.body.presenceProof).toBeNull();
+
+    // Account settings shows the linked account and owns the key.
+    await root.getByRole('button', { name: 'Account settings', exact: true }).click();
+    const account = page.locator('#app-content [data-view="account-settings"]');
+    await expect(account.locator('[data-account-status]')).toHaveText('Logged in rob@example.com');
+    await expect(account.locator('[data-account-settings-action]')).toHaveText('Switch account');
+    const key = account.locator('#setting-api-key');
+    await expect(key).toHaveValue(MASK);
+    expect(await key.getAttribute('data-original-value')).toBe(MASK);
     await key.fill('');
-    await root.locator('#settings-save-button').click();
+    await account.locator('#settings-save-button').click();
     await confirmPresence(page);
     await expect(page.locator('[data-account-nav]:visible')).toBeVisible();
     const clear = calls.filter(call => call.pathname === '/api/v1/settings' && call.method === 'POST').at(-1);
     expect(clear.body.clearApiKey).toBe(true);
     expect(clear.body.presenceProof).toBe(PRESENCE_CODE);
+    // A key-only save repeats the two switches the route always writes and omits App settings.
+    expect(clear.body.remoteAccess).toBe(false);
+    expect(clear.body.useVsCodeTheme).toBe(false);
+    expect(clear.body).not.toHaveProperty('computerName');
+    expect(clear.body).not.toHaveProperty('claudeTokenSaverEnabled');
     await page.locator('[data-account-nav]:visible').click();
     await expect(page.locator('[data-remote-link-status]')).toContainText('Sign in to connect');
     await page.evaluate(mask => window.app.appEventClient._handleMessage(JSON.stringify({
@@ -143,7 +153,7 @@ test('browser sign-in opens from an explicit click and saves only the linked key
     await expect(page.locator('[data-remote-link-start]')).toBeEnabled();
     await expect(key).toHaveValue('');
     await expect(page.locator('[data-remote-link-status]')).not.toContainText('Logged in');
-    await expect(root.locator('[data-account-status]')).toHaveText('Sign in to your viberails.ai account.');
+    await expect(account.locator('[data-account-status]')).toHaveText('Sign in to your viberails.ai account.');
 });
 
 test('VS Code bridge carries the public code on a narrow panel, and Cancel leaves paste usable', async ({ page, context }, testInfo) => {
@@ -184,24 +194,30 @@ test('unavailable site and denied or expired requests offer retry while preservi
 });
 
 for (const width of [1440, 768, 375, 320]) {
-    test(`signed-out navigation keeps Settings and sign in reachable at ${width}px`, async ({ page }) => {
+    test(`signed-out navigation keeps both settings pages and sign in reachable at ${width}px`, async ({ page }) => {
         await page.setViewportSize({ width, height: 900 });
         const { root } = await openSettings(page);
-        const settingsLink = page.locator('[data-settings-nav]');
+        const gear = page.locator('[data-settings-nav]');
+        const appSettings = page.locator('#app-content [data-view="settings"]');
         await expect(page.locator('.app-sidebar, [data-action="switch-nav-layout"]')).toHaveCount(0);
-        await expect(settingsLink).toBeVisible();
-        await expect(settingsLink).toHaveAccessibleName('Settings');
-        await expect(settingsLink.locator('i, svg')).toHaveCount(0);
-        await expect(settingsLink).toHaveAttribute('aria-current', 'page');
-        const bounds = await settingsLink.boundingBox();
+        await expect(gear).toBeVisible();
+        await expect(gear).toHaveAccessibleName('App settings');
+        await expect(gear.locator('svg')).toHaveCount(1);
+        await expect(gear).not.toHaveAttribute('aria-current', 'page');
+        const bounds = await gear.boundingBox();
         expect(bounds.x).toBeGreaterThanOrEqual(0);
         expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
         await page.locator('[data-action="navigate-home"]').click();
         await expect(root).toHaveCount(0);
-        await settingsLink.focus();
-        await settingsLink.press('Enter');
+        await gear.focus();
+        await gear.press('Enter');
+        await expect(appSettings).toBeVisible();
+        await expect(gear).toHaveAttribute('aria-current', 'page');
+        // Signed out there is no account menu, so App settings links to Account settings.
+        await appSettings.getByRole('button', { name: 'Account settings', exact: true }).click();
         await expect(root).toBeVisible();
+        await expect(gear).not.toHaveAttribute('aria-current', 'page');
         await expect(page.locator('[data-account-nav]:visible')).toHaveText('Sign in / Sign up');
         await expect(page.locator('[data-account-nav]:visible')).toHaveAccessibleName('Sign in or sign up to viberails.ai');
         await expect(root.locator('[data-account-settings-action]')).toHaveText('Sign in');
@@ -214,7 +230,7 @@ for (const width of [1440, 768, 375, 320]) {
 
 test('signed-in top bar shows the account and a menu that closes back to its chip', async ({ page }, testInfo) => {
     const { root } = await openSettings(page, { signedIn: true });
-    await expect(page.locator('[data-settings-nav]')).toBeHidden();
+    await expect(page.locator('[data-settings-nav]')).toBeVisible();
     const chip = page.locator('[data-action="account-menu"]');
     const menu = page.getByRole('dialog', { name: 'viberails.ai account' });
     await expect(chip).toHaveAccessibleName('Account menu. Signed in as rob@example.com');
@@ -241,12 +257,12 @@ test('signed-in top bar shows the account and a menu that closes back to its chi
     await page.locator('#app-content').click({ position: { x: 5, y: 5 } });
     await expect(menu).toBeHidden();
 
-    await root.locator('#setting-computer-name').fill('Unsaved laptop');
+    await root.locator('#setting-api-key').fill('unsaved-key');
     await chip.click();
     await menu.getByRole('button', { name: 'Account settings' }).click();
     await expect(menu).toBeHidden();
-    await expect(root.locator('#setting-computer-name')).toHaveValue('Unsaved laptop');
-    await expect(root.locator('#settings-panel-general')).toBeVisible();
+    await expect(root.locator('#setting-api-key')).toHaveValue('unsaved-key');
+    await expect(root.locator('#settings-panel-account')).toBeVisible();
 
     await chip.click();
     await menu.getByRole('button', { name: 'Switch account' }).click();
@@ -333,18 +349,34 @@ test('saved account stays in Settings after reload', async ({ page }, testInfo) 
 });
 
 test('sign-in completed from another tab updates Settings and nav without discarding drafts', async ({ page }) => {
-    const { root, approve } = await openSettings(page);
+    const { root, approve } = await openSettings(page, { view: 'settings' });
     await root.locator('#setting-computer-name').fill('Unsaved laptop');
     approve();
     await page.evaluate(() => window.app.appEventClient._handleMessage(JSON.stringify({
         type: 'remote-account-linked', payload: { account: { email: 'untrusted-event@example.com' } }
     })));
-    await expect(root.locator('[data-account-status]')).toHaveText('Logged in rob@example.com');
+    await expect(page.locator('[data-action="account-menu"]')).toHaveAccessibleName('Account menu. Signed in as rob@example.com');
     await expect(page.locator('[data-account-nav]:visible')).toHaveCount(0);
-    await expect(page.locator('[data-settings-nav]')).toBeHidden();
+    await expect(page.locator('[data-settings-nav]')).toBeVisible();
     await expect(root.locator('#setting-computer-name')).toHaveValue('Unsaved laptop');
     await expect(root.locator('#settings-save-button')).toBeEnabled();
+    await root.locator('#settings-save-button').click();
+    await expect(root.locator('#settings-save-button')).toBeDisabled();
+    await root.getByRole('button', { name: 'Account settings', exact: true }).click();
+    const account = page.locator('#app-content [data-view="account-settings"]');
+    await expect(account.locator('[data-account-status]')).toHaveText('Logged in rob@example.com');
+    await expect(account.locator('#setting-api-key')).toHaveValue(MASK);
+});
+
+test('sign-in completed from another tab fills an open Account settings page', async ({ page }) => {
+    const { root, approve } = await openSettings(page);
+    approve();
+    await page.evaluate(() => window.app.appEventClient._handleMessage(JSON.stringify({
+        type: 'remote-account-linked', payload: { account: { email: 'untrusted-event@example.com' } }
+    })));
+    await expect(root.locator('[data-account-status]')).toHaveText('Logged in rob@example.com');
     await expect(root.locator('#setting-api-key')).toHaveValue(MASK);
+    await expect(root.locator('#settings-save-button')).toBeDisabled();
 });
 
 test('manual keys have an honest fallback and account emails render as text', async ({ page }) => {

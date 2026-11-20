@@ -66,11 +66,11 @@ export class AccountNavMenu {
             event.preventDefault();
             if (name === 'settings') {
                 this.close();
-                // Already on Settings: switch tabs in place rather than reload over a draft.
-                if (this.app.currentView === 'settings' && this.app.settingsController?._selectSettingsTab) {
-                    this.app.settingsController._selectSettingsTab('general');
+                // Already on Account settings: switch tabs in place rather than reload over a draft.
+                if (this.app.currentView === 'account-settings' && this.app.settingsController?._selectSettingsTab) {
+                    this.app.settingsController._selectSettingsTab('account');
                 } else {
-                    this.app.navigate('settings', { tab: 'general' }, { resetStack: true });
+                    this.app.navigate('account-settings', { tab: 'account' }, { resetStack: true });
                 }
             } else if (name === 'review-inbox') {
                 this.close();

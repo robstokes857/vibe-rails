@@ -19,7 +19,7 @@ internal sealed class SigningKeyPrompt(
 {
     /// <summary>
     /// Lists the keys that can sign. With none synced, the window waits for the person to create and
-    /// sync one in Settings &gt; KEYS and checks again on Enter, instead of failing and leaving a
+    /// sync one in Account settings &gt; Keys and checks again on Enter, instead of failing and leaving a
     /// "no signing key" window behind while they set one up for a second attempt (VIBE-200).
     /// Null means cancelled, timed out or unreadable.
     /// </summary>
@@ -44,7 +44,7 @@ internal sealed class SigningKeyPrompt(
             {
                 await output.WriteLineAsync($"{style.Yellow}No signing key on this computer is synced to viberails.ai.{style.Reset}");
                 await output.WriteLineAsync(
-                    "Create one in VibeRails Settings > KEYS with your API key saved and sync it. This window waits; "
+                    "Create one in VibeRails Account settings > Keys with your API key saved and sync it. This window waits; "
                     + waitHint + ".");
             }
             else

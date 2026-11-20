@@ -126,7 +126,7 @@ export class AgentController {
     }
 
     renderSignedApprovalHelp() {
-        return 'The path is relative to the folder containing <code>vc.rules.md</code>; a folder covers everything inside it, and <code>.</code> covers the whole folder. Approvers sign in the Git Guard popup with a Settings &gt; KEYS key, and viberails.ai must report one of these emails as the key\'s verified account email.';
+        return 'The path is relative to the folder containing <code>vc.rules.md</code>; a folder covers everything inside it, and <code>.</code> covers the whole folder. Approvers sign in the Git Guard popup with an Account settings &gt; Keys key, and viberails.ai must report one of these emails as the key\'s verified account email.';
     }
 
     buildCommitWordRuleText(rawWords) {
@@ -570,7 +570,7 @@ export class AgentController {
             <p class="rules-files-detail-foot">
                 Enforcement: <strong>WARN</strong> reports it · <strong>COMMIT</strong> needs a reason in the
                 commit message, which Git Guard asks for · <strong>STOP</strong> blocks the commit until it is
-                fixed or a person signs an exception with a reason and a Settings &gt; KEYS key.
+                fixed or a person signs an exception with a reason and an Account settings &gt; Keys key.
             </p>`;
 
         host.querySelector('[data-rule-editor-rename]')?.addEventListener('click',

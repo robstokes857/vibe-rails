@@ -7,7 +7,7 @@ An agent calls `request_stop_bypass` with a required reason and the intended com
 (needed to evaluate deferred message rules). This purely evaluates the current staged snapshot,
 captures the violating STOP rules, and opens a separate Windows signing popup. The popup shows
 the repository, staged tree, changed paths, exact rules and full reason before asking the person
-to approve, choose a synced Settings > KEYS key and enter its password with echo disabled.
+to approve, choose a synced Account settings > Keys key and enter its password with echo disabled.
 MCP receives only status. `get_stop_bypass_status` verifies approval against the current snapshot.
 Cancellation, an unavailable popup, an invalid signature and offline verification never approve.
 Named approvers in `Signed Approval` rules remain required. Ordinary STOP rules accept a key

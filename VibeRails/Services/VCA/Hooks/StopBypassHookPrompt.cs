@@ -39,7 +39,7 @@ public interface IStopBypassPrompt
 /// <item>Anywhere else nothing is asked, and the transcript's guidance stands.</item>
 /// </list>
 /// The reason is not the gate. The approval is: a person types APPROVE after reading the exact files,
-/// rules and reason, then unlocks a Settings > KEYS key, and viberails.ai verifies the signature. An
+/// rules and reason, then unlocks an Account settings > Keys key, and viberails.ai verifies the signature. An
 /// agent that can type in the window can no more approve an exception here than it can through
 /// <c>request_stop_bypass</c>, which opens the same approval.
 /// </summary>
@@ -120,7 +120,7 @@ public sealed class StopBypassHookPrompt : IStopBypassPrompt
         await _output.WriteLineAsync();
         await WriteWrappedAsync(
             $"{rules} this commit. If the change is deliberate, you can sign an exception: type why, then "
-                + $"approve it {where} with a Settings > KEYS signing key. Git Guard records the reason in the "
+                + $"approve it {where} with an Account settings > Keys signing key. Git Guard records the reason in the "
                 + "commit message.",
             _style.Yellow);
         await WriteWrappedAsync(
