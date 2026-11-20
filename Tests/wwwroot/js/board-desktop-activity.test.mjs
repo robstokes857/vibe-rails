@@ -52,10 +52,33 @@ test('the card retains the app name and monitor after completion and after a CLI
     assert.doesNotMatch(reassigned, /board-card is-live/);
 });
 
+test('an unassigned desktop app named for a CLI wears that CLI mark, not its initials', t => {
+    const originalWindow = globalThis.window;
+    globalThis.window = {};
+    t.after(() => { globalThis.window = originalWindow; });
+    const controller = new BoardController({});
+    const avatar = name => controller.assigneeChipFace(card({ desktopAppName: name })).content;
+
+    for (const [name, logo] of [['Codex', 'openai.svg'], ['Claude Desktop', 'claude-color.svg'], ['ChatGPT', 'openai.svg'], ['codex-mcp-client', 'openai.svg']]) {
+        const html = avatar(name);
+        assert.match(html, new RegExp(`board-avatar has-logo" title="${name}"`), name);
+        assert.match(html, new RegExp(`src="assets/img/${logo}"`), name);
+        assert.doesNotMatch(html, new RegExp(`>${name.slice(0, 2).toUpperCase()}</span>`), name);
+    }
+    // No CLI word: the app keeps its initials on the primary colour, and "Recodex" is not Codex.
+    for (const name of ['Zed', 'Recodex']) {
+        const html = avatar(name);
+        assert.doesNotMatch(html, /has-logo|<img/, name);
+        assert.match(html, new RegExp(`background:var\\(--color-primary\\)[^>]*>${name.slice(0, 2).toUpperCase()}</span>`), name);
+    }
+});
+
 test('activity polling adds and removes desktop styling while preserving CLI activity and card content', async t => {
     const originalDocument = globalThis.document;
+    const originalWindow = globalThis.window;
     globalThis.document = { querySelector: () => null };
-    t.after(() => { globalThis.document = originalDocument; });
+    globalThis.window = {};
+    t.after(() => { globalThis.document = originalDocument; globalThis.window = originalWindow; });
     const requests = [];
     const classes = new Set();
     const indicators = new Map();

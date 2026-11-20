@@ -93,6 +93,9 @@ const CARD_POINTS = [1, 2, 3, 5, 8, 13];
 const CARD_TAG_LIMIT = 20;
 const CARD_TAG_LENGTH = 40;
 const LANE_COLORS = ['#64748b', '#3b82f6', '#06b6d4', '#f59e0b', '#10b981', '#a855f7', '#ec4899'];
+// A word in a desktop app's name -> the getCliBrand key whose mark it wears (BoardTool.Author.cs ClientNameWords).
+const DESKTOP_APP_BRANDS = { claude: 'claude', codex: 'codex', chatgpt: 'chatgpt', openai: 'openai', grok: 'grok',
+    copilot: 'copilot', opencode: 'opencode', antigravity: 'antigravity', agy: 'antigravity' };
 const FILTERS_STORAGE_KEY = 'viberails.board.filters.v1';
 const COLLAPSED_LANES_STORAGE_KEY = 'viberails.board.collapsedLanes.v1';
 // The last board the user looked at (see board-selection.js).
@@ -749,6 +752,15 @@ export class BoardController {
         return { key, cli, label, logo: brand?.logo || '', logoFilter: brand?.logoFilter || '', color: brand?.accentColor || '#64748b' };
     }
 
+    // A desktop app named only by MCP ("Codex", "Claude Desktop", "ChatGPT") wears its CLI's mark,
+    // matched by word as BoardTool.Author.cs matches a handshake; any other app keeps initials.
+    desktopAppInfo(name) {
+        const word = name.toLowerCase().split(/[^a-z0-9]+/).find(part => Object.hasOwn(DESKTOP_APP_BRANDS, part));
+        const brand = word ? getCliBrand(DESKTOP_APP_BRANDS[word]) : null;
+        return { label: name, logo: brand?.logo || '', logoFilter: brand?.logoFilter || '',
+            color: brand?.accentColor || 'var(--color-primary)' };
+    }
+
     // Comment authors are the user ("You"), an agent session, or VibeRails itself (a saved check's
     // receipt, VIBE-338), which wears the VibeRails mark instead of a generic "AI" disc.
     authorInfo(author) {
@@ -1087,7 +1099,7 @@ export class BoardController {
         const member = this.assigneeInfo(card.assignee);
         const id = cardDisplayId(card);
         const name = member?.label || card.desktopAppName || 'Unassigned';
-        const avatar = member || (card.desktopAppName ? { label: card.desktopAppName, color: 'var(--color-primary)' } : null);
+        const avatar = member || (card.desktopAppName ? this.desktopAppInfo(card.desktopAppName) : null);
         const title = member ? name + ' — click to change the assignee' : name + ' — click to assign';
         const accessibleName = member ? `Change assignee of ${id} (${name})`
             : card.desktopAppName ? `Assign ${id}, desktop app ${name}` : `Assign ${id}`;
