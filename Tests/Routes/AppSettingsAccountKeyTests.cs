@@ -1,4 +1,5 @@
 using System.Text.Json;
+using VibeRails.DTOs;
 using VibeRails.Routes;
 using VibeRails.Utils;
 using Xunit;
