@@ -249,9 +249,12 @@ namespace VibeRails
             }).ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
             serviceCollection.AddSingleton<Services.Board.Sync.IBoardSyncClient>(sp =>
                 Services.Board.Sync.BoardSyncHttpClient.FromConfiguration(
-                    sp.GetRequiredService<IHttpClientFactory>(), sp.GetRequiredService<IConfiguration>()));
+                    sp.GetRequiredService<IHttpClientFactory>(), sp.GetRequiredService<IConfiguration>(),
+                    sp.GetRequiredService<IAccountEntitlements>()));
             serviceCollection.AddSingleton(_ => Services.Board.Sync.BoardSyncLock.BesideStateDatabase());
             serviceCollection.AddSingleton<Services.Board.Sync.BoardSyncActivityCache>();
+            // In-memory only: which boards an owner's plan refused, so they are asked again later, not every tick.
+            serviceCollection.AddSingleton<Services.Board.Sync.BoardSyncProPause>();
             serviceCollection.AddScoped<Services.Board.Sharing.CardShareCapture>();
             serviceCollection.AddScoped<Services.Board.Sharing.CardSharePublisher>();
             serviceCollection.AddSingleton(_ => Services.Board.Sharing.CardShareRefreshState.BesideStateDatabase());
@@ -526,6 +529,21 @@ namespace VibeRails
 
             serviceCollection.AddSingleton<IAppEventBus, AppEventBus>();
             serviceCollection.AddSingleton<AppEventWebSocketHandler>();
+
+            // The account's hosted plan (Pro features): one small GET of the frontend origin with
+            // X-Api-Key, bounded by this client (10 s, 16 KiB, no redirects) and cached in memory per
+            // (origin, key). Registered in every process: a terminal tab child asks before it
+            // registers with the relay. A failed read is "unknown" and blocks nothing.
+            serviceCollection.AddHttpClient(AccountEntitlementsClient.HttpClientName, client =>
+            {
+                client.Timeout = AccountEntitlementsClient.RequestTimeout;
+                client.MaxResponseContentBufferSize = AccountEntitlementsClient.MaxResponseBytes;
+            }).ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
+            serviceCollection.AddSingleton<IAccountEntitlements>(sp => new AccountEntitlementsClient(
+                sp.GetRequiredService<IHttpClientFactory>(),
+                static () => AccountEntitlementsClient.Origin(ParserConfigs.GetFrontendUrl()),
+                ParserConfigs.GetApiKey,
+                sp.GetService<TimeProvider>()));
 
             // Remote State Service (for terminal session remote registration); sends X-Api-Key.
             serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>()

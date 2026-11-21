@@ -133,6 +133,62 @@ public sealed class SessionSharingTests : IDisposable
     }
 
     [Theory]
+    // The body code, the header, or both name the plan's denial; who pays decides whether it is noted.
+    [InlineData(true, """{"error":"Sensitive SQL","code":"pro_required","feature":"session_sharing","payer":"account","upgradePath":"/Billing?feature=session-sharing"}""", true)]
+    [InlineData(false, """{"code":"pro_required","feature":"session_sharing","payer":"account"}""", true)]
+    [InlineData(true, "<html>refused</html>", true)]
+    [InlineData(true, """{"code":"pro_required","feature":"session_sharing","payer":"board_owner"}""", false)]
+    public async Task AProRequiredRefusalIsItsOwnOutcome_NotAKeyThatLacksSessionsAccess(bool header, string body, bool noted)
+    {
+        var entitlements = new Tests.Services.Integrations.FakeAccountEntitlements();
+        using var client = new HttpClient(new Handler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.Forbidden)
+                { Content = new StringContent(body, Encoding.UTF8, body.StartsWith('{') ? "application/json" : "text/html") };
+            if (header) response.Headers.Add("X-VibeRails-Denial", "pro_required");
+            return Task.FromResult(response);
+        }));
+
+        var result = await new SessionSharingService(client, _repository.Object, _repository.Object, entitlements).CreateAsync(_id, "Demo", Ct);
+
+        Assert.False(result.Success);
+        Assert.Equal("pro_required", result.Status);
+        Assert.Equal("session_sharing", result.Feature);
+        Assert.Equal(403, result.HttpStatus);
+        Assert.Equal("Session sharing needs Vibe Rails Pro. Upgrade to create links; existing links work again once Pro is active.", result.Message);
+        Assert.Null(result.Url);
+        var json = System.Text.Json.JsonSerializer.Serialize(result, SessionSharingJsonContext.Default.SessionShareResponse);
+        Assert.Contains("\"status\":\"pro_required\"", json);
+        Assert.Contains("\"feature\":\"session_sharing\"", json);
+        Assert.DoesNotContain("Sensitive SQL", json);
+        Assert.DoesNotContain("upgradePath", json);
+        Assert.DoesNotContain(ApiKey, json);
+        Assert.Equal(noted ? new[] { "session_sharing" } : [], entitlements.Noted);
+        _repository.Verify(r => r.QueueSessionShareUploadAsync(It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AnyOther403KeepsThePermissionWording_AndNotesNothing()
+    {
+        var entitlements = new Tests.Services.Integrations.FakeAccountEntitlements();
+        using var client = new HttpClient(new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden)
+            { Content = JsonContent.Create(new { code = "capability_required", feature = "session_sharing", payer = "account" }) })));
+
+        var result = await new SessionSharingService(client, _repository.Object, _repository.Object, entitlements).CreateAsync(_id, "Demo", Ct);
+
+        Assert.Equal("permission_denied", result.Status);
+        Assert.Contains("Sessions access", result.Message);
+        Assert.Null(result.Feature);
+        Assert.Empty(entitlements.Noted);
+        // The code only counts on a 403.
+        using var unauthorized = new HttpClient(new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)
+            { Content = JsonContent.Create(new { code = "pro_required", feature = "session_sharing", payer = "account" }) })));
+        Assert.Equal("invalid_api_key", (await new SessionSharingService(unauthorized, _repository.Object, _repository.Object, entitlements).CreateAsync(_id, "Demo", Ct)).Status);
+        Assert.Empty(entitlements.Noted);
+    }
+
+    [Theory]
     [InlineData("html")]
     [InlineData("malformed")]
     [InlineData("oversized")]

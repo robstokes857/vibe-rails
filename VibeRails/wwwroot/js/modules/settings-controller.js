@@ -6,6 +6,7 @@ import { SetupInstallWindow } from './setup-install-window.js';
 import { AiBoardManagerSettingsPanel } from './settings-ai-board-manager.js';
 import { applyGatewaySettings, gatewayCredentialEdits, initGatewaySettings } from './settings-enterprise-gateway.js';
 import { ContextController } from './context-controller.js';
+import { requirePro } from './pro-upgrade.js';
 
 // Settings are two pages (DESIGN_SYSTEM.md, Top bar account). App settings is everything that is
 // not the account; Account settings holds the account, the remote access password, the API key and
@@ -138,13 +139,7 @@ export class SettingsController {
 
             if (remoteAccessToggle) {
                 remoteAccessToggle.checked = settings.remoteAccess || false;
-                remoteAccessToggle.addEventListener('change', () => {
-                    if (remoteAccessToggle.checked && !this._pinIsSet) {
-                        remoteAccessToggle.checked = false;
-                        this.app.showToast('Remote Access', REMOTE_PASSWORD_NEEDED, 'warning');
-                        this._updateDirtyState(root);
-                    }
-                });
+                remoteAccessToggle.addEventListener('change', () => this._guardRemoteAccess(root, remoteAccessToggle));
             }
             if (apiKeyInput) {
                 apiKeyInput.value = settings.apiKey || '';
@@ -292,10 +287,23 @@ export class SettingsController {
         // status lands.
         content.appendChild(fragment);
         this.app.updateAccountNav?.();
+        this.app.updateProBadges?.();
 
         if (root) {
             await this._initPinSection(root);
         }
+    }
+
+    // Switching remote access on needs the remote terminals feature, then a password. A refused
+    // switch goes back to off; switching off always works.
+    _guardRemoteAccess(root, toggle) {
+        if (!toggle.checked) return;
+        if (requirePro(this.app, 'remote_terminals')) {
+            if (this._pinIsSet) return;
+            this.app.showToast('Remote Access', REMOTE_PASSWORD_NEEDED, 'warning');
+        }
+        toggle.checked = false;
+        this._updateDirtyState(root);
     }
 
     async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexEnterpriseNetworkProxy, codexLlmProxyMode, claudeEnterpriseNetworkProxy, openCodeEnterpriseNetworkProxy, grokEnterpriseNetworkProxy, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, gatewayCredentials = {}, vsCodeSpellCheck = false) {

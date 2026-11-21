@@ -86,6 +86,8 @@ public sealed class SessionSharingTool
                 await response.Content.ReadAsStreamAsync(deadline.Token), 16 * 1024, deadline.Token);
             var result = JsonSerializer.Deserialize(bytes, SessionSharingJsonContext.Default.SessionShareResponse);
             if (result is null) return "FAIL: The local backend returned no sharing result.";
+            // The plan refused the link: name where it is changed, so the agent can tell the user.
+            if (!result.Success && result.Status == ProDenial.Code) return $"FAIL: {result.Message} Upgrade: {SessionSharingService.UpgradeUrl}";
             if (!result.Success) return $"FAIL: {result.Message}";
             if (!SessionShareCommitRule.IsShareUrl(result.Url) || result.ExpiresUtc is null)
                 return "FAIL: The local backend returned an invalid sharing link.";

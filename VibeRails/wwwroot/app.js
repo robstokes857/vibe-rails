@@ -14,6 +14,7 @@ import { SettingsController } from './js/modules/settings-controller.js';
 import { SetupAlert } from './js/modules/setup-panel.js';
 import { RemoteAccountLinkPanel } from './js/modules/remote-account-link.js';
 import { AccountNavMenu, accountSummary } from './js/modules/account-nav.js';
+import { readEntitlements, unknownEntitlements, updateProBadges } from './js/modules/pro-upgrade.js';
 import { McpController } from './js/modules/mcp-controller.js';
 import { ReviewInboxController } from './js/modules/review-inbox-controller.js';
 import { AiAgentsController } from './js/modules/ai-agents-controller.js';
@@ -69,11 +70,22 @@ export class VibeControlApp {
         this.boardController = new BoardController(this);
         this.automationNavLauncher = new AutomationNavLauncher(this);
         this.accountNav = new AccountNavMenu(this);
+        // Which hosted Pro features this account may use. "unknown" until read, which locks nothing.
+        this.entitlements = unknownEntitlements();
+        this.entitlementsReadAt = 0;
         this.appEventClient = new AppEventClient(this);
         this.appEventClient.on('remote-account-linked', () => void this.refreshAccountSettings());
         this.appEventClient.on('account_key_changed', () => {
             this.showToast('Account security', 'The viberails.ai API key was changed.', 'warning');
             void this.refreshAccountSettings();
+        });
+        // A changed account needs a new plan read: the backend keeps one answer per account key.
+        for (const event of ['remote-account-linked', 'account_key_changed']) {
+            this.appEventClient.on(event, () => void this.refreshEntitlements());
+        }
+        // Returning from the Billing page in a browser: read the plan again once the copy is a minute old.
+        this.onUiVisible(() => {
+            if (Date.now() - this.entitlementsReadAt > 60_000) void this.refreshEntitlements();
         });
         this.lifecycleHeartbeatTimer = null;
         this.lifecycleClientId = this.getOrCreateLifecycleClientId();
@@ -105,6 +117,8 @@ export class VibeControlApp {
         // it off the serial cold-start path. The controller falls back to canonical
         // defaults if the request fails, so a failure never blocks startup either.
         const llmPickerPreferencesReady = this.llmPickerController.loadPreferences();
+        // Never awaited: until it answers, nothing is locked and the server still decides.
+        void this.refreshEntitlements();
         await this.fetchConfigs();
         this.applyDocumentTitle();
         await this.applyInitialSettings();
@@ -904,6 +918,8 @@ export class VibeControlApp {
                     this.agentController.selectedAgentPath = data.selectedAgentPath || null;
                     this.agentController.restoreRuleManager();
                 }
+                // The view's template is mounted now; show its Pro badges for locked features.
+                this.updateProBadges();
                 this.queueScrollPageToTop();
                 // [NavPerf] probe: view switches should feel instant. When one doesn't,
                 // this line plus the slow-API log in apiCall separates "backend was slow"
@@ -1185,6 +1201,26 @@ export class VibeControlApp {
         } catch {
             // The next Settings visit reads authoritative state again.
         }
+    }
+
+    /**
+     * Reads which hosted Pro features this account may use (pro-upgrade.js). force asks the
+     * backend to check the hosted server again. A failed read leaves "unknown", which locks nothing.
+     */
+    async refreshEntitlements({ force = false } = {}) {
+        const generation = this.entitlementsGeneration = (this.entitlementsGeneration || 0) + 1;
+        this.entitlementsReadAt = Date.now();
+        const entitlements = await readEntitlements(this, force);
+        if (generation === this.entitlementsGeneration) {
+            this.entitlements = entitlements;
+            this.updateProBadges();
+        }
+        return this.entitlements;
+    }
+
+    /** Shows each "Pro" badge whose feature is locked, in the document or one freshly rendered root. */
+    updateProBadges(root) {
+        updateProBadges(this, root);
     }
 
     openRemoteAccount() {
@@ -1614,18 +1650,25 @@ export class VibeControlApp {
 
             if (!response.ok) {
                 let message = `API call failed: ${response.statusText}`;
-                if (requestOptions?.preferErrorResponseMessage
-                    && response.headers.get('content-type')?.toLowerCase().includes('json')) {
+                let errorBody = null;
+                if (response.headers?.get('content-type')?.toLowerCase().includes('json')) {
                     try {
-                        const errorBody = await response.json();
-                        if (typeof errorBody?.error === 'string' && errorBody.error.trim()) {
-                            message = errorBody.error.trim();
-                        }
+                        errorBody = await response.json();
                     } catch {
                         // Keep the stable status-text fallback for malformed/non-JSON errors.
                     }
                 }
-                throw new Error(message);
+                if (requestOptions?.preferErrorResponseMessage
+                    && typeof errorBody?.error === 'string' && errorBody.error.trim()) {
+                    message = errorBody.error.trim();
+                }
+                const error = new Error(message);
+                // A denial names its reason (such as pro_required), so callers can show the
+                // matching prompt instead of the bare message.
+                for (const key of ['code', 'feature', 'payer', 'status']) {
+                    if (errorBody?.[key] != null) error[key] = errorBody[key];
+                }
+                throw error;
             }
             if (response.status === 204) return null;
             if (requestOptions?.responseType === 'blob') return await response.blob();

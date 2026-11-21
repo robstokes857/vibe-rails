@@ -1,7 +1,34 @@
 import * as assert from 'assert/strict';
-import { isAllowedReviewRequestUrl, isAllowedSignInUrl, openExternalSignIn } from '../../external-sign-in';
+import { isAllowedBillingUrl, isAllowedReviewRequestUrl, isAllowedSignInUrl, openExternalSignIn } from '../../external-sign-in';
 
 suite('External sign-in bridge', () => {
+    test('opens the Billing page only for the fixed host and path, with at most a feature name', async () => {
+        const opened: string[] = [];
+        const open = async (url: string) => { opened.push(url); return true; };
+        for (const url of [
+            'https://evil.example/Billing', 'https://viberails.ai.evil.example/Billing?feature=remote-boards',
+            'https://viberails.ai:443/Billing', 'http://viberails.ai/Billing', 'https://user:secret@viberails.ai/Billing',
+            'https://viberails.ai/billing', 'https://viberails.ai/Billing/', 'https://viberails.ai/Billing/Checkout',
+            'https://viberails.ai/Billing?', 'https://viberails.ai/Billing?feature=', 'https://viberails.ai/Billing#feature=remote-boards',
+            'https://viberails.ai/Billing?feature=Remote-Boards', 'https://viberails.ai/Billing?feature=remote_boards',
+            'https://viberails.ai/Billing?feature=-remote', 'https://viberails.ai/Billing?feature=remote-',
+            'https://viberails.ai/Billing?feature=brd-7k2qz', 'https://viberails.ai/Billing?feature=0123456789abcdef',
+            'https://viberails.ai/Billing?feature=a-b-c-d-e', 'https://viberails.ai/Billing?feature=remote-boards&board=one',
+            'https://viberails.ai/Billing?board=one', 'https://viberails.ai/Billing?feature=remote-boards#paid',
+            'https://viberails.ai/Billing?feature=remote-boards\n', ' https://viberails.ai/Billing']) {
+            assert.equal(isAllowedBillingUrl(url), false, url);
+            assert.equal(await openExternalSignIn(url, open), false, url);
+        }
+        assert.deepEqual(opened, []);
+        const allowed = ['https://viberails.ai/Billing', 'https://viberails.ai/Billing?feature=remote-boards',
+            'https://viberails.ai/Billing?feature=remote-terminals', 'https://viberails.ai/Billing?feature=session-sharing',
+            'https://viberails.ai/Billing?feature=card-sharing'];
+        for (const url of allowed) assert.equal(await openExternalSignIn(url, open), true, url);
+        assert.deepEqual(opened, allowed);
+        assert.equal(isAllowedSignInUrl(allowed[1]), false);
+        assert.equal(isAllowedReviewRequestUrl(allowed[1]), false);
+    });
+
     test('opens a review request page only for the fixed host, path and a strict reference', async () => {
         const reference = 'rvw_0123456789abcdef0123456789abcdef';
         const opened: string[] = [];

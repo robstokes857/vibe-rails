@@ -41,8 +41,9 @@ public sealed record CardShareAccessRequest(string? Access, IReadOnlyList<string
 
 public sealed record CardSharePublished(CardShareLinkDto Link, IReadOnlyList<Guid> UploadSessions);
 public sealed record CardShareRefreshResult(bool Updated, IReadOnlyList<Guid> UploadSessions);
+/// <summary>Code is "pro_required" and Feature the hosted feature ("card_sharing") when the plan refused the request.</summary>
 public sealed record CardShareResult(bool Success, string Message, CardShareLinkDto? Link = null,
-    IReadOnlyList<CardShareLinkDto>? Links = null, int? NextBefore = null);
+    IReadOnlyList<CardShareLinkDto>? Links = null, int? NextBefore = null, string? Code = null, string? Feature = null);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, MaxDepth = 32)]
 [JsonSerializable(typeof(CardShareSnapshot))]

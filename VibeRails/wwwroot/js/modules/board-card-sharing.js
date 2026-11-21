@@ -1,4 +1,5 @@
 import { escapeHtml, confirmDialog } from './utils.js';
+import { proBadge, requirePro, showProRequired } from './pro-upgrade.js';
 
 const RECIPIENT_LIMIT = 10;
 
@@ -30,10 +31,10 @@ function audienceFields(name, { access = 'public', recipients = [], attr }) {
     </fieldset>`;
 }
 
-export function cardSharingSection(saved) {
+export function cardSharingSection(saved, app = null) {
     if (!saved) return '<section class="board-side-section"><h3 class="board-side-label">Share card</h3><p class="board-side-empty">Save the card to create a sharing link.</p></section>';
     return `<section class="board-side-section"><details data-card-sharing>
-        <summary class="board-side-label"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i> Share card</summary>
+        <summary class="board-side-label"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i> Share card ${proBadge(app, 'card_sharing')}</summary>
         <p class="board-side-empty mt-2">A link shares this card, comments, documents, GitHub links, saved commit diffs and linked session recordings: with anyone who has it, or only with people you list.</p>
         <p class="board-side-empty">Saved changes, including new documents and sessions, update shared cards while VibeRails is open and signed in. Recordings become playable after they end and upload.</p>
         <label class="board-editor-label">Link name <input class="form-control form-control-sm" data-card-share-name maxlength="160"></label>
@@ -158,6 +159,9 @@ export function bindCardSharing(editor, card, { app, hasDraft = () => false }) {
         if (['create', 'refresh'].includes(action) && hasDraft()) {
             message.textContent = 'Save the card and post any draft comments before sharing. Your drafts are still here.'; return;
         }
+        // Creating or refreshing a link needs card sharing; listing and revoking stay available.
+        // The prompt replaces this editor, which is why the draft check above comes first.
+        if (['create', 'refresh'].includes(action) && !requirePro(app, 'card_sharing')) return;
         const displayName = (action === 'rename' ? row?.querySelector('[data-card-share-rename]')?.value : name.value)?.trim();
         if (['create', 'rename'].includes(action) && (!displayName || displayName.length > 160)) {
             message.textContent = 'Enter a link name of 1 to 160 characters.'; return;
@@ -184,6 +188,8 @@ export function bindCardSharing(editor, card, { app, hasDraft = () => false }) {
             if (!current()) return;
             message.textContent = result?.message || 'Sharing request finished. Reload links to see its result.';
             setBusy(false);
+            // The server's Pro denial opens the shared prompt, unless a draft appeared meanwhile.
+            if (result?.code === 'pro_required' && !hasDraft() && showProRequired(app, 'card_sharing', result)) return;
             // Always reconcile after creation, including an uncertain response. Never repeat POST.
             if (result?.success || action === 'create') await load(false, true);
         } catch {

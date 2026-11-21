@@ -10,7 +10,8 @@ namespace VibeRails.Services.Board.Sharing;
 
 /// <summary>Publishes only explicitly selected saved cards and refreshes existing, creator-key-bound publications.</summary>
 public sealed class CardSharePublisher(IBoardStore boards, CardShareCapture capture, CardShareClient client,
-    ISessionArchiveReader archives, BoardSyncLock syncLock, CardShareRefreshState refreshState)
+    ISessionArchiveReader archives, BoardSyncLock syncLock, CardShareRefreshState refreshState,
+    IAccountEntitlements? entitlements = null)
 {
     /// <summary>Bounds one discovery sweep, including every capture and transfer it performs.</summary>
     public static readonly TimeSpan SweepDeadline = TimeSpan.FromMinutes(2);
@@ -126,6 +127,9 @@ public sealed class CardSharePublisher(IBoardStore boards, CardShareCapture capt
         if (string.IsNullOrWhiteSpace(key)) return;
         var account = SessionSharingService.KeyFingerprint(key);
         if (!refreshState.TryBeginSweep(account, out var cursor)) return;
+        // Card sharing is a Pro feature of the hosted service. While this account's plan is known
+        // not to include it, a due sweep sends nothing; existing links and local cards are untouched.
+        if (entitlements is not null && !await entitlements.AllowsAsync(ProFeatures.CardSharing, ct)) return;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(SweepDeadline);
         var token = deadline.Token;
@@ -134,11 +138,19 @@ public sealed class CardSharePublisher(IBoardStore boards, CardShareCapture capt
         {
             var sources = await client.SourcesAsync(key, cursor, token);
             found = sources.Count > 0;
+            var refused = false;
             foreach (var source in sources)
             {
                 RequireSameAccount(key);
                 try { await RefreshSourceAsync(key, account, source, token); }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                catch (CardShareTransportException ex) when (ex.Code == ProDenial.Code)
+                {
+                    // Every other publication would be refused the same way: stop this sweep here.
+                    Log.Information("[CardSharing] Scheduled refresh is paused: Vibe Rails Pro is required");
+                    refused = true;
+                    break;
+                }
                 catch (Exception ex)
                 {
                     // One unavailable publication must not starve the rest. Domain and transport
@@ -148,7 +160,7 @@ public sealed class CardSharePublisher(IBoardStore boards, CardShareCapture capt
                 }
                 cursor = source.Id;
             }
-            more = sources.Count >= 100;
+            more = !refused && sources.Count >= 100;
             completed = true;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -208,7 +220,7 @@ public sealed class CardSharePublisher(IBoardStore boards, CardShareCapture capt
     private async Task<bool> SupportsListedPeopleAsync(string key, CancellationToken ct)
     {
         try { return await client.SupportsListedPeopleAsync(key, ct); }
-        catch (CardShareTransportException ex) { throw new BoardValidationException(ex.Message); }
+        catch (CardShareTransportException ex) when (ex.Code is null) { throw new BoardValidationException(ex.Message); }
         catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or InvalidDataException || ex is OperationCanceledException && !ct.IsCancellationRequested)
         { throw new BoardValidationException("Could not reach the sharing server to confirm support for listed people. Check your connection and try again; no link was created."); }
     }
@@ -246,6 +258,9 @@ public sealed class CardSharePublisher(IBoardStore boards, CardShareCapture capt
     private static async Task<CardShareResult> RunAsync(Func<Task<CardShareResult>> action, CancellationToken ct, bool creation = false)
     {
         try { return await action(); }
+        // The plan refused the request before anything was created, so there is no uncertain link to check for.
+        catch (CardShareTransportException ex) when (ex.Code is not null)
+        { return new(false, ex.Message, Code: ex.Code, Feature: ex.Feature); }
         catch (Exception ex) when (ex is BoardValidationException or CardShareTransportException)
         { return new(false, ex.Message + (creation && ex is CardShareTransportException ? Uncertain : "")); }
         catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or InvalidDataException or OperationCanceledException)

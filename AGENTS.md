@@ -131,6 +131,7 @@ file; it is reference material, not instructions.
 | VCA rules and git hooks | [VCA guide](VibeRails/Services/VCA/AGENTS.md), [git hook installation](docs/git-hooks.md) |
 | Python scripts | [Python scripts guide](VibeRails/Services/PythonScripts/AGENTS.md) |
 | Review requests before a commit (VB-50: bundle capture, approvals ledger, commit-hook application) | [Review requests contract](VibeRails/Services/ReviewRequests/README.md) |
+| Pro plan: account entitlements and `pro_required` denials (remote Boards, remote terminals, session and card sharing) | [Pro plan denials](VibeRails/Services/Integrations/VibeCodeRemote/ProPlan.md) |
 | Frontend modules | [wwwroot guide](VibeRails/wwwroot/AGENTS.md), [code report viewer contract](VibeRails/wwwroot/js/modules/code-report/README.md) |
 | Token saver and the local LLM proxy | [TokenSaver README](TokenSaver/README.md) |
 | UI and end-to-end tests | [UITests guide](UITests/AGENTS.md) |

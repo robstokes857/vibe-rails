@@ -8,9 +8,15 @@ using VibeRails.Services.Integrations.VibeCodeRemote;
 
 namespace VibeRails.Services.Board.Sharing;
 
-/// <summary>Bounded transport to the approved public-card host. The caller pins the account for a whole operation.</summary>
-public sealed class CardShareClient(HttpClient client)
+/// <summary>
+/// Bounded transport to the approved public-card host. The caller pins the account for a whole
+/// operation. A 403 that carries the plan's typed <c>pro_required</c> denial becomes its own
+/// failure (and is noted on <paramref name="entitlements"/> when this account pays); every other
+/// 403 keeps the account-key wording.
+/// </summary>
+public sealed class CardShareClient(HttpClient client, IAccountEntitlements? entitlements = null)
 {
+    public const string ProRequiredMessage = "Card sharing needs Vibe Rails Pro. Upgrade to create or refresh links; existing links work again once Pro is active.";
     internal static readonly Uri Endpoint = new(DataExportEndpointConfiguration.Host + "/api/v1/card-sharing-links");
     internal static HttpMessageHandler CreateHandler() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
     internal static bool IsHex(string? value) => value is { Length: 64 } && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
@@ -100,7 +106,7 @@ public sealed class CardShareClient(HttpClient client)
         using var request = Request(key, HttpMethod.Get, "/capabilities", null);
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
         if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotImplemented) return false;
-        if (response.StatusCode != HttpStatusCode.OK) throw Failure(response.StatusCode);
+        if (response.StatusCode != HttpStatusCode.OK) throw await FailureAsync(response, deadline.Token);
         var bytes = await SessionSharingService.ReadBoundedAsync(await response.Content.ReadAsStreamAsync(deadline.Token), 16 * 1024, deadline.Token);
         return ShareAudience.Supports(JsonSerializer.Deserialize(bytes, SessionSharingJsonContext.Default.ShareCapabilitiesResponse));
     }
@@ -112,7 +118,7 @@ public sealed class CardShareClient(HttpClient client)
         deadline.CancelAfter(TimeSpan.FromSeconds(90));
         using var request = Request(key, method, path, body);
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
-        if (response.StatusCode != expected) throw Failure(response.StatusCode);
+        if (response.StatusCode != expected) throw await FailureAsync(response, deadline.Token);
         var bytes = await SessionSharingService.ReadBoundedAsync(await response.Content.ReadAsStreamAsync(deadline.Token), 1024 * 1024, deadline.Token);
         return JsonSerializer.Deserialize(bytes, json) ?? throw Invalid();
     }
@@ -122,7 +128,7 @@ public sealed class CardShareClient(HttpClient client)
         deadline.CancelAfter(TimeSpan.FromSeconds(30));
         using var request = Request(key, method, path, body);
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
-        if (response.StatusCode != HttpStatusCode.NoContent) throw Failure(response.StatusCode);
+        if (response.StatusCode != HttpStatusCode.NoContent) throw await FailureAsync(response, deadline.Token);
     }
     private static HttpRequestMessage Request(string key, HttpMethod method, string path, HttpContent? body)
     {
@@ -164,6 +170,13 @@ public sealed class CardShareClient(HttpClient client)
             || requested.Any(id => !allowed.Contains(id))) throw Invalid();
     }
     private static CardShareTransportException Invalid() => new("The sharing server returned an invalid response.");
+    /// <summary>Only the bounded code, feature and payer of a 403 are read; the message is always local.</summary>
+    private async Task<CardShareTransportException> FailureAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        if (await ProDenial.ReadAsync(response, ProFeatures.CardSharing, ct) is not { } denial) return Failure(response.StatusCode);
+        if (denial.AccountPays) entitlements?.NoteDenied(denial.Feature);
+        return new(ProRequiredMessage, ProDenial.Code, denial.Feature);
+    }
     private static CardShareTransportException Failure(HttpStatusCode status) => new(status switch
     {
         HttpStatusCode.Unauthorized => "Sign in again. viberails.ai rejected the account key.",
@@ -177,5 +190,12 @@ public sealed class CardShareClient(HttpClient client)
     });
 }
 
-/// <summary>Only fixed local wording may cross this boundary; never remote bodies, headers or credentials.</summary>
-public sealed class CardShareTransportException(string message) : Exception(message);
+/// <summary>
+/// Only fixed local wording may cross this boundary; never remote bodies, headers or credentials.
+/// <see cref="Code"/> is <c>pro_required</c> for the plan's typed denial, with the hosted feature it named.
+/// </summary>
+public sealed class CardShareTransportException(string message, string? code = null, string? feature = null) : Exception(message)
+{
+    public string? Code { get; } = code;
+    public string? Feature { get; } = feature;
+}

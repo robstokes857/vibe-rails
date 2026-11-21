@@ -651,6 +651,13 @@ Behavior:
     retried on its own 30 s cap: four terminals reached attempts 32 to 65 against a 404.
   - Only failures that belong to the session (404 even after re-registering) grow its own
     backoff, which is capped at 5 min.
+- Remote terminals are a Pro feature of the hosted relay
+  ([Pro plan denials](../Integrations/VibeCodeRemote/ProPlan.md)). A 403 handshake carrying
+  `X-VibeRails-Denial: pro_required`, a 1008 close whose reason is `Vibe Rails Pro required`, and
+  a re-registration the plan refused are each noted on `IAccountEntitlements` and end reconnecting
+  for that terminal, logged at Information. This adds no handler to the connection's events, so
+  the `takeoverGate` rules above are unchanged, and nothing is written into the PTY: the local
+  terminal keeps running.
 - Raises events:
   - `OnInputReceived`
   - `OnReplayRequested`
@@ -665,6 +672,13 @@ HTTP registration with relay server:
 - `DELETE /api/v1/terminal` on session complete
 
 > **Note:** `RemoteStateService` now lives at `Services/Integrations/VibeCodeRemote/RemoteStateService.cs`, not inside the Terminal folder. It is consumed by `TerminalStateService` via `IRemoteStateService`.
+
+While the account's plan is known not to include `remote_terminals`, `TerminalRunner` opens no
+relay socket and `TerminalStateService` sends no registration. Both ask `IAccountEntitlements`
+(one cached read per process): the registration inside its existing fire-and-forget task, and
+`TerminalRunner` at the relay-connect step, after the PTY exists, so creating the local terminal
+never waits on the plan. An unknown plan (offline, older server) changes nothing. A registration
+answered `pro_required` is noted and logged once at Information. De-registration is always sent.
 
 ### `Sessions/` subdirectory
 - `SessionActivityState.cs` — tracks per-session input/output/activity timestamps and idle notification state; owns a `CancellationToken` for the session.

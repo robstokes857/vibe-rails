@@ -1,4 +1,5 @@
 import { escapeHtml, confirmDialog } from './utils.js';
+import { proBadge, requirePro, showProRequired } from './pro-upgrade.js';
 
 function sharingModal(app, title, intro) {
     const abort = new AbortController();
@@ -18,6 +19,9 @@ export function openBoardSharing(app, boardId) {
     const { host, active, request, status } = view;
     const base = `/api/v1/board/boards/${encodeURIComponent(boardId)}/sharing`;
     const content = host?.querySelector('[data-sharing-content]');
+    // Inviting needs remote Boards; listing and removing collaborators stay available. The
+    // server's Pro denial opens the shared prompt in place of this dialog.
+    const denied = error => active() && showProRequired(app, 'remote_boards', error);
     async function load(message = '') {
         const state = await request(base); if (!active()) return;
         if (!state.configured) { status('Sign in using Account in the navigation bar to share this board.'); return; }
@@ -30,16 +34,17 @@ export function openBoardSharing(app, boardId) {
                 <div class="d-flex gap-2 flex-wrap"><input class="form-control form-control-sm" style="flex:1;min-width:180px" type="email" maxlength="320" required aria-label="Email address" value="${escapeHtml(item.email)}">
                 <button type="submit" class="btn btn-sm btn-outline-primary">Save address</button>
                 <button type="button" class="btn btn-sm btn-outline-danger" data-sharing-remove>Remove</button></div></form>`).join('')}
-            ${sharing.invitations.length < sharing.limit ? `<form class="d-flex gap-2 mt-3" data-sharing-new><input class="form-control form-control-sm" type="email" maxlength="320" required placeholder="person@example.com" aria-label="Invite email"><button class="btn btn-sm btn-primary" type="submit">Invite</button></form>` : ''}`;
+            ${sharing.invitations.length < sharing.limit ? `<form class="d-flex align-items-center gap-2 mt-3" data-sharing-new><input class="form-control form-control-sm" type="email" maxlength="320" required placeholder="person@example.com" aria-label="Invite email"><button class="btn btn-sm btn-primary" type="submit">Invite</button>${proBadge(app, 'remote_boards')}</form>` : ''}`;
         content.querySelectorAll('form').forEach(form => {
             form.addEventListener('submit', async event => {
                 event.preventDefault(); if (!form.reportValidity() || form.dataset.busy) return;
+                if (!form.dataset.sharingEdit && !requirePro(app, 'remote_boards')) return;
                 form.dataset.busy = 'true'; const submit = form.querySelector('[type="submit"]'); submit.disabled = true;
                 try {
                     await request(base + (form.dataset.sharingEdit ? '/' + encodeURIComponent(form.dataset.sharingEdit) : ''),
                         form.dataset.sharingEdit ? 'PUT' : 'POST', { email: form.querySelector('input').value });
                     if (active()) await load('Invitation saved. The recipient can review it in Boards if eligible.');
-                } catch (error) { if (error.name !== 'AbortError') status(error.message || 'Could not save the invitation.'); }
+                } catch (error) { if (error.name !== 'AbortError' && !denied(error)) status(error.message || 'Could not save the invitation.'); }
                 finally { delete form.dataset.busy; submit.disabled = false; }
             });
             form.querySelector('[data-sharing-remove]')?.addEventListener('click', async event => {
@@ -53,6 +58,6 @@ export function openBoardSharing(app, boardId) {
             });
         });
     }
-    if (host) load().catch(error => { if (error.name !== 'AbortError') status(error.message || 'Could not load sharing.'); });
+    if (host) load().catch(error => { if (error.name !== 'AbortError' && !denied(error)) status(error.message || 'Could not load sharing.'); });
     return view.dispose;
 }

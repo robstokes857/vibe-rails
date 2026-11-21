@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 
 namespace VibeRails.Services.Board.Sync;
 
@@ -60,6 +61,9 @@ internal static class BoardSyncActivity
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            // The plan refused the upload: every other card would be refused the same way, so stop
+            // here and leave this card for the turn after the plan allows it again.
+            catch (BoardSyncClientException ex) when (ex.Code == ProDenial.Code) { firstFailure ??= ex; break; }
             catch (Exception ex) { firstFailure ??= ex; }
             // A malformed/missing card must not starve the rest. Its failed hash is never
             // acknowledged, so its next turn retries, even after a process restart.

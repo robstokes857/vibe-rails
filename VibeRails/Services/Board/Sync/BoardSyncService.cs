@@ -7,6 +7,7 @@ using VibeRails.DTOs;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Board.Tracker;
 using VibeRails.Services.Diagnostics;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Board.Sync;
@@ -30,7 +31,11 @@ public sealed record BoardSyncStatus(
     bool ActivityEnabled = false,
     bool IsJiraBoard = false,
     string? RemoteProvider = null,
-    bool Shared = false);
+    bool Shared = false,
+    // "pro_required" while the stored reason is the Pro plan pause, with who pays ("account" or
+    // "board_owner"), so the dashboard can offer Upgrade or say that the owner must renew.
+    string? PausedCode = null,
+    string? PausedPayer = null);
 
 public interface IBoardSyncService
 {
@@ -65,7 +70,9 @@ public sealed partial class BoardSyncService(
     BoardSyncLock syncLock,
     IFeatureLog featureLog,
     BoardSyncActivityCache activityCache,
-    TimeProvider? timeProvider = null) : IBoardSyncService
+    TimeProvider? timeProvider = null,
+    IAccountEntitlements? entitlements = null,
+    BoardSyncProPause? proPause = null) : IBoardSyncService
 {
     public const string FeatureName = "board-sync";
 
@@ -149,6 +156,9 @@ public sealed partial class BoardSyncService(
         catch (BoardSyncClientException ex)
         {
             featureLog.Write(FeatureName, "publish", Trim(ex.Message), board.Id, existing?.RemoteBoardId, "failed", LogLevel.Warning);
+            // The plan's denial stays typed, so the route can answer with its code and the
+            // scheduler can pause instead of retrying.
+            if (ex.Code == ProDenial.Code) throw;
             throw new BoardValidationException("Publishing failed: " + ex.Message);
         }
 
@@ -208,9 +218,21 @@ public sealed partial class BoardSyncService(
         using var held = syncLock.TryAcquire();
         if (held is null)
             return;
-        foreach (var board in await store.GetBoardsForSyncAsync(cancellationToken))
+        var boards = await store.GetBoardsForSyncAsync(cancellationToken);
+        foreach (var board in boards)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            // Remote Boards are a Pro feature of the hosted service. When this account's plan is
+            // known not to include them, say so once on each link and stop: no request per board,
+            // and none on the next tick. Asked per board (a cached answer) because a denial from
+            // the board before flips it; a board list with nothing to sync never asks at all.
+            if (entitlements is not null && !await entitlements.AllowsAsync(ProFeatures.RemoteBoards, cancellationToken))
+            {
+                await RecordAccountPauseAsync(boards, cancellationToken);
+                return;
+            }
+            // Its owner's plan refused this one board: the others carry on, and it is asked again later.
+            if (proPause?.IsOwnerPaused(board.Id) == true) continue;
             try
             {
                 // A dedicated Jira or Azure DevOps board never uploads, even if its sync flag is set.
@@ -222,12 +244,45 @@ public sealed partial class BoardSyncService(
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
+                NotePlanDenial(board.Id, ex);
                 var message = ex is BoardValidationException or BoardSyncClientException ? Trim(ex.Message) : "Automatic board publication failed; retrying next minute.";
                 var link = await store.GetSyncLinkAsync(board.ProjectPath, board.Id, cancellationToken);
                 if (link is not null) await store.SaveSyncLinkAsync(link with { LastError = message }, cancellationToken);
                 featureLog.Write(FeatureName, "publish", message, board.Id, link?.RemoteBoardId, "failed", LogLevel.Warning);
             }
         }
+    }
+
+    /// <summary>
+    /// Writes the account's Pro pause as the visible reason on every owned, published link that does
+    /// not already carry it. Comparing the stored text makes this once per pause, not once per tick;
+    /// the next successful sync clears it like any other error. Nothing is deleted or unpublished.
+    /// </summary>
+    private async Task RecordAccountPauseAsync(IReadOnlyList<BoardRecord> boards, CancellationToken cancellationToken)
+    {
+        // Signed out (the key went away mid-tick) is not a plan pause; the status view already says so.
+        if (!client.IsConfigured) return;
+        foreach (var board in boards)
+        {
+            if (await store.DedicatedProviderAsync(board.ProjectPath, board.Id, cancellationToken) is not null) continue;
+            var link = await store.GetSyncLinkAsync(board.ProjectPath, board.Id, cancellationToken);
+            if (link is null || link.Imported || link.LastError == BoardSyncProPause.AccountMessage) continue;
+            await store.SaveSyncLinkAsync(link with { LastError = BoardSyncProPause.AccountMessage }, cancellationToken);
+            featureLog.Write(FeatureName, "pause", BoardSyncProPause.AccountMessage, board.Id, link.RemoteBoardId, "paused");
+        }
+    }
+
+    /// <summary>
+    /// What a <c>pro_required</c> failure pauses. This account's plan: every remote Board, through
+    /// the entitlement snapshot (the HTTP client has already noted it; repeating it is harmless).
+    /// The Board owner's plan: this board only, in memory, until the scheduler's bounded recheck
+    /// (also the fallback for a host that has no entitlement snapshot to consult).
+    /// </summary>
+    private void NotePlanDenial(string boardId, Exception ex)
+    {
+        if (ex is not BoardSyncClientException { Code: ProDenial.Code } denied) return;
+        if (denied.Payer == ProDenial.BoardOwnerPayer || entitlements is null) proPause?.PauseOwner(boardId);
+        else entitlements.NoteDenied(denied.Feature ?? ProFeatures.RemoteBoards);
     }
 
     // ------------------------------------------------------------------ one board
@@ -254,6 +309,7 @@ public sealed partial class BoardSyncService(
                 await store.SetBoardSyncEnabledAsync(link.ProjectPath, link.BoardId, false, cancellationToken);
                 throw new BoardValidationException("The remote board no longer exists. Sync is paused and local work is retained. Turn on sync in Board settings to publish it again.");
             }
+            proPause?.Resume(link.BoardId);
             return await store.SaveSyncLinkAsync(link with { LastSyncUtc = DateTime.UtcNow, LastError = null }, cancellationToken) ?? link;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -262,6 +318,7 @@ public sealed partial class BoardSyncService(
         }
         catch (Exception ex)
         {
+            NotePlanDenial(link.BoardId, ex);
             var message = ex is BoardSyncClientException or BoardValidationException
                 ? ex.Message
                 : "Sync failed (" + ex.GetType().Name + "). Retry or check the connection.";
@@ -998,7 +1055,9 @@ public sealed partial class BoardSyncService(
             ActivityEnabled: board.SyncEnabled && !isTrackerBoard && !shared && client.IsConfigured,
             IsJiraBoard: tracker == TrackerProviders.Jira,
             RemoteProvider: tracker,
-            Shared: shared);
+            Shared: shared,
+            PausedCode: BoardSyncProPause.PayerOf(link?.LastError) is null ? null : ProDenial.Code,
+            PausedPayer: BoardSyncProPause.PayerOf(link?.LastError));
     }
 
     private static BoardValidationException TrackerBoardRefused(string tracker) =>

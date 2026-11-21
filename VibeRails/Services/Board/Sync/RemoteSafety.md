@@ -31,3 +31,8 @@ still required. An independent upload block never becomes a terminal ban. Reappr
 Roll out the service's status/schema with recovery disabled, release this companion, drain
 old server instances, and only then enable `RemoteAccess:RecoveryEnabled` on the service.
 The server remains the authorization boundary. No local setting can shorten the 72 hours.
+
+The Pro plan's `pro_required` denial is a separate answer with the same shape of handling (a
+typed code, a fixed local reason, no retry loop): see
+[Pro plan denials](../../Integrations/VibeCodeRemote/ProPlan.md). The safety status is still read
+first, and a safety code keeps precedence when a response carries both.

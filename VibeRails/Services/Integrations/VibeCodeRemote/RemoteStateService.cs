@@ -47,11 +47,15 @@ public class RemoteStateService : IRemoteStateService
 
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
+    private readonly IAccountEntitlements? _entitlements;
+    // One line per pause, shared by every terminal in this process; cleared by the next accepted registration.
+    private static int s_proPauseLogged;
 
-    public RemoteStateService(HttpClient httpClient, IConfiguration configuration)
+    public RemoteStateService(HttpClient httpClient, IConfiguration configuration, IAccountEntitlements? entitlements = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
+        _entitlements = entitlements;
     }
 
     public async Task<bool> RegisterTerminalAsync(string sessionId, string cli, string workingDirectory, string? environmentName,
@@ -92,7 +96,19 @@ public class RemoteStateService : IRemoteStateService
             request.Headers.Add("X-VibeRails-Safety-Generation", generation);
             using var response = await _httpClient.SendAsync(request, timeout.Token);
             if (response.IsSuccessStatusCode)
+            {
+                Volatile.Write(ref s_proPauseLogged, 0);
                 return true;
+            }
+            // The plan's typed denial: the relay is off for this account, the local terminal is not.
+            // Noted so later terminals skip the registration instead of being refused one by one.
+            if (await ProDenial.ReadAsync(response, ProFeatures.RemoteTerminals, timeout.Token) is { } denial)
+            {
+                if (denial.AccountPays) _entitlements?.NoteDenied(denial.Feature);
+                if (Interlocked.Exchange(ref s_proPauseLogged, 1) == 0)
+                    Log.Information("[Remote] Remote terminals need Vibe Rails Pro; terminals keep running locally without the relay");
+                return false;
+            }
             Log.Warning("[Remote] Terminal registration was refused with HTTP {Status}", (int)response.StatusCode);
             return false;
         }

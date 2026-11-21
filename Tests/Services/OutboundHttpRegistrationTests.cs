@@ -2,8 +2,10 @@ using System.Net;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using VibeRails;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.Mcp;
 using VibeRails.Services.Mcp.Tools;
 using Xunit;
@@ -26,6 +28,7 @@ public sealed class OutboundHttpRegistrationTests
     [InlineData("UpdateService")]
     [InlineData("jira-cloud")]
     [InlineData("azure-devops")]
+    [InlineData("account-entitlements")]
     public void OutboundClientsDisableRedirectsAndCookies(string name)
     {
         var services = new ServiceCollection();
@@ -49,6 +52,7 @@ public sealed class OutboundHttpRegistrationTests
     [InlineData("UpdateService", false)]
     [InlineData("jira-cloud", false)]
     [InlineData("azure-devops", false)]
+    [InlineData("account-entitlements", false)]
     public void OnlyTheLlmRelayOffersWindowsSignInToAnAuthenticatingProxy(string name, bool signsIn)
     {
         // VIBE-244 / API_SEC.md "Proxy sign-in": the relay (and the gateway Test, which resolves
@@ -60,6 +64,70 @@ public sealed class OutboundHttpRegistrationTests
         Assert.Equal(signsIn ? CredentialCache.DefaultCredentials : null, handler.DefaultProxyCredentials);
         Assert.False(handler.UseDefaultCredentials);
         Assert.Null(handler.Credentials);
+    }
+
+    [Fact]
+    public void TheEntitlementReadIsBoundedByItsNamedClient_AndResolvesInEveryProcessRole()
+    {
+        // The plan read rides the terminal start path in tab children too, so it must be one small,
+        // bounded request: ten seconds, 16 KiB, and (above) no redirects or cookies.
+        foreach (var args in new string[][] { [], ["--parent-pid", "1"] })
+        {
+            var services = new ServiceCollection();
+            MapRegisterServices.Register(services, args, "http://127.0.0.1:12345");
+            using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+            using var http = provider.GetRequiredService<IHttpClientFactory>().CreateClient(AccountEntitlementsClient.HttpClientName);
+            Assert.Equal(TimeSpan.FromSeconds(10), http.Timeout);
+            Assert.Equal(16 * 1024, http.MaxResponseContentBufferSize);
+            Assert.IsType<AccountEntitlementsClient>(provider.GetRequiredService<IAccountEntitlements>());
+            Assert.Same(provider.GetRequiredService<IAccountEntitlements>(), provider.GetRequiredService<IAccountEntitlements>());
+        }
+    }
+
+    [Fact]
+    public async Task TheRealRegistrationHandsTheEntitlementSnapshotToTheHostedClients()
+    {
+        // The clients take the snapshot as an optional dependency. If the container left it out, a
+        // pro_required answer would still be reported but never noted, and the loops would keep asking.
+        var denied = new DenialHandler();
+        var noted = new Tests.Services.Integrations.FakeAccountEntitlements();
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["VibeRails:FrontendUrl"] = "https://plans.example.test" }).Build());
+        MapRegisterServices.Register(services, [], "http://127.0.0.1:12345");
+        services.AddSingleton<IAccountEntitlements>(noted);
+        services.AddHttpClient(VibeRails.Services.Board.Sync.BoardSyncHttpClient.HttpClientName).ConfigurePrimaryHttpMessageHandler(() => denied);
+        services.AddHttpClient<VibeRails.Services.Board.Sharing.CardShareClient>().ConfigurePrimaryHttpMessageHandler(() => denied);
+        var originalKey = VibeRails.Utils.ParserConfigs.GetApiKey();
+        VibeRails.Utils.ParserConfigs.SetApiKey("registration-fixture-key");
+        try
+        {
+            using var provider = services.BuildServiceProvider();
+
+            // Built by a factory: the board sync client.
+            var boards = provider.GetRequiredService<VibeRails.Services.Board.Sync.IBoardSyncClient>();
+            var boardError = await Assert.ThrowsAsync<VibeRails.Services.Board.Sync.BoardSyncClientException>(() => boards.DiscoverAsync(Ct));
+            Assert.Equal("pro_required", boardError.Code);
+
+            // Built by the typed-client activator: the card sharing transport.
+            var cards = provider.GetRequiredService<VibeRails.Services.Board.Sharing.CardShareClient>();
+            var cardError = await Assert.ThrowsAsync<VibeRails.Services.Board.Sharing.CardShareTransportException>(
+                () => cards.SupportsListedPeopleAsync("registration-fixture-key", Ct));
+            Assert.Equal("pro_required", cardError.Code);
+
+            Assert.Equal([ProFeatures.RemoteBoards, ProFeatures.CardSharing], noted.Noted);
+        }
+        finally { VibeRails.Utils.ParserConfigs.SetApiKey(originalKey); }
+    }
+
+    private sealed class DenialHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent("{}") };
+            response.Headers.Add("X-VibeRails-Denial", "pro_required");
+            return Task.FromResult(response);
+        }
     }
 
     [Theory]

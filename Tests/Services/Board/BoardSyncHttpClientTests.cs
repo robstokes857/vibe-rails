@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using Tests.Services.Integrations;
 using VibeRails.Services.Board.Sync;
 using Xunit;
 
@@ -307,6 +308,121 @@ public sealed class BoardSyncHttpClientTests
         Assert.Empty(await client.DiscoverAsync(Ct));
     }
 
+    // ------------------------------------------------------------------ Pro plan denials
+
+    [Theory]
+    [InlineData("account", BoardSyncProPause.AccountMessage, true)]
+    [InlineData("board_owner", BoardSyncProPause.BoardOwnerMessage, false)]
+    public async Task ProRequiredIsATypedDenial_NotARejectedKey_AndOnlyTheAccountPayerIsNoted(string payer, string message, bool noted)
+    {
+        var entitlements = new FakeAccountEntitlements();
+        var client = Client(new Handler(_ => Denied(
+            $$"""{"error":"SECRET upgrade prose","code":"pro_required","feature":"remote_boards","payer":"{{payer}}","upgradePath":"/Billing?feature=remote-boards"}""")),
+            entitlements);
+
+        var error = await Assert.ThrowsAsync<BoardSyncClientException>(() => client.PushAsync("id", new(null, null, null, []), Ct));
+
+        Assert.Equal("pro_required", error.Code);
+        Assert.Equal(403, error.Status);
+        Assert.Equal("remote_boards", error.Feature);
+        Assert.Equal(payer, error.Payer);
+        Assert.Equal(message, error.Message); // the desktop's own words
+        Assert.DoesNotContain("API key", error.Message);
+        Assert.DoesNotContain("SECRET", error.Message);
+        Assert.DoesNotContain("/Billing", error.Message);
+        // An invited member of a Board whose owner is not Pro is never treated as a Free account.
+        Assert.Equal(noted ? new[] { "remote_boards" } : [], entitlements.Noted);
+    }
+
+    [Theory]
+    // The header alone is enough: the body may be unreadable, oversized or absent.
+    [InlineData(true, "<html>not json</html>", "remote_boards", "account")]
+    [InlineData(true, "", "remote_boards", "account")]
+    // The body code alone is enough too.
+    [InlineData(false, """{"code":"pro_required","feature":"remote_boards","payer":"board_owner"}""", "remote_boards", "board_owner")]
+    // A feature or payer this version does not know falls back to this client's own feature and the account.
+    [InlineData(true, """{"code":"pro_required","feature":"something_new","payer":"somebody"}""", "remote_boards", "account")]
+    [InlineData(true, """{"code":"pro_required","feature":7,"payer":null}""", "remote_boards", "account")]
+    // Another known feature named by the server is kept as named.
+    [InlineData(true, """{"code":"pro_required","feature":"card_sharing","payer":"account"}""", "card_sharing", "account")]
+    public async Task ProRequiredIsRecognisedFromTheHeaderOrTheBodyCode(bool header, string body, string feature, string payer)
+    {
+        var client = Client(new Handler(_ => Denied(body, header)), new FakeAccountEntitlements());
+
+        var error = await Assert.ThrowsAsync<BoardSyncClientException>(() => client.PullAsync("id", 0, 200, Ct));
+
+        Assert.Equal(("pro_required", feature, payer), (error.Code, error.Feature, error.Payer));
+    }
+
+    [Theory]
+    // Any other 403 is still the account-key problem it was before.
+    [InlineData(403, false, """{"code":"capability_required"}""", "unauthorized")]
+    [InlineData(403, false, "forbidden", "unauthorized")]
+    // The denial is a 403: the code on another status changes nothing.
+    [InlineData(401, true, """{"code":"pro_required","feature":"remote_boards","payer":"account"}""", "unauthorized")]
+    [InlineData(500, true, """{"code":"pro_required","feature":"remote_boards","payer":"account"}""", "http_500")]
+    public async Task OtherRefusalsKeepTheirExistingMapping_AndNoteNothing(int status, bool header, string body, string expectedCode)
+    {
+        var entitlements = new FakeAccountEntitlements();
+        var client = Client(new Handler(_ =>
+        {
+            var response = new HttpResponseMessage((HttpStatusCode)status) { Content = new StringContent(body) };
+            if (header) response.Headers.Add("X-VibeRails-Denial", "pro_required");
+            return response;
+        }), entitlements);
+
+        var error = await Assert.ThrowsAsync<BoardSyncClientException>(() => client.PushAsync("id", new(null, null, null, []), Ct));
+
+        Assert.Equal(expectedCode, error.Code);
+        Assert.Null(error.Feature);
+        Assert.Empty(entitlements.Noted);
+    }
+
+    [Fact]
+    public async Task TheAccountSafetyPauseKeepsItsPrecedenceOverAPlanDenial()
+    {
+        var entitlements = new FakeAccountEntitlements();
+        var client = Client(new Handler(_ => Denied("""{"code":"board_remote_sync_paused","feature":"remote_boards","payer":"account"}""")), entitlements);
+
+        var error = await Assert.ThrowsAsync<BoardSyncClientException>(() => client.PushAsync("id", new(null, null, null, []), Ct));
+
+        Assert.Equal("board_remote_sync_paused", error.Code);
+        Assert.Empty(entitlements.Noted);
+    }
+
+    [Fact]
+    public async Task EveryPaidCallReportsTheDenial_IncludingLaunchPollsAndContentParts()
+    {
+        var entitlements = new FakeAccountEntitlements();
+        var client = Client(new Handler(_ => Denied("""{"code":"pro_required","feature":"remote_boards","payer":"account"}""")), entitlements);
+        var bytes = new byte[] { 1, 2, 3 };
+        var part = new BoardSyncContentPartWire(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)), bytes.Length);
+
+        foreach (var call in new Func<Task>[]
+        {
+            () => client.PublishAsync(new("board", "Board", "VB", []), Ct),
+            () => client.PollLaunchAsync(new(Guid.NewGuid(), "Desktop", [Guid.NewGuid()]), Ct, client.DestinationKey!),
+            () => client.PutActivityAsync("remote", "card_1", new(1, [], [], [], [], []), Ct, client.DestinationKey),
+            () => client.PutContentPartAsync(part, bytes, Ct, client.DestinationKey),
+            () => client.SaveInviteAsync("remote", null, new("a@example.com"), Ct, client.DestinationKey)
+        })
+            Assert.Equal("pro_required", (await Assert.ThrowsAsync<BoardSyncClientException>(call)).Code);
+        Assert.Equal(5, entitlements.Noted.Count);
+
+        // A content part refused for any other reason keeps its own code.
+        var plain = Client(new Handler(_ => new(HttpStatusCode.Forbidden) { Content = new StringContent("""{"code":"capability_required"}""") }));
+        Assert.Equal("content_upload_failed", (await Assert.ThrowsAsync<BoardSyncClientException>(() => plain.PutContentPartAsync(part, bytes, Ct, plain.DestinationKey))).Code);
+    }
+
+    private static HttpResponseMessage Denied(string body, bool header = true)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        if (header) response.Headers.Add("X-VibeRails-Denial", "pro_required");
+        return response;
+    }
+
+    private static BoardSyncHttpClient Client(Handler handler, FakeAccountEntitlements entitlements) =>
+        new(new Factory(handler), () => new Uri("https://example.com/api/v1/boards"), () => "test-key", null, entitlements);
     private static BoardSyncHttpClient Client(Handler handler) => new(new Factory(handler), new Uri("https://example.com/api/v1/boards"), () => "test-key");
     private sealed class NonSeekableStream(byte[] bytes) : MemoryStream(bytes)
     {

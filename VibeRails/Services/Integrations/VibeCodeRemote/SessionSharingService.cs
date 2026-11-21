@@ -11,13 +11,14 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote;
 
 /// <summary>Access is "public" (default) or "email"; Emails lists who may open an email-restricted link.</summary>
 public sealed record CreateSessionShareRequest(string DisplayName, string? Access = null, IReadOnlyList<string>? Emails = null);
+/// <summary>Status "pro_required" carries Feature "session_sharing": the plan, not the account key, refused the link.</summary>
 public sealed record SessionShareResponse(bool Success, string Status, string Message,
     string? Url = null, string? DisplayName = null, DateTimeOffset? ExpiresUtc = null,
-    int? HttpStatus = null, string? Access = null, IReadOnlyList<string>? Recipients = null);
+    int? HttpStatus = null, string? Access = null, IReadOnlyList<string>? Recipients = null, string? Feature = null);
 internal sealed record RemoteSessionShareRequest(Guid SessionId, string DisplayName, string? Access = null, IReadOnlyList<string>? Emails = null);
 internal sealed record RemoteSessionShareResponse(Guid SessionId, string Key, string SharePath,
     DateTimeOffset ExpiresUtc, bool? UploadRequired, string? Access = null, IReadOnlyList<string>? Recipients = null);
-internal sealed record RemoteSessionShareError(string? Code);
+internal sealed record RemoteSessionShareError(string? Code, string? Feature = null, string? Payer = null);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(CreateSessionShareRequest))]
@@ -29,8 +30,12 @@ internal sealed record RemoteSessionShareError(string? Code);
 internal partial class SessionSharingJsonContext : JsonSerializerContext;
 
 /// <summary>Creates sharing capabilities at the pinned export origin and persists their upload intent.</summary>
-public sealed class SessionSharingService(HttpClient client, ISessionStore sessions, ISessionArchiveReader archives)
+public sealed class SessionSharingService(HttpClient client, ISessionStore sessions, ISessionArchiveReader archives,
+    IAccountEntitlements? entitlements = null)
 {
+    public const string ProRequiredMessage = "Session sharing needs Vibe Rails Pro. Upgrade to create links; existing links work again once Pro is active.";
+    /// <summary>Where the plan is changed for this feature; built from the pinned sharing origin, never from a response.</summary>
+    public static string UpgradeUrl => Endpoint.GetLeftPart(UriPartial.Authority) + AccountEntitlementsClient.BillingPath + "?feature=session-sharing";
     private static readonly SemaphoreSlim CreationGate = new(1, 1);
     internal static readonly Uri Endpoint = new(DataExportEndpointConfiguration.ExportUri, "/api/v1/session-sharing-links");
     internal static readonly Uri CapabilitiesEndpoint = new(DataExportEndpointConfiguration.ExportUri, "/api/v1/session-sharing-links/capabilities");
@@ -135,10 +140,10 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
         return ShareAudience.Supports(capabilities) ? null : Failure("server_update_required", NoListedPeopleSupport);
     }
 
-    private static async Task<SessionShareResponse> ServerFailureAsync(HttpResponseMessage response, CancellationToken ct)
+    private async Task<SessionShareResponse> ServerFailureAsync(HttpResponseMessage response, CancellationToken ct)
     {
         var status = (int)response.StatusCode;
-        string? code = null;
+        RemoteSessionShareError? error = null;
         var mediaType = response.Content.Headers.ContentType?.MediaType;
         if (string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase)
             || mediaType?.EndsWith("+json", StringComparison.OrdinalIgnoreCase) == true)
@@ -146,7 +151,7 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
             try
             {
                 var bytes = await ReadBoundedAsync(await response.Content.ReadAsStreamAsync(ct), 16 * 1024, ct);
-                code = JsonSerializer.Deserialize(bytes, SessionSharingJsonContext.Default.RemoteSessionShareError)?.Code;
+                error = JsonSerializer.Deserialize(bytes, SessionSharingJsonContext.Default.RemoteSessionShareError);
             }
             catch (Exception ex) when (ex is JsonException or IOException or InvalidDataException)
             {
@@ -156,8 +161,17 @@ public sealed class SessionSharingService(HttpClient client, ISessionStore sessi
 
         // Only known codes select our own messages. Never display remote error prose, SQL,
         // redirect locations, response headers, or exception messages that might contain keys.
+        var code = error?.Code;
         if (status >= 500 && code == "schema_update_required")
             return Failure("schema_update_required", "The sharing server needs a database update. Ask the server administrator to apply the pending migrations.", status);
+        // The plan's typed denial (header and/or body code) is not a key problem: say so, and let
+        // background sharing work stop at once when this account is the one that pays.
+        if (response.StatusCode == HttpStatusCode.Forbidden
+            && ProDenial.From(ProDenial.HasHeader(response), code, error?.Feature, error?.Payer, ProFeatures.SessionSharing) is { } denial)
+        {
+            if (denial.AccountPays) entitlements?.NoteDenied(denial.Feature);
+            return new(false, ProDenial.Code, ProRequiredMessage, HttpStatus: status, Feature: ProFeatures.SessionSharing);
+        }
         return response.StatusCode switch
         {
             HttpStatusCode.Unauthorized => Failure("invalid_api_key", code switch

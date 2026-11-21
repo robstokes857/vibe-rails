@@ -74,6 +74,17 @@ public sealed class SessionSharingToolTests
         Assert.DoesNotContain("vibe-share:", result);
     }
 
+    [Fact]
+    public async Task AProRequiredRefusalNamesWhereToUpgrade_WithoutInventingALink()
+    {
+        using var client = new HttpClient(new Handler((_, _) => Task.FromResult(Response(
+            new(false, "pro_required", SessionSharingService.ProRequiredMessage, HttpStatus: 403, Feature: "session_sharing")))));
+        var result = await Tool(client).CreateSessionShareLink("Fix bug", TestContext.Current.CancellationToken);
+        Assert.Equal("FAIL: Session sharing needs Vibe Rails Pro. Upgrade to create links; existing links work again once Pro is active."
+            + " Upgrade: https://viberails.ai/Billing?feature=session-sharing", result);
+        Assert.DoesNotContain("vibe-share:", result);
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.Unauthorized)]
     [InlineData(HttpStatusCode.Redirect)]

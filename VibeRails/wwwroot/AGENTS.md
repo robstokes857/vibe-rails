@@ -287,6 +287,7 @@ Use microtasks, not short-delay `setTimeout` batching, for webview activity even
 | [js/modules/settings-controller.js](js/modules/settings-controller.js) | App settings (`loadSettings`: General / LLMs / Context / Setup / AI board manager) and Account settings (`loadAccountSettings`: Account / Keys), each with section tabs (panels stay in the DOM so dirty tracking and the save bar keep reading hidden-tab controls; `_initSettingsTabs` owns click + arrow-key switching). Account settings saves only the API key: it repeats `remoteAccess` and `useVsCodeTheme`, which the settings route always writes, and omits every other field. The Context tab mounts `context-controller.js` the first time it opens; one navigation guard covers settings and context drafts. Git Guard trailer cleanup and completed-session sharing are always on (no switches). The one-shot Export Data button and its progress modal are gone; smaller complete backups stay. |
 | [js/modules/remote-account-link.js](js/modules/remote-account-link.js) | Navigation account modal: user code, external browser link, countdown, polling and cancellation over the protected local `settings/remote-link` API. |
 | [js/modules/account-nav.js](js/modules/account-nav.js) | Signed-in account chip and popover in the top bar: email, key ending, Account settings, viberails.ai account page, Switch account; the managed-organization placeholder. |
+| [js/modules/pro-upgrade.js](js/modules/pro-upgrade.js) | The one sign-in / upgrade prompt for the hosted Pro features, the entitlement read behind `app.entitlements`, `requirePro`, `showProRequired` and the Pro badge (see "Vibe Rails Pro features" below). |
 | [js/modules/settings-keys.js](js/modules/settings-keys.js) | Lazy Keys panel in Account settings: create password-protected RSA-4096 keys, sync public keys to the saved API-key account, download public/encrypted private PEMs, and sign a message/file into public-verification JSON. Independent of the settings save bar. |
 | [js/modules/terminal-multitab.js](js/modules/terminal-multitab.js) | Reusable xterm.js terminal manager with per-tab lifecycle and environment picker |
 | [js/modules/llm-picker-controller.js](js/modules/llm-picker-controller.js) | Shared launch-picker catalog, Tom Select lifecycle, customization modal, and live preference refresh |
@@ -339,7 +340,8 @@ The top navigation offers **Sign in / Sign up** only when no API key is saved (V
 accent pill (`app-subnav-account-prompt`), never a popup, toast or repeated reminder. Sign-up
 uses the same device link, because the viberails.ai sign-in page also creates accounts; the
 modal's `data-remote-link-signup` line says so until an account is saved. Do not add a second
-external sign-up URL: the VS Code bridge allowlist accepts only `/link` and review pages. General Settings
+external sign-up URL: the VS Code bridge allowlist accepts only `/link`, review pages and the
+Billing page. General Settings
 always has an **Account** card: **Sign in** when signed out, or **Logged in {email}** and
 **Switch account** when linked. Manual/older keys without an approved email say **API key
 configured**. Both entry points open the shared modal from `remote-account-template`.
@@ -414,6 +416,59 @@ Only encrypted private PEM backup bytes may leave the backend. Public metadata i
 rendering. Signing preserves exact UTF-8 message bytes or file bytes, bounded to 64 KiB before
 base64 encoding. The resulting JSON is for
 `POST https://viberails.ai/public/api/v1/signatures/verify`, using RSA-PSS-SHA256.
+
+## Vibe Rails Pro features (VIBE-169)
+
+Remote Boards, remote terminals, session sharing and card sharing are hosted Pro features.
+Everything local stays free, with sign-in, device linking, API keys and code signing. The hosted
+server decides; the UI only avoids starting an action it already knows will be refused.
+
+`app.entitlements` holds the local backend's answer from `GET /api/v1/account/entitlements`:
+`{ state, enforced, features, billingUrl, checkedUtc }`, with `state` one of `signed_out`, `free`,
+`pro`, `inactive` or `unknown`. `normalizeEntitlements` in `pro-upgrade.js` reads anything else
+(a failed request, an older backend, the `{}` a test harness answers) as `unknown`, which
+reports every feature available: unknown never locks anything. `app.refreshEntitlements({ force })`
+reads at startup without being awaited, on `remote-account-linked` and `account_key_changed`
+(the backend keeps one answer per account key, so a new key needs only a new read), and when the
+window returns and the copy is a minute old. `force` (`POST …/refresh`) makes the backend ask the
+hosted server again; only **Check again** uses it. A failed read returns to `unknown`, and
+generations drop a superseded read.
+
+`pro-upgrade.js` is the one module for the prompt (DESIGN_SYSTEM.md, Desktop Pro upgrade prompt):
+
+- `requirePro(app, feature)` returns true when the feature may run; otherwise it opens the prompt
+  and returns false. Call it at the activation, before any request.
+- `showProRequired(app, feature, denial)` opens the same prompt when a response body or a thrown
+  `app.apiCall` error is the server's `pro_required` denial (`code`, or `status` on the session
+  share route), and returns whether it was one. `app.apiCall` copies `code`, `feature`, `payer`
+  and `status` from a JSON error body onto the thrown `Error`. `payer: 'board_owner'` selects the
+  informational state: an invited member is never asked to upgrade.
+- `proBadge(app, feature)` renders the badge in generated markup; static markup uses
+  `<span class="badge pro-badge" data-pro-badge="…" hidden>Pro</span>`. `app.updateProBadges()`
+  runs after each view loads and after every entitlement read.
+
+The prompt is an `app.showModal` dialog, so it replaces any open dialog. Inside an editor, check
+for unsaved work first: card sharing keeps its "save first" rule ahead of `requirePro`. It opens
+only from a user action. Board sync status shows `pausedCode` / `pausedPayer` inline with an
+**Upgrade** button and never opens it from a read. Turning a feature off, listing and revoking
+links, and removing collaborators are never intercepted.
+
+Billing opens from an anchor, or through `window.__viberails_openExternal__` in VS Code, whose
+allowlist accepts `https://viberails.ai/Billing` with an optional `?feature=` of lowercase words
+joined by hyphens. Build the link with `billingUrl()`: it carries the feature name and never a
+board, session, sharing link or key. **Check again** is the only thing that unlocks a feature in
+place; nothing in a URL or a return visit counts as proof of payment.
+
+Call sites: Board sync on and Sync now (`board-settings.js`), inviting a collaborator
+(`board-sharing.js`), creating a session link
+(`terminal-session-share.js`), creating or refreshing a card link (`board-card-sharing.js`) and
+switching Remote Access on (`SettingsController._guardRemoteAccess`). Tests:
+`pro-upgrade.test.mjs`, plus cases in `app-account`, `board-settings`, `board-card-sharing` and
+`settings-controller`.
+
+The Remote boards dialog (`board-remote.js`) is not gated on opening: its list and Delete stay
+free so a downgraded owner can clean up and an invited member can find a paying owner's Board.
+A paid action inside it that the hosted server refuses opens the prompt through `showProRequired`.
 
 ## Board
 

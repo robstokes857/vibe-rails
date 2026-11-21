@@ -1958,7 +1958,7 @@ export class BoardController {
 
                     ${cardReviewsSection(card, { readOnly: true })}
                     ${requestReviewSection(Boolean(card))}
-                    ${cardSharingSection(Boolean(card))}
+                    ${cardSharingSection(Boolean(card), this.app)}
 
                     ${card ? `<section class="board-side-section"><details data-board-advanced>
                         <summary class="board-side-label">Advanced</summary>

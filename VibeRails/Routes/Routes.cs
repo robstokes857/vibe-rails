@@ -59,6 +59,9 @@ public static class RouteExtensions
         AppSettingsRoutes.Map(app, isActiveRootBackend);
         if (isActiveRootBackend)
             RemoteAccountLinkRoutes.Map(app);
+        // The account's hosted plan (Pro features), read for the dashboard only.
+        if (isActiveRootBackend)
+            AccountEntitlementRoutes.Map(app);
         if (isActiveRootBackend)
             SigningKeyRoutes.Map(app);
         // Tool checks and installers run from the dashboard only, never a tab child.

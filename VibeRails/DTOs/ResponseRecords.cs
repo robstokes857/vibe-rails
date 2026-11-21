@@ -12,6 +12,10 @@ namespace VibeRails.DTOs
     public record HealthResponse(string Status);
     public record FileResponse(string FileName, string Content);
     public record ErrorResponse(string Error);
+    // A hosted feature the Pro plan refused: HTTP 403 with code "pro_required", the feature
+    // ("remote_boards") and who pays ("account", or "board_owner" when the caller must not be
+    // asked to upgrade). Error is the desktop's own wording, never remote text.
+    public record ProRequiredResponse(string Error, string Code, string Feature, string Payer);
 
     // CLI Launch DTOs
     public record LaunchVsCodeRequest(string? Path = null);
@@ -300,7 +304,10 @@ namespace VibeRails.DTOs
         IReadOnlyList<BoardSyncSkippedEntry>? SkippedEntries = null,
         bool ActivityEnabled = false,
         bool IsJiraBoard = false,
-        string? RemoteProvider = null);
+        string? RemoteProvider = null,
+        // "pro_required" while LastError is the Pro plan pause; PausedPayer is "account" or "board_owner".
+        string? PausedCode = null,
+        string? PausedPayer = null);
 
     public record SetBoardSyncRequest(bool Enabled = false, bool IncludeActivity = false);
     public record UpdateBoardRequest(string? Name = null, string? DisplayPrefix = null);
@@ -2232,6 +2239,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(AdoBoardSummaryResponse))]
     [JsonSerializable(typeof(AdoPullResponse))]
     [JsonSerializable(typeof(BoardSyncStatusResponse))]
+    [JsonSerializable(typeof(ProRequiredResponse))]
+    [JsonSerializable(typeof(VibeRails.Services.Integrations.VibeCodeRemote.AccountEntitlements))]
     [JsonSerializable(typeof(VibeRails.Services.Board.Sync.RemoteSafetyStatus))]
     [JsonSerializable(typeof(VibeRails.Routes.RemoteSafetyApprovalRequest))]
     [JsonSerializable(typeof(VibeRails.Services.Board.Sync.RemoteBoardPage))]

@@ -150,8 +150,10 @@ double-click time later. `runLauncherItem` keeps the row in its guard set for
 quick run cannot be queued twice; the backend rejects the overlapping run otherwise.
 
 `external-sign-in.ts` accepts only `https://viberails.ai/link`, optionally followed by the strict
-public user-code fragment `#code=ABCD-EFGH`, and (VB-50 slice D) a review request's own page
-`https://viberails.ai/Reviews/requests/rvw_<32 lowercase hex>`, before calling
+public user-code fragment `#code=ABCD-EFGH`, (VB-50 slice D) a review request's own page
+`https://viberails.ai/Reviews/requests/rvw_<32 lowercase hex>`, and the Billing page
+`https://viberails.ai/Billing`, optionally naming the Pro feature that asked
+(`?feature=remote-boards`: lowercase words joined by hyphens, never an identifier), before calling
 `vscode.env.openExternal`. The review inbox view also posts `{ command: 'openReviewInbox' }` through
 `postWhenReady`, which the dashboard answers by opening its `review-inbox` page. Reject other schemes, hosts, paths, explicit ports, credentials,
 queries and any other fragments. The dashboard stays in its webview; account authentication runs in

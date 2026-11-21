@@ -4,6 +4,7 @@ using VibeRails.Services.AzureDevOps;
 using VibeRails.Services.Board;
 using VibeRails.Services.Board.Sync;
 using VibeRails.Services.Board.Tracker;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.Jira;
 using VibeRails.Utils;
 
@@ -522,7 +523,8 @@ public static partial class BoardRoutes
             ? null
             : new BoardSyncStatusResponse(status.BoardId, status.Published, status.Enabled, status.RemoteBoardId, status.RemoteUrl,
                 status.Cursor, status.Unsent, status.LastSyncUtc, status.LastError, status.Configured, status.Rejected, status.RejectedEntries,
-                status.Skipped, status.SkippedEntries, status.ActivityEnabled, status.IsJiraBoard, status.RemoteProvider);
+                status.Skipped, status.SkippedEntries, status.ActivityEnabled, status.IsJiraBoard, status.RemoteProvider,
+                status.PausedCode, status.PausedPayer);
 
     private static JiraConnectionResponse ToResponse(BoardJiraConnectionRecord? connection, string boardId) =>
         connection is null
@@ -637,6 +639,14 @@ public static partial class BoardRoutes
         catch (BoardConflictException ex)
         {
             return Results.Conflict(new ErrorResponse(ex.Message));
+        }
+        catch (BoardSyncClientException ex) when (ex.Code == ProDenial.Code)
+        {
+            // The plan refused the feature, not the key: the dashboard offers Upgrade for the
+            // account payer and only explains for board_owner. 403, never a 401 (which the
+            // dashboard would read as its own credentials failing).
+            return Results.Json(new ProRequiredResponse(ex.Message, ProDenial.Code, ex.Feature ?? ProFeatures.RemoteBoards,
+                ex.Payer ?? ProDenial.AccountPayer), AppJsonSerializerContext.Default.ProRequiredResponse, statusCode: StatusCodes.Status403Forbidden);
         }
         catch (BoardSyncClientException ex)
         {

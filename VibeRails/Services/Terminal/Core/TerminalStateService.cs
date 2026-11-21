@@ -13,6 +13,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     private readonly UserInputRecordingService _inputRecordingService;
     private readonly IRemoteStateService _remoteStateService;
     private readonly ITerminalIoObserverService _ioObserverService;
+    private readonly IAccountEntitlements? _entitlements;
 
     // Shared across scoped TerminalStateService instances so terminal state remains
     // consistent across start/WS/reconnect/stop requests.
@@ -32,13 +33,15 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         IGitService gitService,
         IRemoteStateService remoteStateService,
         ITerminalIoObserverService ioObserverService,
-        UserInputRecordingService? inputRecordingService = null)
+        UserInputRecordingService? inputRecordingService = null,
+        IAccountEntitlements? entitlements = null)
     {
         _repository = repository;
         _inputRecordingService = inputRecordingService ?? new UserInputRecordingService(repository);
         _gitService = gitService;
         _remoteStateService = remoteStateService;
         _ioObserverService = ioObserverService;
+        _entitlements = entitlements;
     }
 
     public async Task<string> CreateSessionAsync(
@@ -94,11 +97,25 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             {
                 s_remoteRegistrations[sessionId] = new RemoteRegistration(cli, workDir, envName);
             }
-            _ = _remoteStateService.RegisterTerminalAsync(sessionId, cli, workDir, envName);
+            _ = RegisterRemoteSessionAsync(sessionId, cli, workDir, envName);
         }
 
         return sessionId;
     }
+
+    /// <summary>
+    /// Fire-and-forget like the registration it wraps, so the local terminal never waits on the
+    /// relay or on the plan. Remote terminals are a Pro feature of the hosted service: an account
+    /// known not to have it sends no registration at all.
+    /// </summary>
+    internal async Task RegisterRemoteSessionAsync(string sessionId, string cli, string workDir, string? envName)
+    {
+        if (await RemoteTerminalsAllowedAsync(CancellationToken.None))
+            await _remoteStateService.RegisterTerminalAsync(sessionId, cli, workDir, envName);
+    }
+
+    private async Task<bool> RemoteTerminalsAllowedAsync(CancellationToken ct) =>
+        _entitlements is null || await _entitlements.AllowsAsync(ProFeatures.RemoteTerminals, ct);
 
     public void PublishSessionStart(string sessionId, string cli, string workDir, string? envName, IReadOnlyList<string> setupCommands, string launchCommand)
     {
@@ -241,8 +258,9 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         }
 
         // Never registers anything that was not registered at creation (Job sessions, sessions
-        // started without remote), and stops once remote access or its PIN has been turned off.
-        if (registration is null || !RemoteConfig.IsEnabled)
+        // started without remote), and stops once remote access or its PIN has been turned off,
+        // or the account's plan is known not to include remote terminals.
+        if (registration is null || !RemoteConfig.IsEnabled || !await RemoteTerminalsAllowedAsync(ct))
             return false;
 
         return await _remoteStateService.RegisterTerminalAsync(

@@ -15,6 +15,20 @@ They are also created unpublished (`SyncEnabled=0`), so an older binary that doe
 Azure DevOps tables never uploads one. `TrackerBoards.DedicatedProviderAsync` is the one check:
 the status reports `RemoteProvider` (`jira`, `ado` or null) beside the retained `IsJiraBoard`.
 
+## Pro plan pause
+
+Remote Boards are a Pro feature of the hosted service; local boards are not affected. The hosted
+`pro_required` denial is its own `BoardSyncClientException` code with `Feature` and `Payer`, never
+the rejected-key wording. `BoardSyncProPause` holds the two fixed reasons (the account's plan, or
+the Board owner's plan for an invited member). The reason is stored as the link's `LastError`, and
+the status adds `pausedCode` / `pausedPayer` derived from that text: no schema change. While the
+account's plan says no, `SyncDueAsync` writes the reason once per link and sends nothing, and the
+remote Start work poll is skipped; a Board refused for its owner's plan pauses alone and is asked
+again about every 15 minutes. Queued entries, cursors and the hosted copy are kept, and the next
+successful sync clears the reason. Publish and Sync now are always sent, and their refusal reaches
+the dashboard as HTTP 403 with the code. Contract and rules:
+[Pro plan denials](../Integrations/VibeCodeRemote/ProPlan.md).
+
 ## Remote board manager
 
 The Board toolbar's **Remote boards** screen lists owned and accepted shared boards, including

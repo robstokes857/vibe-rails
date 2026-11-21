@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Tests.Services.Integrations;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 using Xunit;
@@ -145,6 +147,89 @@ public sealed class RemoteTerminalConnectionTests : IAsyncDisposable
         Assert.Equal(1, _relay.Handshakes);
     }
 
+    // ------------------------------------------------------------------ Pro plan denials
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AHandshakeRefusedByThePlan_IsNotedAndNeverRetried_WhileAPlain403IsOnlyARejection(bool denialHeader)
+    {
+        await StartRelayAsync(registered: true);
+        _relay.Status = StatusCodes.Status403Forbidden;
+        _relay.ProRequired = denialHeader;
+        var entitlements = new FakeAccountEntitlements();
+        var reregistered = 0;
+        await using var connection = new RemoteTerminalConnection(_ =>
+        {
+            Interlocked.Increment(ref reregistered);
+            return Task.FromResult(true);
+        }, new RemoteRelayBackoff(), _safetyDirectory, entitlements);
+
+        await connection.ConnectAsync(SessionId, Ct);
+
+        Assert.False(connection.IsConnected);
+        Assert.Equal(1, _relay.Handshakes);
+        Assert.Equal(0, reregistered);
+        // The body of a refused handshake is unreadable, so the header alone carries the denial.
+        Assert.Equal(denialHeader ? new[] { ProFeatures.RemoteTerminals } : [], entitlements.Noted);
+    }
+
+    [Theory]
+    [InlineData("Vibe Rails Pro required", true)]
+    [InlineData("Remote access is paused", false)]
+    public async Task ALiveRelayClosedForPolicy_NeverReconnects_AndOnlyTheProReasonIsNoted(string reason, bool noted)
+    {
+        await StartRelayAsync(registered: true);
+        var entitlements = new FakeAccountEntitlements();
+        await using var connection = new RemoteTerminalConnection(_ => Task.FromResult(true), new RemoteRelayBackoff(), _safetyDirectory, entitlements);
+        await connection.ConnectAsync(SessionId, Ct);
+        Assert.True(connection.IsConnected);
+
+        _relay.CloseStatus = WebSocketCloseStatus.PolicyViolation;
+        _relay.CloseReason = reason;
+        await _relay.DropCurrentSocketAsync();
+
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (connection.IsConnected && DateTime.UtcNow < deadline)
+            await Task.Delay(20, Ct);
+        Assert.False(connection.IsConnected);
+        // Longer than the first reconnect delay: a retry would show up as a second handshake.
+        await Task.Delay(TimeSpan.FromSeconds(2.5), Ct);
+        Assert.Equal(1, _relay.Handshakes);
+        Assert.Equal(noted ? new[] { ProFeatures.RemoteTerminals } : [], entitlements.Noted);
+    }
+
+    [Fact]
+    public async Task ReconnectStopsWhenThePlanRefusesTheReregistration_InsteadOfLoopingOn404()
+    {
+        await StartRelayAsync(registered: true);
+        var entitlements = new FakeAccountEntitlements();
+        var reregistered = 0;
+        await using var connection = new RemoteTerminalConnection(_ =>
+        {
+            Interlocked.Increment(ref reregistered);
+            // What the registration does when the relay answers pro_required.
+            entitlements.NoteDenied(ProFeatures.RemoteTerminals);
+            return Task.FromResult(false);
+        }, new RemoteRelayBackoff(), _safetyDirectory, entitlements);
+        await connection.ConnectAsync(SessionId, Ct);
+        Assert.True(connection.IsConnected);
+
+        // The server restarts and the account is no longer Pro: the row is gone, registering is refused.
+        _relay.Registered = false;
+        await _relay.DropCurrentSocketAsync();
+
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (Volatile.Read(ref reregistered) == 0 && DateTime.UtcNow < deadline)
+            await Task.Delay(20, Ct);
+        Assert.Equal(1, Volatile.Read(ref reregistered));
+        // Past the second reconnect delay: nothing further is attempted for this terminal.
+        await Task.Delay(TimeSpan.FromSeconds(4), Ct);
+        Assert.Equal(1, Volatile.Read(ref reregistered));
+        Assert.Equal(2, _relay.Handshakes); // the first connect and the one 404
+        Assert.False(connection.IsConnected);
+    }
+
     private const string SessionId = "3648c893-6634-42b3-8692-8988da904090";
 
     private async Task StartRelayAsync(bool registered = false)
@@ -175,6 +260,10 @@ public sealed class RemoteTerminalConnectionTests : IAsyncDisposable
 
         public volatile bool Registered;
         public int? Status;
+        /// <summary>Adds the plan's denial header to a refused handshake.</summary>
+        public bool ProRequired;
+        public WebSocketCloseStatus CloseStatus = WebSocketCloseStatus.EndpointUnavailable;
+        public string CloseReason = "restart";
         public int Handshakes => Volatile.Read(ref _handshakes);
         public string Url => _app!.Urls.First();
 
@@ -198,6 +287,7 @@ public sealed class RemoteTerminalConnectionTests : IAsyncDisposable
                 }
                 if (Status is { } status)
                 {
+                    if (ProRequired) context.Response.Headers["X-VibeRails-Denial"] = "pro_required";
                     context.Response.StatusCode = status;
                     return;
                 }
@@ -216,7 +306,7 @@ public sealed class RemoteTerminalConnectionTests : IAsyncDisposable
                 await Task.WhenAny(reading, release.Task);
                 if (socket.State == WebSocketState.Open)
                 {
-                    try { await socket.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "restart", CancellationToken.None); }
+                    try { await socket.CloseOutputAsync(CloseStatus, CloseReason, CancellationToken.None); }
                     catch (WebSocketException) { }
                 }
                 await reading;

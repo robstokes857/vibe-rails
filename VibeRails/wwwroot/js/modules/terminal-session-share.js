@@ -1,3 +1,5 @@
+import { requirePro, showProRequired } from './pro-upgrade.js';
+
 const openShares = new WeakMap();
 const SHARE_URL = /^https:\/\/viberails\.ai\/shared\/session\?key=[a-f0-9]{64}$/;
 const RECIPIENT_LIMIT = 10;
@@ -9,7 +11,8 @@ export function parseShareEmails(text) {
 // The session id and label are captured when Share is clicked. A tab can start a new
 // session while this POST is pending; its replacement must never receive this link.
 export function showSessionShareModal(app, sessionId, label) {
-    if (!sessionId) return Promise.resolve(null);
+    // Creating a link needs session sharing; existing links are managed on viberails.ai.
+    if (!sessionId || !requirePro(app, 'session_sharing')) return Promise.resolve(null);
     const previous = openShares.get(app);
     if (previous?.root.isConnected) return previous.promise;
     let closed = false;
@@ -91,6 +94,8 @@ export function showSessionShareModal(app, sessionId, label) {
             const result = await app.apiCall(`/api/v1/sessions/${encodeURIComponent(sessionId)}/sharing-links`,
                 'POST', body, { showLoading: false });
             if (closed || !root.isConnected) { settle(result); return result; }
+            // The server's Pro denial opens the shared prompt in place of this dialog.
+            if (showProRequired(app, 'session_sharing', result)) return result;
             if (!result?.success || !SHARE_URL.test(result.url || '')) {
                 status.textContent = result?.message || 'Could not create the link. Try again shortly.';
                 retry.hidden = false;

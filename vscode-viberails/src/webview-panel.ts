@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { DASHBOARD_MESSAGE_TIMEOUT_MS, WEBVIEW_VIEW_TYPE } from './constants';
-import { openExternalSignIn } from './external-sign-in';
+import { isAllowedBillingUrl, openExternalSignIn } from './external-sign-in';
 import { showError } from './notifications';
 import { ReviewRequestChange, reviewRequestChangeFromMessage } from './review-requests-view';
 
@@ -169,11 +169,14 @@ export class WebviewPanelManager {
             } else if (message.command === 'openFile' && typeof message.path === 'string') {
                 void this.openFileInEditor(message.path);
             } else if (message.command === 'openExternal') {
+                const failed = isAllowedBillingUrl(message.url)
+                    ? 'VibeRails could not open Billing. Open https://viberails.ai/Billing in your browser.'
+                    : 'VibeRails could not open sign-in. Open https://viberails.ai/link in your browser and enter the displayed code.';
                 void openExternalSignIn(message.url, url => vscode.env.openExternal(vscode.Uri.parse(url)))
                     .then(opened => {
-                        if (!opened) void showError('VibeRails could not open sign-in. Open https://viberails.ai/link in your browser and enter the displayed code.');
+                        if (!opened) void showError(failed);
                     }).catch(() => {
-                        void showError('VibeRails could not open sign-in. Open https://viberails.ai/link in your browser and enter the displayed code.');
+                        void showError(failed);
                     });
             } else if (message.command === 'setTitle' && this.panel && typeof message.title === 'string') {
                 // Strip Unicode format (Cf — RTL/LTR overrides, zero-width joiners) and

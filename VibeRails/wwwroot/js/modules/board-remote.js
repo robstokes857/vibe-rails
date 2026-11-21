@@ -1,4 +1,5 @@
 import { escapeHtml, confirmDialog } from './utils.js';
+import { showProRequired } from './pro-upgrade.js';
 
 // Independent of the selected local board: remote-only and other-project copies belong here too.
 // No create: a hosted board is always a local owner's board published from its settings (VIBE-235).
@@ -35,6 +36,9 @@ export function openRemoteBoards(app, onChanged = () => {}) {
     const active = () => host.isConnected && !abort.signal.aborted;
     const get = selector => host.querySelector(selector);
     const status = message => { if (active()) get('[data-remote-status]').textContent = message; };
+    // Listing and deleting stay free, so this dialog opens for every account. A paid action the
+    // hosted server refuses opens the shared prompt in place of this dialog.
+    const denied = error => active() && showProRequired(app, 'remote_boards', error);
     const request = (path, method = 'GET', data = null) => app.apiCall(`/api/v1/board/remote${path}`, method, data,
         { ...(method === 'GET' ? { signal: abort.signal } : {}), showLoading: false, preferErrorResponseMessage: true });
     function setBusy(value) {
@@ -89,7 +93,7 @@ export function openRemoteBoards(app, onChanged = () => {}) {
             nextOffset = page.nextOffset ?? null;
             render();
             status(message || `${rows.length} remote board${rows.length === 1 ? '' : 's'} loaded${nextOffset !== null ? ' · More available' : ''}.`);
-        } catch (error) { if (active() && error.name !== 'AbortError') status(error.message || 'Could not load remote boards.'); }
+        } catch (error) { if (active() && error.name !== 'AbortError' && !denied(error)) status(error.message || 'Could not load remote boards.'); }
         finally { if (current === generation) setBusy(false); }
     }
     function openEditor(row) {
@@ -114,7 +118,7 @@ export function openRemoteBoards(app, onChanged = () => {}) {
             if (!active()) return;
             edit = null; get('[data-remote-editor]').hidden = true;
             await load(false, result.message); await changed();
-        } catch (error) { status(error.message || 'Could not save the remote board. Your name is still here to retry.'); }
+        } catch (error) { if (!denied(error)) status(error.message || 'Could not save the remote board. Your name is still here to retry.'); }
         finally { setBusy(false); }
     });
     get('[data-remote-list]').addEventListener('click', async event => {
@@ -131,7 +135,7 @@ export function openRemoteBoards(app, onChanged = () => {}) {
             if (!confirmed || !active()) return;
             const result = await request(`/${encodeURIComponent(row.id)}/delete`, 'POST', { context: selectedContext });
             if (active()) { await load(false, result.message); await changed(); }
-        } catch (error) { if (active()) await load(false, error.message || 'Deletion was not confirmed. Refresh before retrying.'); }
+        } catch (error) { if (active() && !denied(error)) await load(false, error.message || 'Deletion was not confirmed. Refresh before retrying.'); }
         finally { setBusy(false); }
     });
     get('[data-remote-search]').addEventListener('input', render);

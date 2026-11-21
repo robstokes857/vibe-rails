@@ -311,6 +311,101 @@ public sealed class CardSharePublisherTests : IDisposable
         Assert.Equal("/api/v1/card-sharing-links/sources/3", Assert.Single(refreshed));
     }
 
+    // ------------------------------------------------------------------ Pro plan denials
+
+    private static HttpResponseMessage ProRequired(string payer = "account", bool header = true, string? body = null)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.Forbidden)
+        {
+            Content = new StringContent(body ?? $$"""{"error":"REMOTE PROSE","code":"pro_required","feature":"card_sharing","payer":"{{payer}}","upgradePath":"/Billing?feature=card-sharing"}""",
+                Encoding.UTF8, "application/json")
+        };
+        if (header) response.Headers.Add("X-VibeRails-Denial", "pro_required");
+        return response;
+    }
+    private CardSharePublisher Publisher(HttpClient http, Tests.Services.Integrations.FakeAccountEntitlements entitlements) =>
+        new(_boards.Object, Capture(), new(http, entitlements), _archives.Object, new(_lockPath), _state, entitlements);
+
+    [Theory]
+    [InlineData(true, null)]
+    [InlineData(false, null)]              // the body code alone
+    [InlineData(true, "<html>refused</html>")] // the header alone
+    public async Task AProRequiredRefusalIsTyped_ForCreateAndRefresh_AndClaimsNoUncertainLink(bool header, string? body)
+    {
+        var entitlements = new Tests.Services.Integrations.FakeAccountEntitlements();
+        using var http = new HttpClient(new Handler(request => Task.FromResult(request.Method == HttpMethod.Get
+            ? new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(
+                new List<CardShareSource> { new(2, _card.Key, new string('a', 64), _card.Id) }, CardSharingJsonContext.Default.ListCardShareSource) }
+            : ProRequired(header: header, body: body))));
+        var publisher = Publisher(http, entitlements);
+
+        foreach (var result in new[] { await publisher.CreateAsync("project", "card_test", "Demo", Ct), await publisher.RefreshAsync("project", "card_test", Ct) })
+        {
+            Assert.False(result.Success);
+            Assert.Equal("pro_required", result.Code);
+            Assert.Equal("card_sharing", result.Feature);
+            Assert.Equal("Card sharing needs Vibe Rails Pro. Upgrade to create or refresh links; existing links work again once Pro is active.", result.Message);
+            Assert.DoesNotContain("may already", result.Message); // refused before anything was created
+            var json = JsonSerializer.Serialize(result, CardSharingJsonContext.Default.CardShareResult);
+            Assert.Contains("\"code\":\"pro_required\"", json);
+            Assert.Contains("\"feature\":\"card_sharing\"", json);
+            Assert.DoesNotContain("REMOTE PROSE", json); Assert.DoesNotContain("upgradePath", json); Assert.DoesNotContain(Key, json);
+        }
+        Assert.Equal(["card_sharing", "card_sharing"], entitlements.Noted);
+        _archives.Verify(a => a.EnsureSessionShareUploadAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AnyOther403KeepsTheAccountKeyWording_AndListingStaysUsable()
+    {
+        var entitlements = new Tests.Services.Integrations.FakeAccountEntitlements();
+        using var http = new HttpClient(new Handler(request => Task.FromResult(request.Method == HttpMethod.Get
+            ? new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(new List<CardShareLinkDto> { Link() }, CardSharingJsonContext.Default.ListCardShareLinkDto) }
+            : new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent("""{"code":"capability_required"}""", Encoding.UTF8, "application/json") })));
+        var publisher = Publisher(http, entitlements);
+
+        var refused = await publisher.CreateAsync("project", "card_test", "Demo", Ct);
+        Assert.False(refused.Success);
+        Assert.Null(refused.Code); Assert.Null(refused.Feature);
+        Assert.Contains("Boards and Sessions access", refused.Message);
+        Assert.Empty(entitlements.Noted);
+        // Listing (and revoking) stay free on the host, so existing links remain visible.
+        var listed = await publisher.ListAsync("project", "card_test", null, Ct);
+        Assert.True(listed.Success); Assert.Single(listed.Links!);
+    }
+
+    [Fact]
+    public async Task BackgroundRefresh_SendsNothingWhileThePlanDoesNotIncludeCardSharing_AndStopsASweepAtTheFirstRefusal()
+    {
+        var gets = 0; var puts = 0;
+        var entitlements = new Tests.Services.Integrations.FakeAccountEntitlements();
+        using var http = new HttpClient(new Handler(request =>
+        {
+            if (request.Method == HttpMethod.Get) { gets++; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(
+                new List<CardShareSource> { new(2, _card.Key, new string('a', 64), _card.Id), new(3, _card.Key, new string('b', 64), _card.Id), new(4, _card.Key, new string('c', 64), _card.Id) },
+                CardSharingJsonContext.Default.ListCardShareSource) }); }
+            puts++;
+            return Task.FromResult(ProRequired());
+        }));
+        var publisher = Publisher(http, entitlements);
+
+        // The first due sweep is refused on its first publication and does not try the other two.
+        await publisher.RefreshDueAsync(Ct);
+        Assert.Equal((1, 1), (gets, puts));
+        Assert.Equal(["card_sharing"], entitlements.Noted);
+
+        // While the plan is known not to include it, a due sweep makes no request at all.
+        var due = new CardSharePublisher(_boards.Object, Capture(), new(http, entitlements), _archives.Object, new(_lockPath), new CardShareRefreshState(), entitlements);
+        await due.RefreshDueAsync(Ct);
+        await due.RefreshDueAsync(Ct);
+        Assert.Equal((1, 1), (gets, puts));
+
+        // Allowed again: discovery resumes.
+        entitlements.Off.Clear();
+        await due.RefreshDueAsync(Ct);
+        Assert.Equal(2, gets);
+    }
+
     [Fact]
     public async Task PersistedRefreshState_SurvivesRestart_SoUnchangedCardsAreNotResent_AndHoldsNoSecrets()
     {

@@ -86,6 +86,11 @@ requests; explicit recording deletion still cascades them. Requests for unavaila
 instead of silently switching accounts. Links themselves expire after one month and can be
 revoked on the website; the desktop's upload request grants no public read access.
 
+Creating a link is a Pro feature of the hosted service. A 403 that carries the typed
+`pro_required` denial is the domain result `status: "pro_required"` with
+`feature: "session_sharing"` and a fixed upgrade message (the MCP tool adds the Billing link);
+every other 403 keeps the Sessions-access wording. See [Pro plan denials](ProPlan.md).
+
 Tests cover local credential combinations/body bounds, outbound response validation, account
 changes, live/completed/already-exported selection, durable retry and exact-key ACK, retention,
 frozen spool reuse and the real frontend modal at desktop/phone widths. Run `dotnet test

@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { publicCardUrl, cardSharingSection, bindCardSharing, describeAudience, parseShareEmails } from '../../../VibeRails/wwwroot/js/modules/board-card-sharing.js';
 
 const turn = () => new Promise(resolve => setImmediate(resolve));
-function fixture(apiCall, hasDraft = () => false) {
+function fixture(apiCall, hasDraft = () => false, plan = {}) {
     const nodes = new Map(['[data-card-share-message]', '[data-card-share-links]', '[data-card-share-name]', '[data-share-action="more"]']
         .map(key => [key, { value: '', textContent: '', innerHTML: '', hidden: true }]));
     const listeners = new Map();
     const host = { isConnected: true, open: true, querySelector: s => nodes.get(s), querySelectorAll: () => [...nodes.values()],
         addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener: type => listeners.delete(type) };
     const editor = { querySelector: () => host };
-    const control = bindCardSharing(editor, { id: 'card fixture', title: 'Example' }, { app: { apiCall }, hasDraft });
+    const control = bindCardSharing(editor, { id: 'card fixture', title: 'Example' }, { app: { apiCall, ...plan }, hasDraft });
     return { control, host, nodes, load: async () => { listeners.get('toggle')(); await turn(); },
         click: action => listeners.get('click')({ target: { closest: s => s === '[data-share-action]' ? { dataset: { shareAction: action }, closest: () => null } : null } }) };
 }
@@ -77,4 +77,58 @@ test('creation forwards the chosen audience and describes link audiences without
     assert.equal(describeAudience({ access: 'email', recipients: ['x@example.test'] }), '1 person: x@example.test');
     assert.deepEqual(parseShareEmails(' one@example.test;two@example.test two@example.test '), ['one@example.test', 'two@example.test']);
     assert.match(cardSharingSection(true), /Who can view/);
+});
+
+// An account whose plan does not include card sharing, recording every prompt it is shown.
+function lockedPlan(available = false) {
+    const modals = [];
+    return { modals, entitlements: { state: 'free', features: { card_sharing: available } }, appSettings: { apiKey: '••••abcd' },
+        showModal: (title, html) => { modals.push({ title, html }); }, refreshEntitlements: async () => ({}) };
+}
+
+test('a locked plan is prompted instead of creating or refreshing a link, and can still list links', async () => {
+    const calls = [];
+    const plan = lockedPlan();
+    const f = fixture(async (...args) => { calls.push(args[1]); return { success: true, links: [] }; }, () => false, plan);
+    await f.click('create');
+    await f.click('refresh');
+    assert.deepEqual(calls, [], 'nothing was published');
+    assert.deepEqual(plan.modals.map(modal => modal.title), ['Card sharing needs Vibe Rails Pro', 'Card sharing needs Vibe Rails Pro']);
+    await f.click('reload');
+    assert.deepEqual(calls, ['GET']);
+    assert.equal(plan.modals.length, 2);
+    f.control.dispose();
+
+    // The prompt replaces the editor, so unsaved work is named first and nothing opens.
+    const drafting = lockedPlan();
+    const g = fixture(() => { throw new Error('Must not call remote'); }, () => true, drafting);
+    await g.click('create');
+    assert.match(g.nodes.get('[data-card-share-message]').textContent, /drafts are still here/);
+    assert.deepEqual(drafting.modals, []);
+    g.control.dispose();
+
+    assert.match(cardSharingSection(true, plan), /Share card <span class="badge pro-badge" data-pro-badge="card_sharing" title="Part of Vibe Rails Pro">Pro</);
+    assert.match(cardSharingSection(true), /data-pro-badge="card_sharing" title="Part of Vibe Rails Pro" hidden>Pro</);
+});
+
+test('the server\'s Pro denial opens the prompt, unless a draft appeared while it was pending', async () => {
+    const denial = { success: false, message: 'Card sharing needs Vibe Rails Pro.', code: 'pro_required', feature: 'card_sharing' };
+    const calls = [];
+    const api = async (...args) => { calls.push(args[1]); return args[1] === 'POST' ? denial : { success: true, links: [] }; };
+    const plan = lockedPlan(true);
+    const f = fixture(api, () => false, plan);
+    await f.click('create');
+    assert.deepEqual(calls, ['POST']);
+    assert.equal(plan.modals.length, 1);
+    assert.equal(plan.modals[0].title, 'Card sharing needs Vibe Rails Pro');
+    assert.equal(f.nodes.get('[data-card-share-message]').textContent, denial.message);
+    f.control.dispose();
+
+    let asked = 0;
+    const drafting = lockedPlan(true);
+    const g = fixture(api, () => asked++ > 0, drafting);
+    await g.click('refresh');
+    assert.deepEqual(drafting.modals, [], 'the editor and its new draft stay');
+    assert.equal(g.nodes.get('[data-card-share-message]').textContent, denial.message);
+    g.control.dispose();
 });

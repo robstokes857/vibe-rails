@@ -105,6 +105,13 @@ restore it and use Refresh shared card. A failed or oversized update preserves t
 public version; manual Refresh reports the error. No new database diagnostics, visitor counters,
 background host or listener is introduced.
 
+Creating and refreshing a publication are Pro features of the hosted service; listing and
+revoking stay free. A 403 that carries the typed `pro_required` denial becomes a `CardShareResult`
+with `code: "pro_required"` and `feature: "card_sharing"`, without the "may already have created
+a link" note. While the account's plan is known not to include card sharing a due sweep sends
+nothing, and a refusal ends the sweep at that publication. See
+[Pro plan denials](../../Integrations/VibeCodeRemote/ProPlan.md).
+
 ## Tests
 
 - `dotnet test Tests/Tests.csproj --no-restore --filter "FullyQualifiedName~CardShare|FullyQualifiedName~SessionShare|FullyQualifiedName~BoardSyncScheduler|FullyQualifiedName~BoardRoutesTests"`

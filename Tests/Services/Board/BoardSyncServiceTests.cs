@@ -1268,6 +1268,7 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         public BoardSyncPublishRequest? PublishedLayout;
         public string? RejectEntryId;
         public BoardSyncClientException? PushError;
+        public Action<BoardSyncPushRequest>? BeforePush;
         public Func<BoardSyncPushResponse, BoardSyncPushResponse>? TransformAck;
         public Func<BoardSyncPullResponse, BoardSyncPullResponse>? TransformPull;
         public long? AdvertisedLastSeq;
@@ -1279,10 +1280,14 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         public bool FailActivity;
         public bool WrongActivityAck;
         public string? FailActivityCardId;
+        public BoardSyncClientException? ActivityError;
+        public int ActivityAttempts;
         public Task<BoardSyncActivityAck> PutActivityAsync(string boardId, string cardId, BoardSyncActivityWire activity, CancellationToken ct, string? expectedDestination = null)
         {
             Calls++;
+            ActivityAttempts++;
             Assert.Equal(DestinationKey, expectedDestination);
+            if (ActivityError is { } activityError) throw activityError;
             if (FailActivity || FailActivityCardId == cardId) throw new BoardSyncClientException("Activity upload failed", "network");
             Activity.Add((cardId, activity));
             return Task.FromResult(new BoardSyncActivityAck(WrongActivityAck ? 0 : activity.Schema, cardId));
@@ -1348,6 +1353,7 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         public Task<BoardSyncPushResponse> PushAsync(string boardId, BoardSyncPushRequest request, CancellationToken ct, string? expectedDestination = null)
         {
             Calls++;
+            BeforePush?.Invoke(request);
             if (PushConflictUntilDelete)
                 throw new BoardSyncClientException("Write conflict", BoardSyncWire.CodeWriteConflict, 409);
             if (PushError is { } pushError) throw pushError;

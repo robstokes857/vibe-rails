@@ -60,6 +60,7 @@ public class TerminalRunner
     private readonly IManagedWorktreeService? _worktrees;
     private readonly VibeRails.Auth.AgentCredentialService? _agentCredentials;
     private readonly VibeRails.Services.Board.IBoardStore? _boardStore;
+    private readonly VibeRails.Services.Integrations.VibeCodeRemote.IAccountEntitlements? _entitlements;
 
     public TerminalRunner(
         ITerminalStateService stateService,
@@ -73,7 +74,8 @@ public class TerminalRunner
         IHostApplicationLifetime? appLifetime = null,
         IManagedWorktreeService? worktrees = null,
         VibeRails.Auth.AgentCredentialService? agentCredentials = null,
-        VibeRails.Services.Board.IBoardStore? boardStore = null)
+        VibeRails.Services.Board.IBoardStore? boardStore = null,
+        VibeRails.Services.Integrations.VibeCodeRemote.IAccountEntitlements? entitlements = null)
     {
         _stateService = stateService;
         _commandService = commandService;
@@ -87,6 +89,7 @@ public class TerminalRunner
         _worktrees = worktrees;
         _agentCredentials = agentCredentials;
         _boardStore = boardStore;
+        _entitlements = entitlements;
     }
 
     /// <summary>
@@ -283,10 +286,16 @@ public class TerminalRunner
 
             // For now, any configured instance defaults to remote-enabled sessions.
             // Keep makeRemote in the signature so explicit per-session controls can be reintroduced later.
-            if (shouldEnableRemote)
+            // Remote terminals are a Pro feature of the hosted relay. When the account's plan is
+            // known not to include them, no relay socket is opened and the session carries on as
+            // it would with remote access off. Asked here, after the PTY exists, so the local
+            // terminal never waits on the plan; an unknown plan (offline, older server) changes nothing.
+            if (shouldEnableRemote && (_entitlements is null || await _entitlements.AllowsAsync(
+                    VibeRails.Services.Integrations.VibeCodeRemote.ProFeatures.RemoteTerminals, ct)))
             {
                 var remoteConn = new RemoteTerminalConnection(
-                    reregisterCt => _stateService.ReregisterRemoteSessionAsync(sessionId, reregisterCt));
+                    reregisterCt => _stateService.ReregisterRemoteSessionAsync(sessionId, reregisterCt),
+                    entitlements: _entitlements);
                 await remoteConn.ConnectAsync(sessionId, ct);
 
                 if (remoteConn.IsConnected)

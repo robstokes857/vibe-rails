@@ -558,6 +558,7 @@ Use `role="status"` or a polite live region for confirmations; reserve `role="al
 | Signing keys | "Active", "Valid": Success; "Invalid": Danger; "Revoked": Neutral |
 | Push status | Dot plus sentence: on Success, working Accent (pulsing), off Neutral, blocked Danger, unsupported Warning |
 | Account (desktop top bar) | "Signed in": Success with a dot; "Personal account": Neutral; "Managed": Active with a building icon |
+| Plan (desktop) | "Pro": Active, beside a hosted feature the account's plan does not include; hidden otherwise |
 
 **In the code today**
 
@@ -603,6 +604,8 @@ Today: `.vibe-empty-state` with an `i.empty-state-mark` or `img.vibe-empty-state
 | Board card drawer (`aside.vibe-card-panel[role=dialog]`), terminal PIN and composer overlays | Keep their layouts; apply the dialog surface, focus and Escape rules | `vibe-boards.css`, `viberails.css`, `vibe-theme.css` |
 
 Bootstrap modals and offcanvas are not used.
+
+The desktop sign-in and upgrade prompt for Vibe Rails Pro features follows this standard; see [Desktop Pro upgrade prompt](#desktop-pro-upgrade-prompt).
 
 ### Brand and marketing
 
@@ -935,6 +938,25 @@ Signed in, the desktop top bar shows the viberails.ai account as a chip beside E
 The popover is a simple popover of ordinary buttons (`role="dialog"`, `aria-label="viberails.ai account"`), not an ARIA menu. The chip carries `aria-haspopup`, `aria-expanded` and `aria-controls`; opening focuses the first action, Tab moves through the rest, and Escape or an outside click closes it, with Escape returning focus to the chip. The chip's accessible name states the account and any organization ("Account menu. Signed in as rob@example.com, managed by Contoso"). Email and organization names are set as text, never markup. The component uses inline Lucide icons only.
 
 The managed state is a placeholder: nothing supplies an organization yet. The Account card in Account settings follows it ("Logged in {email}, managed by {organization}", **Switch account** disabled). Implemented by `VibeRails/wwwroot/js/modules/account-nav.js`, the `data-account-menu-host` markup in `index.html` and the `.app-account*` rules in `style.css`; the data contract is in `VibeRails/wwwroot/AGENTS.md`.
+
+#### Desktop Pro upgrade prompt
+
+Remote Boards, remote terminals, session sharing and card sharing are Vibe Rails Pro features; everything local stays free. When a signed-out or Free account activates one of them, or the hosted server refuses the action for the plan, one shared dialog replaces the action. It opens only from a user action, never from polling or a status read. Locked controls stay visible and enabled, so the feature stays discoverable.
+
+| State | Title | Actions |
+| --- | --- | --- |
+| Signed out | "Sign in to use remote Boards" | **Not now**, then primary **Sign in** (the existing sign-in dialog, which also creates accounts) |
+| Free | "Remote Boards need Vibe Rails Pro" | **Not now**, then primary **Upgrade to Pro** |
+| Inactive subscription | "Your Vibe Rails Pro subscription is inactive" | **Not now**, then primary **Manage billing** |
+| The Board's owner pays | "This Board's owner needs Vibe Rails Pro" | **Close** only; the body says "You do not need to upgrade." |
+
+Follow the [Dialogs](#dialogs) standard at 420px: a muted body of two sentences naming the feature and what the primary action does, then a supporting line that every state repeats: "Everything local stays free, and nothing was deleted." **Upgrade to Pro** and **Manage billing** are links styled as primary buttons that open the Billing page in the browser. The link names the feature (`?feature=remote-boards`) and carries no board, session, sharing link or key. After that click a secondary **Check again** appears between the safe and primary actions. It reads the plan again, reports "Checking your plan…" and any failure in a polite status line, and on success closes the dialog with the toast "Remote Boards are ready to use." A return from the browser or anything in a URL is never treated as proof of payment.
+
+A locked control carries a **Pro** badge in the Active tone (`.badge.pro-badge`) after its label or inside its button. The badge is hidden while the feature is available or the plan is unknown. A paused Board sync states its reason inline with a small secondary **Upgrade** button for the account that pays, and no action when the Board's owner pays.
+
+Implemented by `VibeRails/wwwroot/js/modules/pro-upgrade.js` on `app.showModal`, with `.pro-badge` and `.pro-upgrade-dialog` in `style.css`; the data contract is in `VibeRails/wwwroot/AGENTS.md`.
+
+On viberails.ai the same prompt is an inline alert in the Neutral tone, not a dialog: the Billing page shows it when a paid page sends a Free account there (`/Billing?feature=remote-boards`), ending in a link back to the feature once Pro is active, and a one-sentence notice with an **Upgrade to Pro** link sits above the Boards list and on the two sharing pages. Implemented in `VibeRails-Front/Views/Billing/Index.cshtml` and the Boards and sharing views.
 
 ## Decisions made while merging
 

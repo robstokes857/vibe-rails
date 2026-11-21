@@ -336,3 +336,62 @@ test('a dirty settings form blocks navigation, asks in-app, and replays on yes',
     controller._settingsDirty = true;
     assert.equal(controller._guardSettingsNavigation({ from: 'dashboard', retry }), true);
 });
+
+test('switching remote access on needs remote terminals, then a password; switching off always works', () => {
+    globalThis.window = { VibeRailsPerformance: null };
+    const features = available => ({ features: { remote_terminals: available } });
+    const modals = [];
+    const toasts = [];
+    const app = {
+        entitlements: features(false), appSettings: { apiKey: '' },
+        showModal: (title, html) => { modals.push({ title, html }); },
+        showToast: (...args) => toasts.push(args)
+    };
+    const controller = new SettingsController(app);
+    const dirtyChecks = [];
+    controller._updateDirtyState = root => dirtyChecks.push(root);
+    const root = {};
+    const toggle = { checked: true };
+
+    // Signed out or Free: the shared prompt opens and the switch goes back to off.
+    controller._pinIsSet = true;
+    controller._guardRemoteAccess(root, toggle);
+    assert.equal(toggle.checked, false);
+    assert.equal(modals.length, 1);
+    assert.equal(modals[0].title, 'Sign in to use remote terminals');
+    assert.deepEqual(toasts, [], 'the prompt replaces the password reminder');
+    assert.deepEqual(dirtyChecks, [root]);
+
+    // Switching off is never intercepted, whatever the plan.
+    controller._guardRemoteAccess(root, toggle);
+    assert.equal(modals.length, 1);
+    assert.equal(dirtyChecks.length, 1);
+
+    // Available (Pro, or an unknown plan): the existing password rule still applies.
+    for (const entitlements of [features(true), undefined]) {
+        app.entitlements = entitlements;
+        controller._pinIsSet = true;
+        toggle.checked = true;
+        controller._guardRemoteAccess(root, toggle);
+        assert.equal(toggle.checked, true);
+        controller._pinIsSet = false;
+        controller._guardRemoteAccess(root, toggle);
+        assert.equal(toggle.checked, false);
+    }
+    assert.equal(modals.length, 1);
+    assert.equal(toasts.length, 2);
+    assert.equal(toasts[0][0], 'Remote Access');
+});
+
+test('locked hosted features carry a hidden Pro badge that the app reveals', () => {
+    const html = readFileSync(indexPath, 'utf8');
+    const badge = feature => new RegExp(`<span class="badge pro-badge[^"]*" data-pro-badge="${feature}" title="Part of Vibe Rails Pro" hidden>Pro</span>`);
+    const app = templateOf(html, 'settings-template');
+    assert.match(app.slice(app.indexOf('id="setting-remote-access"'), app.indexOf('id="setting-performance-mode"')), badge('remote_terminals'));
+    // Remote boards stays unlocked: listing and deleting hosted boards are free.
+    const board = templateOf(html, 'board-template');
+    assert.doesNotMatch(board.slice(board.indexOf('data-board-action="remote-boards"'), board.indexOf('data-board-stats')), /pro-badge/);
+    const css = readFileSync(path.resolve('VibeRails/wwwroot/style.css'), 'utf8');
+    assert.match(css, /\.badge-cli, \.pro-badge \{\s*color: var\(--tone-active-fg\);/, 'the badge uses the Active tone');
+    assert.match(css, /\.pro-upgrade-dialog \{\s*max-width: 420px;/);
+});

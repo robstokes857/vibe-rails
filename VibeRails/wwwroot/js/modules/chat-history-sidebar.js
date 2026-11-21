@@ -141,7 +141,7 @@ export class ChatHistorySidebar {
                     <div class="ch-context-menu-item text-danger" data-action="delete">Delete</div>
                     <div class="ch-context-menu-divider"></div>
                     <div class="ch-context-menu-item" data-action="get-session">Replay Session</div>
-                    <div class="ch-context-menu-item" data-action="share-session">Share session</div>
+                    <div class="ch-context-menu-item" data-action="share-session">Share session <span class="badge pro-badge ms-1" data-pro-badge="session_sharing" title="Part of Vibe Rails Pro" hidden>Pro</span></div>
                 </div>
             </div>`;
     }
@@ -165,6 +165,7 @@ export class ChatHistorySidebar {
         this.cardPickerHost = root.querySelector('[data-history-card-picker]');
         this.clearFiltersButton = root.querySelector('#ch-clear-filters');
         this.resultsLabel = root.querySelector('#ch-filter-results');
+        this.app?.updateProBadges?.(root);
         this._mountCardPicker();
         this.clearFiltersButton?.addEventListener('click', () => this._clearFilters());
         this.filterDrawerToggle = root.querySelector('#ch-filter-drawer-toggle');

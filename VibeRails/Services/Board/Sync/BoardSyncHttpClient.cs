@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Board.Sync;
@@ -41,9 +42,11 @@ public interface IBoardSyncClient
 /// HTTPS client for the desktop Board sync API. The endpoint and the API key are both resolved on
 /// every call (a changed destination interrupts this exchange and is republished next tick), the key is sent in
 /// <c>X-Api-Key</c>, and the named client follows no redirects: a redirect would replay the key and
-/// body to wherever it pointed.
+/// body to wherever it pointed. A <c>pro_required</c> denial is reported as its own code, before
+/// the generic 401/403 wording, and noted on <paramref name="entitlements"/> when this account pays.
 /// </summary>
-public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Func<Uri?> endpoint, Func<string?> apiKey, RemoteSafetyClient? safety = null) : IBoardSyncClient
+public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Func<Uri?> endpoint, Func<string?> apiKey, RemoteSafetyClient? safety = null,
+    IAccountEntitlements? entitlements = null) : IBoardSyncClient
 {
     public const string HttpClientName = "board-sync";
 
@@ -145,7 +148,11 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
         using var client = httpClientFactory.CreateClient(HttpClientName);
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
         if (!response.IsSuccessStatusCode)
+        {
+            if (response.StatusCode == HttpStatusCode.Forbidden && ProRequired(response, await ReadErrorAsync(response, deadline.Token)) is { } denied)
+                throw denied;
             throw new BoardSyncClientException($"Card content upload returned HTTP {(int)response.StatusCode}; local content is retained.", "content_upload_failed", (int)response.StatusCode);
+        }
         var ack = await ReadJsonAsync(response, BoardSyncJsonContext.Default.BoardSyncContentPartWire, deadline.Token);
         if (ack is null || ack.Sha256 != part.Sha256 || ack.Bytes != part.Bytes || !ack.ChecksumsVerified)
             throw new BoardSyncClientException("The server did not verify this content part.", "invalid_response");
@@ -216,8 +223,12 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
 
                 // Only a bounded, recognised code changes what the desktop does; the message is
                 // always the desktop's own wording, so remote prose never reaches logs or the UI.
-                var (code, entryId) = await ReadErrorAsync(response, timeout.Token);
+                var error = await ReadErrorAsync(response, timeout.Token);
+                var (code, entryId) = (error.Code, error.EntryId);
                 if (RemoteSafetyClient.IsSafetyCode(code)) throw RemoteSafetyClient.Failure(code!);
+                // The plan refused the feature; the key is fine. Checked after the safety pause and
+                // before the generic wording, which would send the user to their API key.
+                if (ProRequired(response, error) is { } denied) throw denied;
                 if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
                     throw new BoardSyncClientException("viberails.ai rejected the API key. Check it in Settings.", "unauthorized", status);
                 if (response.StatusCode == HttpStatusCode.BadRequest && code == BoardSyncWire.CodeInvalidEntry && entryId is not null)
@@ -254,14 +265,29 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
         }
     }
 
+    /// <summary>
+    /// The typed plan denial of a 403, from its header or its body code. This account's own denial
+    /// is noted at once, so the scheduler and the launch poll stop without another request.
+    /// </summary>
+    private BoardSyncClientException? ProRequired(HttpResponseMessage response, BoardSyncError error)
+    {
+        if (response.StatusCode != HttpStatusCode.Forbidden
+            || ProDenial.From(ProDenial.HasHeader(response), error.Code, error.Feature, error.Payer, ProFeatures.RemoteBoards) is not { } denial)
+            return null;
+        if (denial.AccountPays) entitlements?.NoteDenied(denial.Feature);
+        return BoardSyncProPause.Failure(denial);
+    }
+
+    private readonly record struct BoardSyncError(string? Code, string? EntryId, string? Feature = null, string? Payer = null);
+
     // Only these bounded, known machine-readable fields affect what the desktop does: a recognised
-    // `code` and, for invalid_entry, a well-formed `entryId`. Remote prose is never trusted,
-    // retained, or shown; an oversized, malformed or unknown error reads as (null, null) and
-    // falls back to the ordinary retryable HTTP error.
-    private static async Task<(string? Code, string? EntryId)> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    // `code`, for invalid_entry a well-formed `entryId`, and for pro_required its `feature` and
+    // `payer`. Remote prose is never trusted, retained, or shown; an oversized, malformed or unknown
+    // error reads as (null, null) and falls back to the ordinary retryable HTTP error.
+    private static async Task<BoardSyncError> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         if (response.Content.Headers.ContentLength > MaxErrorResponseBytes)
-            return (null, null);
+            return default;
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         var buffer = new byte[MaxErrorResponseBytes + 1];
         var length = 0;
@@ -271,39 +297,44 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
             if (read == 0) break;
             length += read;
         }
-        if (length > MaxErrorResponseBytes) return (null, null);
+        if (length > MaxErrorResponseBytes) return default;
         try
         {
             using var document = JsonDocument.Parse(buffer.AsMemory(0, length));
-            if (document.RootElement.ValueKind != JsonValueKind.Object) return (null, null);
-            string? code = null, entryId = null;
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return default;
+            string? code = null, entryId = null, feature = null, payer = null;
             var hasCode = false;
             var hasId = false;
             foreach (var property in document.RootElement.EnumerateObject())
             {
                 if (property.NameEquals("code"))
                 {
-                    if (hasCode || property.Value.ValueKind != JsonValueKind.String) return (null, null);
+                    if (hasCode || property.Value.ValueKind != JsonValueKind.String) return default;
                     hasCode = true;
                     code = property.Value.GetString();
                 }
                 else if (property.NameEquals("entryId"))
                 {
-                    if (hasId || property.Value.ValueKind != JsonValueKind.String) return (null, null);
+                    if (hasId || property.Value.ValueKind != JsonValueKind.String) return default;
                     hasId = true;
                     entryId = property.Value.GetString();
                 }
+                else if (property.NameEquals("feature") && property.Value.ValueKind == JsonValueKind.String)
+                    feature = property.Value.GetString();
+                else if (property.NameEquals("payer") && property.Value.ValueKind == JsonValueKind.String)
+                    payer = property.Value.GetString();
             }
+            if (code == ProDenial.Code) return new(code, null, feature, payer);
             if (!RemoteSafetyClient.IsSafetyCode(code) && code is not (BoardSyncWire.CodeInvalidEntry or BoardSyncWire.CodeInvalidRequest
                 or BoardSyncWire.CodeBoardNotFound or BoardSyncWire.CodeWriteConflict))
-                return (null, null);
+                return default;
             var wellFormedId = entryId is { Length: > 0 and <= BoardSyncWire.MaxIdLength }
                 && entryId.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-');
-            return (code, wellFormedId ? entryId : null);
+            return new(code, wellFormedId ? entryId : null);
         }
         catch (JsonException)
         {
-            return (null, null);
+            return default;
         }
     }
 
@@ -335,7 +366,9 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
     }
 
     /// <summary>The production instance: named client, endpoint and key both re-read per call.</summary>
-    public static BoardSyncHttpClient FromConfiguration(IHttpClientFactory factory, Microsoft.Extensions.Configuration.IConfiguration configuration) =>
+    public static BoardSyncHttpClient FromConfiguration(IHttpClientFactory factory, Microsoft.Extensions.Configuration.IConfiguration configuration,
+        IAccountEntitlements? entitlements = null) =>
         new(factory, () => BoardSyncEndpoint.FromConfiguration(configuration), static () => ParserConfigs.GetApiKey(),
-            new RemoteSafetyClient(() => factory.CreateClient(HttpClientName), () => BoardSyncEndpoint.FromConfiguration(configuration), static () => ParserConfigs.GetApiKey()));
+            new RemoteSafetyClient(() => factory.CreateClient(HttpClientName), () => BoardSyncEndpoint.FromConfiguration(configuration), static () => ParserConfigs.GetApiKey()),
+            entitlements);
 }

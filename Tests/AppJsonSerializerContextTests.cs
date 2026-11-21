@@ -393,4 +393,34 @@ public sealed class AppJsonSerializerContextTests
         Assert.Contains("\"timedOut\":false", json);
     }
 
+    [Fact]
+    public void AccountEntitlements_KeepTheShapeTheDashboardReads()
+    {
+        // camelCase properties, and the four feature keys exactly as the hosted service names them.
+        var json = JsonSerializer.Serialize(
+            new VibeRails.Services.Integrations.VibeCodeRemote.AccountEntitlements("free", true,
+                new(RemoteBoards: false, RemoteTerminals: true, SessionSharing: false, CardSharing: true),
+                "https://viberails.ai/Billing", new DateTime(2026, 11, 20, 12, 0, 0, DateTimeKind.Utc)),
+            AppJsonSerializerContext.Default.AccountEntitlements);
+
+        Assert.Equal(
+            """{"state":"free","enforced":true,"features":{"remote_boards":false,"remote_terminals":true,"session_sharing":false,"card_sharing":true},"billingUrl":"https://viberails.ai/Billing","checkedUtc":"2026-11-20T12:00:00Z"}""",
+            json);
+    }
+
+    [Fact]
+    public void ProRequiredResponse_AndThePausedSyncStatus_KeepTheNamesTheDashboardReads()
+    {
+        var denied = JsonSerializer.Serialize(
+            new ProRequiredResponse("Remote Boards need Vibe Rails Pro.", "pro_required", "remote_boards", "board_owner"),
+            AppJsonSerializerContext.Default.ProRequiredResponse);
+        Assert.Equal("""{"error":"Remote Boards need Vibe Rails Pro.","code":"pro_required","feature":"remote_boards","payer":"board_owner"}""", denied);
+
+        var status = JsonSerializer.Serialize(
+            new BoardSyncStatusResponse("board", true, true, null, null, 0, 0, null, "paused", true, PausedCode: "pro_required", PausedPayer: "account"),
+            AppJsonSerializerContext.Default.BoardSyncStatusResponse);
+        Assert.Contains("\"pausedCode\":\"pro_required\"", status);
+        Assert.Contains("\"pausedPayer\":\"account\"", status);
+    }
+
 }

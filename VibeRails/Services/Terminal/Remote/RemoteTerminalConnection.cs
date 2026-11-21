@@ -5,6 +5,7 @@ using System.Threading.Channels;
 using Serilog;
 using VibeRails.Utils;
 using VibeRails.Services.Board.Sync;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 
 namespace VibeRails.Services.Terminal;
 
@@ -25,7 +26,10 @@ namespace VibeRails.Services.Terminal;
 /// <item>No response, 429 or 5xx: the host is unavailable. The machine-wide
 /// <see cref="RemoteRelayBackoff"/> paces these, so many terminals do not each probe it.</item>
 /// </list>
-/// Only <see cref="DisposeAsync"/> or a rejection stops the loop.
+/// Only <see cref="DisposeAsync"/> or a rejection stops the loop. The plan's typed denial is a
+/// rejection too: a 403 handshake carrying <c>X-VibeRails-Denial: pro_required</c>, or a live
+/// socket closed with 1008 and reason <c>Vibe Rails Pro required</c>, is noted on the account's
+/// entitlements and never retried. Nothing is written into the PTY; the local terminal keeps running.
 /// </summary>
 public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
 {
@@ -41,6 +45,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
 
     private readonly Func<CancellationToken, Task<bool>>? _reregister;
     private readonly RemoteRelayBackoff _hostBackoff;
+    private readonly IAccountEntitlements? _entitlements;
 
     private readonly Channel<OutboundFrame> _outbound = Channel.CreateBounded<OutboundFrame>(
         new BoundedChannelOptions(MaxBufferedFrames)
@@ -69,11 +74,14 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
     /// relay accepted it. Supply it only for a session that was registered in the first place.
     /// </param>
     /// <param name="hostBackoff">Host-wide reconnect pacing; defaults to <see cref="RemoteRelayBackoff.Shared"/>.</param>
-    public RemoteTerminalConnection(Func<CancellationToken, Task<bool>>? reregister, RemoteRelayBackoff? hostBackoff = null, string? safetyStateDirectory = null)
+    /// <param name="entitlements">Told when the relay answers that remote terminals need Pro.</param>
+    public RemoteTerminalConnection(Func<CancellationToken, Task<bool>>? reregister, RemoteRelayBackoff? hostBackoff = null, string? safetyStateDirectory = null,
+        IAccountEntitlements? entitlements = null)
     {
         _reregister = reregister;
         _safetyStateDirectory = safetyStateDirectory;
         _hostBackoff = hostBackoff ?? RemoteRelayBackoff.Shared;
+        _entitlements = entitlements;
     }
 
     public event Action<byte[]>? OnInputReceived;
@@ -109,7 +117,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
 
     internal enum HandshakeOutcome { Connected, SessionMissing, Rejected, HostUnavailable, Cancelled }
 
-    internal readonly record struct HandshakeResult(HandshakeOutcome Outcome, int StatusCode = 0, TimeSpan? RetryAfter = null);
+    internal readonly record struct HandshakeResult(HandshakeOutcome Outcome, int StatusCode = 0, TimeSpan? RetryAfter = null, bool ProRequired = false);
 
     /// <summary>Maps a failed handshake's HTTP status (0 when there was no response) to what to do next.</summary>
     internal static HandshakeOutcome ClassifyFailure(int statusCode) => statusCode switch
@@ -128,9 +136,12 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
             return result;
 
         bool registered;
+        var refusedByPlan = false;
         try
         {
             registered = await _reregister(ct);
+            // A registration the plan refused cannot succeed by retrying the handshake either.
+            refusedByPlan = !registered && _entitlements is not null && !await _entitlements.AllowsAsync(ProFeatures.RemoteTerminals, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -141,6 +152,9 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
             Log.Warning(ex, "[Remote] Re-registering session {SessionId} failed", _sessionId![..8]);
             registered = false;
         }
+
+        if (refusedByPlan)
+            return new(HandshakeOutcome.Rejected, 403, ProRequired: true);
 
         if (!registered)
         {
@@ -211,11 +225,19 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
         {
             var status = (int)socket.HttpStatusCode;
             var retryAfter = ParseRetryAfter(socket.HttpResponseHeaders, DateTimeOffset.UtcNow);
+            // The refused handshake's body is unreadable here; the denial header is the signal.
+            var proRequired = status == 403 && ProDenial.HasHeader(socket.HttpResponseHeaders);
             socket.Dispose();
             if (ct.IsCancellationRequested)
                 return new(HandshakeOutcome.Cancelled);
 
             var outcome = ex is BoardSyncClientException policyError ? policyError.Code == "account_remote_access_unavailable" ? HandshakeOutcome.HostUnavailable : HandshakeOutcome.Rejected : ClassifyFailure(status);
+            if (proRequired)
+            {
+                // 403 is already a rejection, so this terminal makes no further attempt.
+                NoteProRequired();
+                return new(outcome, status, retryAfter, ProRequired: true);
+            }
             if (ex is WebSocketException or OperationCanceledException or HttpRequestException)
             {
                 // Expected while the relay is down or has lost the session: one line, no stack.
@@ -228,6 +250,17 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
             }
             return new(outcome, status, retryAfter);
         }
+    }
+
+    /// <summary>
+    /// The relay said remote terminals need Pro. Recorded so later terminals skip the relay, and
+    /// logged as information: the local terminal is untouched and nothing is written to its screen.
+    /// </summary>
+    private void NoteProRequired()
+    {
+        _entitlements?.NoteDenied(ProFeatures.RemoteTerminals);
+        Log.Information("[Remote] Remote access for session {SessionId} is off: remote terminals need Vibe Rails Pro. The local terminal keeps running",
+            _sessionId is { Length: >= 8 } id ? id[..8] : _sessionId);
     }
 
     /// <summary>Reads a Retry-After header in either form (delta-seconds or an HTTP date).</summary>
@@ -276,6 +309,10 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
             }
 
             var policyClosed = socket.CloseStatus == WebSocketCloseStatus.PolicyViolation;
+            // A live relay whose owner lost Pro is closed with 1008 and this exact reason. Any
+            // policy close already ends the loop below; this one also tells the entitlement snapshot.
+            if (policyClosed && socket.CloseStatusDescription == ProDenial.CloseReason)
+                NoteProRequired();
             try { socket.Dispose(); } catch { }
             if (ReferenceEquals(_socket, socket))
                 _socket = null;
@@ -326,6 +363,9 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
                 case HandshakeOutcome.Connected:
                     Log.Information("[Remote] Reconnected for session {SessionId}", _sessionId![..8]);
                     return true;
+                case HandshakeOutcome.Rejected when result.ProRequired:
+                    // Already noted and logged as information; not a relay fault.
+                    return false;
                 case HandshakeOutcome.Rejected:
                     Log.Warning(
                         "[Remote] Relay rejected session {SessionId} (HTTP {Status}); remote access for this terminal stays off until it is restarted",

@@ -1,4 +1,5 @@
 using Serilog;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 
 namespace VibeRails.Services.Board.Sync;
 
@@ -43,6 +44,8 @@ public sealed class BoardRemoteLaunchService(IBoardStore store, IBoardSyncClient
             try { status = await sync.SyncNowAsync(project, link.BoardId, ct); break; }
             catch (BoardValidationException) when (attempt < 19) { await Task.Delay(500, ct); }
             catch (BoardValidationException) { return Result("sync_failed"); }
+            // The plan refused the sync: waiting cannot change that, and nothing is launched from a stale card.
+            catch (BoardSyncClientException ex) when (ex.Code == ProDenial.Code) { return Result("sync_failed"); }
         }
         if (status is null || status.LastError is not null || status.Cursor < command.RequiredSeq || status.Unsent != 0)
             return Result("sync_failed");
@@ -65,31 +68,55 @@ public sealed class BoardRemoteLaunchService(IBoardStore store, IBoardSyncClient
     }
 }
 
-/// <summary>Outbound live control, only while this project's root backend is open.</summary>
-public sealed class BoardRemoteLaunchHostedService(IServiceScopeFactory scopes, IBoardSyncClient client) : BackgroundService
+/// <summary>
+/// Outbound live control, only while this project's root backend is open. Remote Boards are a Pro
+/// feature of the hosted service: while the account's plan is known not to include them the poll
+/// is skipped, and a <c>pro_required</c> answer is logged once, not as a Warning every ten seconds.
+/// </summary>
+public sealed class BoardRemoteLaunchHostedService(IServiceScopeFactory scopes, IBoardSyncClient client,
+    IAccountEntitlements? entitlements = null) : BackgroundService
 {
     private readonly Guid instance = Guid.NewGuid();
     private readonly Dictionary<Guid, DateTime> handled = [];
+    private DateTime proRecheckUtc = DateTime.MinValue;
+    private bool proPauseLogged;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            try
-            {
-                if (client.IsConfigured && client.DestinationKey is { } destination)
-                    await PollAsync(destination, stoppingToken);
-            }
+            try { await PollOnceAsync(stoppingToken); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
-            catch (BoardSyncClientException ex)
-            {
-                // Old hosted versions answer 404 until the companion release is deployed.
-                if (ex.Status != 404) Log.Warning("[BoardRemoteLaunch] Poll failed: {Code}", ex.Code);
-            }
-            catch (Exception ex) { Log.Warning(ex, "[BoardRemoteLaunch] Live launch poll failed"); }
             try { await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
         }
+    }
+
+    /// <summary>One poll. Only cancellation escapes; every failure is logged and left for the next turn.</summary>
+    internal async Task PollOnceAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            if (client.IsConfigured && client.DestinationKey is { } destination)
+                await PollAsync(destination, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
+        catch (BoardSyncClientException ex) when (ex.Code == ProDenial.Code)
+        {
+            // This account's denial goes into the entitlement snapshot (the HTTP client has already
+            // noted it; repeating it is harmless), so the next polls are skipped without a request.
+            // Any other payer waits here before it is asked again.
+            if (ex.Payer == ProDenial.BoardOwnerPayer || entitlements is null) proRecheckUtc = DateTime.UtcNow + BoardSyncProPause.OwnerRecheck;
+            else entitlements.NoteDenied(ex.Feature ?? ProFeatures.RemoteBoards);
+            if (!proPauseLogged) Log.Information("[BoardRemoteLaunch] Remote Start work is paused: Vibe Rails Pro is required ({Payer})", ex.Payer);
+            proPauseLogged = true;
+        }
+        catch (BoardSyncClientException ex)
+        {
+            // Old hosted versions answer 404 until the companion release is deployed.
+            if (ex.Status != 404) Log.Warning("[BoardRemoteLaunch] Poll failed: {Code}", ex.Code);
+        }
+        catch (Exception ex) { Log.Warning(ex, "[BoardRemoteLaunch] Live launch poll failed"); }
     }
 
     private async Task PollAsync(string destination, CancellationToken ct)
@@ -106,9 +133,12 @@ public sealed class BoardRemoteLaunchHostedService(IServiceScopeFactory scopes, 
                 && Guid.TryParse(link.RemoteBoardId, out var remote)) ids.Add(remote);
         }
         if (ids.Count == 0) return;
+        // Asked only when there is a board to advertise; the answer is cached between polls.
+        if (DateTime.UtcNow < proRecheckUtc || entitlements is not null && !await entitlements.AllowsAsync(ProFeatures.RemoteBoards, ct)) return;
         var label = Environment.MachineName + " · " + Path.GetFileName(project.TrimEnd(Path.DirectorySeparatorChar));
         if (label.Length > 100) label = label[..100];
         var response = await client.PollLaunchAsync(new(instance, label, ids), ct, destination);
+        proPauseLogged = false;
         if (response.Command is not { } command || client.DestinationKey != destination || !ids.Contains(command.BoardId)) return;
         foreach (var id in handled.Where(p => DateTime.UtcNow - p.Value > TimeSpan.FromMinutes(15)).Select(p => p.Key).ToList()) handled.Remove(id);
         if (handled.Count >= 1024 || !handled.TryAdd(command.Id, DateTime.UtcNow)) return;

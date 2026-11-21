@@ -444,7 +444,7 @@ test('Back restores the selected rule file only after the parent page finishes l
     const app = Object.create(VibeControlApp.prototype);
     let finishLoad;
     app.dashboardController = { loadDashboard: () => new Promise(resolve => { finishLoad = resolve; }) };
-    app.updateActiveSubNav = app.applyViewLayoutState = app.queueScrollPageToTop = () => {};
+    app.updateActiveSubNav = app.applyViewLayoutState = app.queueScrollPageToTop = app.updateProBadges = () => {};
     let opened = 0;
     app.agentController = { restoreRuleManager: () => { opened++; } };
     const data = { restoreRuleManager: true, selectedAgentPath: 'C:\\repo\\Tests\\vc.rules.md' };
@@ -463,7 +463,7 @@ test('A stale parent-page load cannot restore rule selection after a later navig
     const app = Object.create(VibeControlApp.prototype);
     let finishLoad;
     app.dashboardController = { loadDashboard: () => new Promise(resolve => { finishLoad = resolve; }) };
-    app.updateActiveSubNav = app.applyViewLayoutState = app.queueScrollPageToTop = () => {};
+    app.updateActiveSubNav = app.applyViewLayoutState = app.queueScrollPageToTop = app.updateProBadges = () => {};
     app.agentController = { restoreRuleManager: () => assert.fail('stale load must not restore the manager') };
     const data = { restoreRuleManager: true };
     app.currentView = 'dashboard';

@@ -141,14 +141,21 @@ public sealed partial class BoardSyncJsonContext : JsonSerializerContext;
 /// of the desktop's own: <c>no_api_key</c>, <c>no_endpoint</c>, <c>destination_changed</c>,
 /// <c>unauthorized</c>, <c>network</c>, <c>response_too_large</c>, <c>invalid_response</c>,
 /// <c>http_NNN</c>. <see cref="EntryId"/> names the rejected entry of an <c>invalid_entry</c>.
+/// <c>pro_required</c> is the plan's typed denial: <see cref="Feature"/> and <see cref="Payer"/>
+/// say which hosted feature needs Pro and whose plan it is (see <see cref="BoardSyncProPause"/>).
 /// </summary>
-public sealed class BoardSyncClientException(string message, string code, int status = 0, string? entryId = null, TimeSpan? retryAfter = null) : Exception(message)
+public sealed class BoardSyncClientException(string message, string code, int status = 0, string? entryId = null, TimeSpan? retryAfter = null,
+    string? feature = null, string? payer = null) : Exception(message)
 {
     public string Code { get; } = code;
     public int Status { get; } = status;
     public string? EntryId { get; } = entryId;
     /// <summary>A bounded standard Retry-After delay for HTTP 429, without remote body text.</summary>
     public TimeSpan? RetryAfter { get; } = retryAfter;
+    /// <summary>The hosted feature a <c>pro_required</c> denial names, such as <c>remote_boards</c>.</summary>
+    public string? Feature { get; } = feature;
+    /// <summary><c>account</c> or <c>board_owner</c> for a <c>pro_required</c> denial.</summary>
+    public string? Payer { get; } = payer;
 }
 
 /// <summary>

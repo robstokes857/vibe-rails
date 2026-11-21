@@ -5,6 +5,7 @@ import { boardTracker } from './board-brand.js';
 import { jobLaunchKind } from './launch-kind.js';
 import { mountLlmPicker } from './pickers/llm-picker.js';
 import { renderBoardLaunchOptions, bindBoardLaunchOptions, readBoardLaunchOptions, waitForBoardLaunchDefaults } from './board-launch-options.js';
+import { openProUpgrade, proBadge, requirePro, showProRequired } from './pro-upgrade.js';
 
 // A dedicated board's tracker connection sits under General; a local board offers each as a tab.
 const TRACKER_TABS = [['jira', 'Jira Cloud'], ['ado', 'Azure DevOps']];
@@ -209,15 +210,23 @@ export function mountBoardSync(app, element, boardId, onStatus = () => {}) {
                 ${status.remoteUrl ? `<a href="${escapeHtml(status.remoteUrl)}" target="_blank" rel="noopener noreferrer">Open on viberails.ai</a>` : ''}`;
             return;
         }
+        // The hosted server paused this board's sync for Vibe Rails Pro. Only the account that pays
+        // is offered the upgrade; an invited member waits for the Board's owner.
+        const paused = status.pausedCode !== 'pro_required' ? '' : `<p class="board-editor-muted mb-2" data-board-sync-paused>${
+            status.pausedPayer === 'board_owner'
+                ? 'Sync is paused until this Board\'s owner has Vibe Rails Pro. You do not need to upgrade, and nothing was deleted.'
+                : 'Sync is paused because remote Boards need Vibe Rails Pro. This board stays on this computer, and nothing was deleted.'}
+            ${status.pausedPayer === 'account' ? '<button type="button" class="btn btn-sm btn-outline-primary ms-2" data-board-sync-upgrade>Upgrade</button>' : ''}</p>`;
         content.innerHTML = `
             <label class="form-check mb-2">
                 <input class="form-check-input" type="checkbox" data-board-sync-enabled ${status.enabled ? 'checked' : ''}>
-                <span class="form-check-label">Sync this board with viberails.ai</span>
+                <span class="form-check-label">Sync this board with viberails.ai ${proBadge(app, 'remote_boards')}</span>
             </label>
             <p class="board-editor-muted mb-2">${status.enabled
                 ? status.configured ? 'This board syncs while a VibeRails backend is open.' : 'Sign in to your account in Settings to start syncing.'
                 : 'This board stays local. A previously hosted copy remains on viberails.ai until you delete it there.'}</p>
-            ${status.lastError ? `<p class="text-warning" role="alert">${escapeHtml(status.lastError)}</p>` : ''}
+            ${status.lastError && !paused ? `<p class="text-warning" role="alert">${escapeHtml(status.lastError)}</p>` : ''}
+            ${paused}
             ${status.remoteUrl ? `<a href="${escapeHtml(status.remoteUrl)}" target="_blank" rel="noopener noreferrer">Open hosted board</a>` : ''}
             ${status.enabled && status.configured ? '<button type="button" class="btn btn-sm btn-outline-secondary ms-2" data-board-sync-now>Sync now</button>' : ''}`;
     };
@@ -234,14 +243,16 @@ export function mountBoardSync(app, element, boardId, onStatus = () => {}) {
     };
     const change = async event => {
         if (!event.target.matches('[data-board-sync-enabled]') || busy) return;
-        busy = true;
         const enabled = event.target.checked;
+        // Turning sync on needs remote Boards; turning it off always works.
+        if (enabled && !requirePro(app, 'remote_boards')) { event.target.checked = false; return; }
+        busy = true;
         event.target.disabled = true;
         try {
             const status = await BoardApi.setBoardSyncAsync(boardId, enabled);
             if (alive()) { render(status); app.showToast('Board', enabled ? 'Board sync enabled.' : 'Board sync disabled.', 'success'); }
         } catch (error) {
-            if (alive()) app.showToast('Board', error?.message || 'Sync setting could not be saved.', 'error');
+            if (alive() && !showProRequired(app, 'remote_boards', error)) app.showToast('Board', error?.message || 'Sync setting could not be saved.', 'error');
             // Publication can fail after the choice was saved. Read the stored setting again
             // instead of assuming the request rolled it back.
             await reload();
@@ -251,14 +262,16 @@ export function mountBoardSync(app, element, boardId, onStatus = () => {}) {
         }
     };
     const click = async event => {
-        if (!event.target.closest('[data-board-sync-now]') || busy) return;
+        // The prompt opens only from this button, never from a status read.
+        if (event.target.closest('[data-board-sync-upgrade]')) { openProUpgrade(app, 'remote_boards'); return; }
+        if (!event.target.closest('[data-board-sync-now]') || busy || !requirePro(app, 'remote_boards')) return;
         busy = true;
         event.target.disabled = true;
         try {
             const status = await BoardApi.syncBoardNowAsync(boardId);
             if (alive()) { render(status); app.showToast('Board', status.lastError || 'Board synced.', status.lastError ? 'warning' : 'success'); }
         } catch (error) {
-            if (alive()) app.showToast('Board', error?.message || 'Sync failed.', 'error');
+            if (alive() && !showProRequired(app, 'remote_boards', error)) app.showToast('Board', error?.message || 'Sync failed.', 'error');
         } finally { busy = false; if (alive()) event.target.disabled = false; }
     };
     element.addEventListener('change', change);

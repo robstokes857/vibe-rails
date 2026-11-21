@@ -306,6 +306,8 @@ middleware serves their paths rather than registering individual API endpoints.
 | GET | `/api/v1/board/cards/{card}/launches/runs` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
 | POST | `/api/v1/board/cards/{card}/launches/{entry}/skip` | [BoardLaunchRoutes.cs](VibeRails/Routes/BoardLaunchRoutes.cs); root only |
 | OPTIONS | `*` | [CookieAuthMiddleware.cs](VibeRails/Middleware/CookieAuthMiddleware.cs); global bypass, not a business mapping |
+| GET | `/api/v1/account/entitlements` | [AccountEntitlementRoutes.cs](VibeRails/Routes/AccountEntitlementRoutes.cs); root only, both credentials; always 200 |
+| POST | `/api/v1/account/entitlements/refresh` | [AccountEntitlementRoutes.cs](VibeRails/Routes/AccountEntitlementRoutes.cs); root only, both credentials; always 200 |
 | GET | `/api/v1/agent-tools/terminal` | [AgentToolRoutes.cs](VibeRails/Routes/AgentToolRoutes.cs) |
 | POST | `/api/v1/agent-tools/terminal/input` | [AgentToolRoutes.cs](VibeRails/Routes/AgentToolRoutes.cs) |
 | POST | `/api/v1/agent-tools/terminal/open` | [AgentToolRoutes.cs](VibeRails/Routes/AgentToolRoutes.cs) |
@@ -1316,6 +1318,26 @@ application of the target card's edits before ordinary Board launch. Only the ow
 execution; collaborators cannot. Hosted browser requests require Auth0/antiforgery; delivery and
 results bind the owner's API key and desktop instance. Consume once; lost results are Unknown,
 never an automatic second launch. Closing the root stops this capability; there is no daemon.
+
+### Pro plan entitlements and denials
+
+Remote Boards, remote terminals, session sharing and card sharing are Pro features of the hosted
+service, which is the only authority: no local state unlocks a feature. The desktop reads
+`GET {frontend origin}/api/v1/account/entitlements` with header-only `X-Api-Key` through the
+`account-entitlements` client (HTTPS, loopback HTTP for fixtures; 10 seconds, 16 KiB, no redirects,
+cookies or retries) and caches the answer in memory under a hash of origin and key. The key is not
+stored or logged there. Any failed read is `unknown`, which blocks nothing. Root-only
+`GET /api/v1/account/entitlements` and `POST .../refresh` require both local credentials, return
+no-store JSON (state, feature flags, fixed `{origin}/Billing` link, check time) and always answer
+200, so an upstream 401 can never look like a local credential failure. Scoped CLI contacts cannot
+reach them.
+
+A hosted 403 carrying `X-VibeRails-Denial: pro_required` (or that body code) selects fixed local
+wording. Only the bounded `code`, `feature` and `payer` fields are read (4 KiB); remote prose and
+the response's upgrade path are never shown, followed or logged. It is handled after the account
+safety pause and before the generic rejected-key wording, and stops the affected background loop
+instead of retrying. A relay refusal never writes into the PTY. See
+[Pro plan denials](VibeRails/Services/Integrations/VibeCodeRemote/ProPlan.md).
 
 ### Account linking
 
