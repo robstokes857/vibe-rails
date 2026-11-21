@@ -146,6 +146,7 @@ test('adoptLaunchedTab restores authoritative CLI and session identity', async (
             return { tabs: [{
                 tabId: 'tab-1',
                 hasActiveSession: true,
+                statusAvailable: true,
                 sessionId: 'session-1',
                 cli: 'OpenCode',
                 workingDirectory: 'C:/source/project/.workspace/run-1',
@@ -166,6 +167,7 @@ test('adoptLaunchedTab restores authoritative CLI and session identity', async (
     assert.deepEqual(added[0].tabInfo, {
         tabId: 'tab-1',
         hasActiveSession: true,
+        statusAvailable: true,
         sessionId: 'session-1',
         cli: 'OpenCode',
         workingDirectory: 'C:/source/project/.workspace/run-1',
@@ -189,6 +191,7 @@ test('adoptLaunchedTab falls back to the remembered selection when status is una
     assert.equal(added[0].tabInfo.cli, 'codex');
     assert.equal(added[0].tabInfo.sessionId, null);
     assert.equal(added[0].tabInfo.hasActiveSession, true);
+    assert.equal(added[0].tabInfo.statusAvailable, false);
 });
 
 test('title events request refreshed history without focusing or creating tabs', () => {
@@ -263,12 +266,22 @@ test('selectBlankPlaceholderTabIds drops only blank placeholders once an ordinar
         { id: 'saved-pick', hasActiveSession: false, selection: 'preset:preset_1:codex' },
         { id: 'saved-named', hasActiveSession: false, selection: 'preset:preset_1:codex', customLabel: true }
     ];
-    const ids = selectBlankPlaceholderTabIds(states, {
+    const ids = selectBlankPlaceholderTabIds(states.map(state => state && { statusAvailable: true, ...state }), {
         startsHere,
         isPendingClose: (id) => id === 'closing'
     });
     assert.deepEqual(ids, ['blank', 'second-blank', 'saved-pick']);
     assert.deepEqual(selectBlankPlaceholderTabIds(undefined, { startsHere }), []);
+});
+
+test('unavailable, unknown and previously used saved-launch tabs are never placeholder candidates', () => {
+    const states = [
+        { id: 'live', hasActiveSession: true },
+        { id: 'unavailable', hasActiveSession: false, statusAvailable: false },
+        { id: 'unknown', hasActiveSession: false },
+        { id: 'history', hasActiveSession: false, statusAvailable: true, sessionId: 'completed-session' }
+    ].map(state => ({ selection: 'preset:agent:codex', customLabel: false, ...state }));
+    assert.deepEqual(selectBlankPlaceholderTabIds(states, { startsHere }), []);
 });
 
 function createPruningManager({ live }) {
@@ -336,7 +349,7 @@ function pruneManager({ failWith = null } = {}) {
     });
     const add = (id, state = {}) => {
         const ui = { item: { style: {}, classList: { remove() {} }, remove() {} }, panel: { style: {}, remove() {} } };
-        manager.tabs.set(id, { state: { id, ui, ...state }, instance: { setActive() {}, dispose() { log.disposed.push(id); } } });
+        manager.tabs.set(id, { state: { id, ui, statusAvailable: true, hasActiveSession: false, ...state }, instance: { setActive() {}, dispose() { log.disposed.push(id); } } });
         manager.tabOrder.push(id);
     };
     add('live', { hasActiveSession: true, selection: 'base:claude' });
@@ -351,6 +364,7 @@ test('overlapping automatic prunes delete and dispose each placeholder once', as
     assert.deepEqual([...first, ...second].sort(), ['blank-a', 'blank-b']);
     assert.deepEqual(log.disposed.sort(), ['blank-a', 'blank-b']);
     assert.equal(log.deletes.length, 2);
+    assert.ok(log.deletes.every(request => request.startsWith('POST ') && request.endsWith('/prune')));
     assert.deepEqual(manager.tabOrder, ['live']);
     assert.equal(manager._removingTabs.size, 0);
 });
@@ -379,15 +393,17 @@ test('a tab holding a saved launch shows the launch name, not a generic label', 
     assert.equal(manager.getSelectionMeta('preset:preset_1:codex').displayName, 'Saved launch');
 });
 
-test('a refused automatic prune stays off screen, while a close the user asked for still reports', async (t) => {
+test('a refused automatic prune preserves the tab, while a close the user asked for still reports', async (t) => {
     const warn = t.mock.method(console, 'warn', () => {});
     const { manager, add, log } = pruneManager({ failWith: 'API call failed: Internal Server Error' });
     add('blank');
     add('stopped', { selection: 'base:claude' });
-    assert.deepEqual(await manager.pruneBlankPlaceholderTabs(), ['blank']);
+    assert.deepEqual(await manager.pruneBlankPlaceholderTabs(), []);
     assert.deepEqual(log.errors, []);
-    assert.equal(warn.mock.callCount(), 1);
-    assert.equal(manager.tabs.has('blank'), false, 'the local chip still goes');
+    assert.equal(warn.mock.callCount(), 0);
+    assert.equal(manager.tabs.has('blank'), true, 'a stale status must not hide or dispose the viewer');
+    assert.deepEqual(log.disposed, []);
+    assert.equal(manager.tabs.get('blank').state.ui.item.style.display, undefined);
 
     assert.equal(await manager._removeTab('stopped'), true);
     assert.deepEqual(log.errors, ['Failed to close terminal tab: API call failed: Internal Server Error']);

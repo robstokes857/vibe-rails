@@ -16,6 +16,13 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
 {
     public const int Capacity = 3;
 
+    /// <summary>A new token for this HTTP admission; repeated requests must never resume another request's claim.</summary>
+    public static LaunchRequestOwner CreateRequestOwner()
+    {
+        using var process = Process.GetCurrentProcess();
+        return new(Guid.NewGuid().ToString("N"), Environment.ProcessId, process.StartTime.ToUniversalTime());
+    }
+
     /// <summary>
     /// Opens a terminal-picker tab in this backend, in the request that asked for it. The page that
     /// asked is attached to this backend, and it waits for the tab in this backend's tab strip.
@@ -25,8 +32,15 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
     /// </summary>
     /// <param name="run">The run the request just queued or found.</param>
     /// <param name="ct">The host's stopping token, not the request's: a page that navigates away must not abandon a tab that is half open.</param>
-    public Task<LaunchRun> DispatchRequestedTabAsync(LaunchRun run, CancellationToken ct = default) =>
-        run.Status == "queued" && run.Snapshot.IsInteractiveTerminal ? DispatchAsync(run.Id, ct) : Task.FromResult(run);
+    /// <param name="requestOwner">The private token used to atomically claim this request's newly enqueued picker run.</param>
+    public Task<LaunchRun> DispatchRequestedTabAsync(LaunchRun run, CancellationToken ct = default, LaunchRequestOwner? requestOwner = null)
+    {
+        if (!run.Snapshot.IsInteractiveTerminal) return Task.FromResult(run);
+        if (run.Status == "claimed" && requestOwner is not null && run.ClaimToken == requestOwner.Token
+            && run.OwnerPid == requestOwner.Pid && run.OwnerStartedUtc == requestOwner.StartedUtc)
+            return DispatchClaimedAsync(run, new(run.Id, requestOwner.Token), ct);
+        return run.Status == "queued" ? DispatchAsync(run.Id, ct) : Task.FromResult(run);
+    }
 
     public async Task<LaunchRun> DispatchAsync(string id, CancellationToken ct = default)
     {
@@ -44,6 +58,12 @@ public sealed class LaunchDispatcher(ILaunchStore store, LaunchService service, 
         using var process = Process.GetCurrentProcess();
         var claim = await store.TryClaimAsync(id, Capacity, Environment.ProcessId, process.StartTime.ToUniversalTime(), ct);
         if (claim is null) return (await store.GetRunAsync(id, ct))!;
+        return await DispatchClaimedAsync(run, claim, ct);
+    }
+
+    private async Task<LaunchRun> DispatchClaimedAsync(LaunchRun run, LaunchClaim claim, CancellationToken ct)
+    {
+        var id = run.Id;
         try
         {
             await service.ValidateSnapshotAsync(run.Snapshot, ct);

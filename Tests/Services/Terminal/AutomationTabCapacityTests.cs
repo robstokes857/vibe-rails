@@ -820,6 +820,120 @@ public sealed class AutomationTabCapacityTests
         .GetMethod("ReclaimIdleOwnedTabIfFullAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
         .Invoke(host, [TestContext.Current.CancellationToken])!;
 
+    [Theory]
+    [InlineData("blank", true)]
+    [InlineData("active", false)]
+    [InlineData("unavailable", false)]
+    [InlineData("invalid", false)]
+    [InlineData("not-ready", false)]
+    [InlineData("history", false)]
+    [InlineData("unconfirmed", false)]
+    [InlineData("owned", false)]
+    [InlineData("automation", false)]
+    [InlineData("external-session", false)]
+    public async Task UnusedPruneRequiresAConfirmedNeverStartedOrdinaryHost(string scenario, bool removed)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var services = new ServiceCollection().BuildServiceProvider();
+        using var http = new StatusHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/start"))
+            {
+                if (scenario == "unconfirmed") throw new HttpRequestException("lost startup acknowledgement");
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"hasActiveSession\":true,\"sessionId\":\"old-session\"}") };
+            }
+            return new HttpResponseMessage(scenario == "unavailable" ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK)
+            {
+                Content = new StringContent(scenario switch
+                {
+                    "invalid" => "invalid JSON",
+                    "active" => "{\"hasActiveSession\":true,\"canReclaim\":true}",
+                    "not-ready" => "{\"hasActiveSession\":false}",
+                    "external-session" => "{\"hasActiveSession\":false,\"canReclaim\":true,\"sessionId\":\"existing\"}",
+                    _ => "{\"hasActiveSession\":false,\"canReclaim\":true}"
+                })
+            };
+        });
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var process = StartHarmlessProcess();
+        try
+        {
+            AddChild(registry, "tab", process, 1, scenario == "automation" ? new AutomationTabState("run", "Agent") : null,
+                scenario == "owned" ? "script-agent:one" : null);
+            if (scenario == "history") await host.StartSessionAsync("tab", new(Cli: "codex"), ct);
+            if (scenario == "unconfirmed")
+                await Assert.ThrowsAsync<InvalidOperationException>(() => host.StartSessionAsync("tab", new(Cli: "codex"), ct));
+            Assert.Equal(removed, await host.PruneUnusedTabAsync("tab", ct));
+            Assert.Equal(!removed, registry.Contains("tab"));
+            Assert.Equal(removed, process.HasExited);
+        }
+        finally
+        {
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!process.HasExited) { process.Kill(entireProcessTree: true); await process.WaitForExitAsync(ct); }
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnusedPruneAndStartCannotPassEachOther(bool startFirst)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var starts = 0;
+        using var http = new StatusHandler(async (request, token) =>
+        {
+            var start = request.RequestUri!.AbsolutePath.EndsWith("/start");
+            if (start) Interlocked.Increment(ref starts);
+            if (request.RequestUri.AbsolutePath.EndsWith(startFirst ? "/start" : "/status"))
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(token);
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(start
+                ? "{\"hasActiveSession\":true,\"sessionId\":\"session\"}"
+                : "{\"hasActiveSession\":false,\"canReclaim\":true}") };
+        });
+        var host = Host(services, http);
+        var registry = Registry(host);
+        using var process = StartHarmlessProcess();
+        try
+        {
+            AddChild(registry, "tab", process, 1, null);
+            if (startFirst)
+            {
+                var start = host.StartSessionAsync("tab", new(Cli: "codex"), ct);
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+                Assert.False(await host.PruneUnusedTabAsync("tab", ct));
+                release.TrySetResult();
+                await start;
+                Assert.False(process.HasExited);
+            }
+            else
+            {
+                var prune = host.PruneUnusedTabAsync("tab", ct);
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+                var start = host.StartSessionAsync("tab", new(Cli: "codex"), ct);
+                release.TrySetResult();
+                Assert.True(await prune);
+                await Assert.ThrowsAsync<InvalidOperationException>(() => start);
+                Assert.Equal(0, starts);
+            }
+        }
+        finally
+        {
+            release.TrySetResult();
+            registry.Clear();
+            await host.DisposeAsync();
+            if (!process.HasExited) { process.Kill(entireProcessTree: true); await process.WaitForExitAsync(ct); }
+        }
+    }
+
     private static TerminalTabHostService Host(ServiceProvider services, HttpMessageHandler http, IAppEventBus? events = null,
         ILocalToolApiContext? toolContext = null)
     {
@@ -862,7 +976,7 @@ public sealed class AutomationTabCapacityTests
     {
         var start = new ProcessStartInfo
         {
-            FileName = OperatingSystem.IsWindows() ? "powershell.exe" : "/bin/sh",
+            FileName = OperatingSystem.IsWindows() ? VibeRails.Utils.PathExecutable.Resolve("powershell.exe") : "/bin/sh",
             UseShellExecute = false,
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden

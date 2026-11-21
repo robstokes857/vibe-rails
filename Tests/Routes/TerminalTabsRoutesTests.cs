@@ -143,6 +143,26 @@ public sealed class TerminalTabsRoutesTests
             TerminalTabHostService.NormalizeOwner(new string('a', TerminalTabHostService.MaxOwnerLength + 1)));
     }
 
+    [Fact]
+    public async Task AutomaticPruneIsAuthenticatedAndNeverFallsBackToExplicitDelete()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var host = new Mock<ITerminalTabHostService>(MockBehavior.Strict);
+        host.Setup(h => h.PruneUnusedTabAsync("blank", It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        host.Setup(h => h.PruneUnusedTabAsync("busy", It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        await using var app = await StartAsync(host.Object, Mock.Of<IBoardStore>(), ct);
+        using var denied = await Client.PostAsync(new Uri(new Uri(app.Urls.First()), "/api/v1/terminal/tabs/blank/prune"), null, ct);
+        Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+        using var removed = await SendAsync(app, HttpMethod.Post, "/api/v1/terminal/tabs/blank/prune", ct);
+        Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+        using var retained = await SendAsync(app, HttpMethod.Post, "/api/v1/terminal/tabs/busy/prune", ct);
+        Assert.Equal(HttpStatusCode.Conflict, retained.StatusCode);
+        host.Verify(h => h.PruneUnusedTabAsync("blank", It.IsAny<CancellationToken>()), Times.Once);
+        host.Verify(h => h.PruneUnusedTabAsync("busy", It.IsAny<CancellationToken>()), Times.Once);
+        host.VerifyNoOtherCalls();
+        await app.StopAsync(CancellationToken.None);
+    }
+
     private static async Task<WebApplication> StartAsync(ITerminalTabHostService tabHost, IBoardStore board, CancellationToken ct)
     {
         var builder = WebApplication.CreateSlimBuilder();

@@ -145,7 +145,7 @@ test('card attention colors the originating terminal and Automation menu until c
 
 async function openFixture(page, total = 35, presets = []) {
     const normal = { tabId: 'ordinary', sessionId: 'ordinary-session', cli: 'codex',
-        hasActiveSession: true, createdUTC: '2026-09-23T09:00:00Z', workingDirectory: 'C:/fixture' };
+        hasActiveSession: true, statusAvailable: true, createdUTC: '2026-09-23T09:00:00Z', workingDirectory: 'C:/fixture' };
     const tabs = new Map([[normal.tabId, normal]]);
     for (let i = 1; i <= total; i++) {
         const tab = { tabId: `automation-${i}`, sessionId: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
@@ -194,9 +194,18 @@ async function openFixture(page, total = 35, presets = []) {
         if (path === '/api/v1/terminal/tabs' && route.request().method() === 'POST') {
             // "+" opens a backend host with no session: the blank "Select a LLM" placeholder.
             const tab = { tabId: `placeholder-${tabs.size}`, sessionId: null, cli: null,
-                hasActiveSession: false, createdUTC: new Date().toISOString(), workingDirectory: 'C:/fixture' };
+                hasActiveSession: false, statusAvailable: true, createdUTC: new Date().toISOString(), workingDirectory: 'C:/fixture' };
             tabs.set(tab.tabId, tab);
             return route.fulfill({ json: tab });
+        }
+        const prune = path.match(/^\/api\/v1\/terminal\/tabs\/([^/]+)\/prune$/);
+        if (prune) {
+            const tab = tabs.get(prune[1]);
+            if (!tab || tab.statusAvailable !== true || tab.hasActiveSession || tab.sessionId || tab.wasStarted)
+                return route.fulfill({ status: 409, json: { error: 'The terminal tab is not confirmed unused.' } });
+            deleted.push(prune[1]);
+            tabs.delete(prune[1]);
+            return route.fulfill({ status: 204 });
         }
         const snapshotMatch = path.match(/^\/api\/v1\/agent-tools\/terminal\/([^/]+)\/snapshot$/);
         if (snapshotMatch) {
@@ -305,6 +314,82 @@ test('terminal picker starts the same saved launch again as a second tab', async
     await expect(page.getByText(/did not start|waiting to start|unusually long/)).toHaveCount(0);
 });
 
+for (const width of [1280, 390]) test(`terminal picker shows a steady spinner beside Start while opening at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 850 });
+    const fixture = await openFixture(page, 1, [{ id: 'reviewer', name: 'Saved reviewer', cli: 'codex',
+        initialPrompt: 'Review the changes.', revision: 4 }]);
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    let requests = 0;
+    await page.route('**/api/v1/runs', async route => {
+        requests++;
+        await pending;
+        await route.fallback();
+    });
+    await page.locator('#terminal-header-select-ts-control').click();
+    await page.locator('.ts-dropdown .option[data-value="preset:reviewer:codex"]').click();
+    const start = page.locator('#terminal-start-btn');
+    const progress = page.locator('#terminal-start-progress');
+    const before = await start.boundingBox();
+    const panelBefore = await page.locator('.vb-terminal-window-shell').boundingBox();
+    await start.click();
+    try {
+        await expect(start).toBeDisabled();
+        await expect(start).toHaveAttribute('aria-busy', 'true');
+        await expect(progress).toBeVisible();
+        await expect(progress).toHaveText('Opening terminal…');
+        expect(await start.boundingBox()).toEqual(before);
+        expect(await page.locator('.vb-terminal-window-shell').boundingBox()).toEqual(panelBefore);
+        // A routine control refresh and a second programmatic Start cannot clear the guard.
+        await page.evaluate(() => {
+            const manager = window.app.terminalController.manager;
+            manager.updateAddButtonState();
+            void manager.startActiveTab();
+        });
+        await expect(start).toBeDisabled();
+        expect(requests).toBe(1);
+        await page.screenshot({ path: testInfo.outputPath(`terminal-start-loading-${width}.png`) });
+    } finally { release(); }
+    await expect.poll(() => fixture.launches.length).toBe(1);
+    await expect(start).toBeEnabled();
+    await expect(start).toHaveAttribute('aria-busy', 'false');
+    await expect(progress).toBeHidden();
+    await expect.poll(() => page.evaluate(() => window.app.terminalController.manager.activeTabId)).toBe('picker-agent');
+});
+
+test('terminal picker clears its spinner after a failed start and tracks the selected launch', async ({ page }) => {
+    await openFixture(page, 1, [{ id: 'reviewer', name: 'Saved reviewer', cli: 'codex',
+        initialPrompt: 'Review the changes.', revision: 4 },
+        { id: 'writer', name: 'Writer', cli: 'claude', initialPrompt: '', revision: 1 }]);
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    await page.route('**/api/v1/runs', async route => {
+        await pending;
+        await route.fulfill({ status: 400, json: { error: 'Launch unavailable for this project.' } });
+    });
+    const choose = async value => {
+        await page.locator('#terminal-header-select-ts-control').click();
+        await page.locator(`.ts-dropdown .option[data-value="${value}"]`).click();
+    };
+    await choose('preset:reviewer:codex');
+    const start = page.locator('#terminal-start-btn');
+    const progress = page.locator('#terminal-start-progress');
+    await start.click();
+    try {
+        await expect(start).toBeDisabled();
+        await expect(progress).toBeVisible();
+        await choose('preset:writer:claude');
+        await expect(start).toBeEnabled();
+        await expect(progress).toBeHidden();
+        await choose('preset:reviewer:codex');
+        await expect(start).toBeDisabled();
+        await expect(progress).toBeVisible();
+    } finally { release(); }
+    await expect(start).toBeEnabled();
+    await expect(progress).toBeHidden();
+    await expect(page.getByText('Launch unavailable for this project.', { exact: true })).toBeVisible();
+});
+
 test('terminal picker launched from a blank placeholder tab shows the new Agent tab', async ({ page }) => {
     const fixture = await openFixture(page, 1, [{ id: 'reviewer', name: 'Code review', cli: 'codex',
         initialPrompt: 'Review the changes.', revision: 4 }]);
@@ -326,6 +411,29 @@ test('terminal picker launched from a blank placeholder tab shows the new Agent 
     await expect(page.getByText('Select a LLM to continue')).toBeHidden();
     expect(fixture.connections).toContain('picker-agent');
     await expect.poll(() => fixture.deleted.filter(id => id.startsWith('placeholder-')).length).toBe(1);
+});
+
+for (const statusAvailable of [false, true]) test(`terminal cleanup preserves a saved-launch tab with ${statusAvailable ? 'stale inactive' : 'unavailable'} status`, async ({ page }) => {
+    const fixture = await openFixture(page, 1, [{ id: 'reviewer', name: 'Saved reviewer', cli: 'codex', initialPrompt: '', revision: 1 }]);
+    fixture.tabs.set('saved', { tabId: 'saved', hasActiveSession: false, sessionId: null,
+        statusAvailable, wasStarted: true, cli: null, createdUTC: new Date().toISOString() });
+    await page.evaluate(() => {
+        sessionStorage.setItem('viberails_terminal_tab_selection_saved', 'preset:reviewer:codex');
+        sessionStorage.setItem('viberails_terminal_tab_meta_saved', JSON.stringify({
+            label: 'Generated discussion title', customLabel: false, labelSource: null, taskKey: 'board-card:story'
+        }));
+    });
+    const unsafeDeletes = [];
+    page.on('request', request => {
+        if (request.method() === 'DELETE' && request.url().includes('/terminal/tabs/')) unsafeDeletes.push(request.url());
+    });
+    await page.reload();
+    await expect.poll(() => page.evaluate(() =>
+        window.app?.terminalController?.manager?.getActiveTab()?.instance?.hasOpenSocket())).toBe(true);
+    await expect(page.locator('#vb-terminal-tab-list [data-tab-id="saved"]')).toBeVisible();
+    expect(fixture.deleted).not.toContain('saved');
+    expect(unsafeDeletes).toEqual([]);
+    expect(fixture.tabs.has('saved')).toBe(true);
 });
 
 for (const renderer of ['webgl', 'canvas']) test(`${renderer} renderer fonts survive the strict canvas font parser in VS Code webviews`, async ({ page }) => {

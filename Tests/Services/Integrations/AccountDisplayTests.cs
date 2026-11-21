@@ -73,6 +73,41 @@ public sealed class AccountDisplayTests : IDisposable
         Assert.Equal("second@example.com", ApiKeyStore.GetAccountEmail(store.LoadFresh()));
     }
 
+    // A retry after the file was written is the same sign-in. It used to compare the file with
+    // the key from before sign-in and report a completed sign-in as "key changed".
+    [Fact]
+    public void RetryingASaveThatAlreadyReachedTheFileSucceeds()
+    {
+        Assert.True(keys.TrySave("approved-private-key", "", "rob@example.com"));
+        var written = File.GetLastWriteTimeUtc(Path.Combine(directory, "settings.json"));
+
+        Assert.True(keys.TrySave("approved-private-key", "", "rob@example.com"));
+
+        Assert.Equal("approved-private-key", store.LoadFresh().ApiKey);
+        Assert.Equal("rob@example.com", ApiKeyStore.GetAccountEmail(store.LoadFresh()));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(Path.Combine(directory, "settings.json")));
+        // An older writer saved the same key without its identity: the retry completes it.
+        var settings = store.LoadFresh();
+        settings.RemoteAccountEmail = null;
+        settings.RemoteAccountKeyFingerprint = null;
+        store.Save(settings);
+        Assert.True(keys.TrySave("approved-private-key", "", "rob@example.com"));
+        Assert.Equal("rob@example.com", ApiKeyStore.GetAccountEmail(store.LoadFresh()));
+    }
+
+    [Fact]
+    public void AFailedRelayResetCannotFailASavedKey()
+    {
+        var relay = new Mock<IRemoteHttpRelayClient>();
+        relay.Setup(r => r.Reset()).Throws(new InvalidOperationException("socket already disposed"));
+        var failing = new ApiKeyStore(relay.Object, store);
+
+        Assert.True(failing.TrySave("approved-private-key", "", "rob@example.com"));
+
+        Assert.Equal("approved-private-key", store.LoadFresh().ApiKey);
+        Assert.Equal("approved-private-key", ParserConfigs.GetApiKey());
+    }
+
     // VIBE-213 item 17: the inbox asks on every poll; config.json is re-read only when the key changes.
     [Fact]
     public void CachedAccountEmailRereadsSettingsOnlyWhenTheKeyChanges()

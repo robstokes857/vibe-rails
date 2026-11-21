@@ -22,6 +22,8 @@ public interface ITerminalTabHostService
     Task<TerminalTabStatusResponse> CreateAutomationTabAsync(string runId, string automationName, CancellationToken cancellationToken = default);
     Task<TerminalTabStatusResponse> CreatePythonScriptTabAsync(string name, CancellationToken cancellationToken = default);
     Task<bool> DeleteTabAsync(string tabId, CancellationToken cancellationToken = default);
+    /// <summary>Removes only a confirmed unused ordinary host, serialized against session startup.</summary>
+    Task<bool> PruneUnusedTabAsync(string tabId, CancellationToken cancellationToken = default) => Task.FromResult(false);
     Task<TerminalStatusResponse?> GetStatusAsync(string tabId, CancellationToken cancellationToken = default);
     Task<TerminalStatusResponse> StartSessionAsync(string tabId, StartTerminalRequest request, CancellationToken cancellationToken = default);
     Task<TerminalStatusResponse> StopSessionAsync(string tabId, CancellationToken cancellationToken = default);

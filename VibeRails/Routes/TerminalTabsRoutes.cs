@@ -59,6 +59,14 @@ public static class TerminalTabsRoutes
             return Results.Ok(new MessageResponse($"Terminal tab closed: {tabId}"));
         }).WithName("DeleteTerminalTab");
 
+        // Automatic cleanup cannot use the explicit, session-stopping DELETE operation.
+        app.MapPost("/api/v1/terminal/tabs/{tabId}/prune", async (
+            string tabId, ITerminalTabHostService tabHost, CancellationToken cancellationToken) =>
+            await tabHost.PruneUnusedTabAsync(tabId, cancellationToken)
+                ? Results.NoContent()
+                : Results.Conflict(new ErrorResponse("The terminal tab is not confirmed unused.")))
+            .WithName("PruneUnusedTerminalTab");
+
         app.MapGet("/api/v1/terminal/tabs/{tabId}/status", async (
             string tabId,
             ITerminalTabHostService tabHost,

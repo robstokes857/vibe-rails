@@ -150,7 +150,8 @@ Content-Type: application/json
 | --- | --- |
 | `202 authorization_pending` | Keep waiting. |
 | `429 slow_down` | Back off; the current local client adds five seconds, up to 60 seconds. |
-| `403 access_denied` | Approval was denied, including a refused key-limit request. |
+| `403 access_denied` | The owner denied the request. |
+| `403 key_limit` | The owner approved, but the account already holds its ten API keys. The dialog says to remove one on viberails.ai. A site that predates this code answers `access_denied`. |
 | `410 expired_token` | Expired, unknown, cancelled or already redeemed. |
 | `200 {apiKey,keyPrefix,keySuffix,account:{email,name}}` | Successful one-time delivery; remove the pending grant and its retained plaintext. |
 
@@ -172,8 +173,24 @@ revoke an issued API key.
   Approved, uncollected plaintext is discarded on expiry, cancellation or shutdown.
 - Late responses from a cancelled or replaced local attempt cannot save a key.
   Cancellation reports `linked` if the key was already saved and is still current.
-- A received key stays in local backend memory when saving fails, allowing a save
-  retry without another hosted redemption, even after the original code expires.
+- A received key stays in local backend memory when saving fails for any reason, allowing
+  a save retry without another hosted redemption, even after the original code expires. A
+  retry that finds the approved key already in the settings file is that same sign-in and
+  succeeds; activation steps after the write (the relay reset) cannot fail it.
+- The account dialog polls while it is open. An attempt that nobody polled for two minutes
+  is treated as given up: if its code has since expired, or the saved key changed another
+  way (another window signed in, or a key was pasted), it is dropped without reporting a
+  failure and the dialog shows the saved account. A request that could still be approved
+  is cancelled on the site first. An attempt that is being watched still reports `expired`
+  or `key_changed`.
+- A repeated approval of the same request by its owner (a double click, a resubmitted
+  page) returns the first approval's result and mints no second key. The approval page
+  also submits one decision per request.
+- The key is saved by one root backend. Every other VibeRails process, including the tab
+  children that run the CLIs, follows the settings file within a few seconds
+  (`SavedAccountFollower`), so a second window never keeps the previous account, and
+  removing the key stops uploads everywhere without a restart. Other windows' dashboards
+  receive `account_settings_changed` and read the saved account again.
 - The local save compares the original saved credential under the settings
   transaction. Current-version processes coordinate the entire read/compare/write
   through an OS mutex. Older binaries and external file editors do not participate
@@ -198,6 +215,7 @@ browser sign-in configuration.
 - [Local service](../VibeRails/Services/Integrations/VibeCodeRemote/RemoteAccountLinkService.cs)
 - [Local routes](../VibeRails/Routes/RemoteAccountLinkRoutes.cs)
 - [Key persistence](../VibeRails/Services/Integrations/VibeCodeRemote/ApiKeyStore.cs)
+- [Following the saved key in other processes](../VibeRails/Services/Integrations/VibeCodeRemote/SavedAccountFollower.cs)
 - [Settings transaction](../VibeRails/Utils/SettingsFile.cs)
 - [Dashboard flow](../VibeRails/wwwroot/js/modules/remote-account-link.js)
 - [VS Code URL policy](../vscode-viberails/src/external-sign-in.ts)

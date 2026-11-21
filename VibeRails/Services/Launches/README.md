@@ -270,12 +270,15 @@ SQLite lease. Dispatch prefers a root open on the run's project; another root
 may take over after 30 seconds only when no root for that project remains open.
 Two roots can be open on one project (a VS Code window and the browser, or two
 versions). A terminal-picker tab belongs in the root whose page asked for it: that
-root claims it inside the request, and every scheduler leaves a queued one alone for
-`LaunchScheduler.RequestedTabGrace` (6 seconds). Left to the scheduler, the tab opened
-in whichever root ticked first, and the page that asked got 404 for a tab its own root
-never had and reported that nothing opened. The grace is a delay, not a ban, because an
-older root queues the run and claims it on its own next tick, and a retry queued from
-outside a root has no root of its own.
+root inserts new picker requests and retries already claimed in the admission transaction.
+A private per-request token binds dispatch to that request; duplicate occurrences cannot
+redispatch another request's claim. Other roots, including older schedulers, never see the
+new run queued. A delay between separate enqueue and claim operations previously let an
+older root take the run, opening a tab the requesting page could not reach.
+For legacy or external queued picker runs, schedulers retain
+`LaunchScheduler.RequestedTabGrace` (6 seconds) before fallback dispatch. The grace is a
+delay, not a ban, because an older root queues the run and claims it on its own next tick,
+and a retry queued from outside a root has no root of its own.
 Before/after-commit hooks only enqueue; VCA preflight blocking
 remains independent. No daemon or OS registration is added.
 

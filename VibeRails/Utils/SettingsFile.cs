@@ -71,6 +71,24 @@ internal sealed class SettingsFile : IDisposable
         }
     }
 
+    /// <summary>
+    /// Identifies the saved file without the lock or its contents, so a process can notice that
+    /// another one replaced it. Every save renames a new file into place, which changes the write
+    /// time. Null while the file is missing or unreadable.
+    /// </summary>
+    internal (DateTime WriteTimeUtc, long Length)? Stamp()
+    {
+        try
+        {
+            var file = new FileInfo(_path);
+            return file.Exists ? (file.LastWriteTimeUtc, file.Length) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     internal Settings Load()
     {
         using var lease = AcquireWriteLock();

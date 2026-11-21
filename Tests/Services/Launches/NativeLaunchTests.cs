@@ -230,6 +230,51 @@ public sealed class NativeLaunchTests : IDisposable
     }
 
     [Fact]
+    public async Task RequestedPickerAdmissionAndRetryAreClaimedBeforeAnySchedulerCanSeeThem()
+    {
+        await using var services = Services();
+        var service = new LaunchService(store, scripts.Object);
+        var preset = (await service.SavePresetAsync(null, new("codex_yolo", "", "codex"), Ct)).Preset;
+        var tabs = new Mock<ITerminalTabHostService>(MockBehavior.Strict);
+        var count = 0;
+        tabs.Setup(t => t.CreateTabAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new TerminalTabStatusResponse("tab-" + ++count, DateTime.UtcNow, false));
+        var dispatcher = PickerDispatcher(services, service, tabs);
+        var owner = LaunchDispatcher.CreateRequestOwner();
+        var context = new LaunchExecutionContext(root, root, "manual", "atomic-picker", TerminalTab: true);
+        var run = await service.EnqueueAsync("preset", preset.Id, context, Ct, requestOwner: owner);
+        Assert.Equal("claimed", run.Status);
+        Assert.Equal(owner.Token, run.ClaimToken);
+
+        // Even an old scheduler that has no six-second grace cannot claim a non-queued row.
+        using var otherRoot = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(root, "launches.db")};Pooling=False");
+        await otherRoot.OpenAsync(Ct);
+        using var oldClaim = otherRoot.CreateCommand();
+        oldClaim.CommandText = "UPDATE Runs SET Status='claimed',ClaimToken='other-root' WHERE Id=$id AND Status='queued';";
+        oldClaim.Parameters.AddWithValue("$id", run.Id);
+        Assert.Equal(0, await oldClaim.ExecuteNonQueryAsync(Ct));
+        var duplicateOwner = LaunchDispatcher.CreateRequestOwner();
+        var duplicate = await service.EnqueueAsync("preset", preset.Id, context, Ct, requestOwner: duplicateOwner);
+        Assert.Equal(run.Id, duplicate.Id);
+        Assert.Equal("claimed", (await dispatcher.DispatchRequestedTabAsync(duplicate, Ct, duplicateOwner)).Status);
+        Assert.Equal(0, count);
+        var opened = await dispatcher.DispatchRequestedTabAsync(run, Ct, owner);
+        Assert.Equal(("running", "tab-1"), (opened.Status, opened.TabId));
+        await store.CompleteAsync(new(run.Id, owner.Token), "succeeded", ct: Ct);
+        var retryOwner = LaunchDispatcher.CreateRequestOwner();
+        var retry = await service.RetryAsync(root, run.Id, Ct, retryOwner);
+        Assert.Equal("claimed", retry.Status);
+        oldClaim.Parameters["$id"].Value = retry.Id;
+        Assert.Equal(0, await oldClaim.ExecuteNonQueryAsync(Ct));
+        Assert.Equal("tab-2", (await dispatcher.DispatchRequestedTabAsync(retry, Ct, retryOwner)).TabId);
+
+        var native = await service.EnqueueAsync("preset", preset.Id,
+            new(root, root, "manual", "native-request"), Ct, requestOwner: LaunchDispatcher.CreateRequestOwner());
+        Assert.Equal("queued", native.Status);
+        Assert.Null(native.ClaimToken);
+    }
+
+    [Fact]
     public async Task ATabThatCannotBeCreatedAnswersTheRequestWithItsReason()
     {
         await using var services = Services();

@@ -112,6 +112,8 @@ public sealed record LaunchRun(string Id, long Sequence, string DefinitionId, st
 
 public sealed record LaunchRunPage(IReadOnlyList<LaunchRun> Runs, long? NextCursor);
 public sealed record LaunchClaim(string RunId, string Token);
+/// <summary>A fresh request's private claim token and root identity; never part of the launch snapshot or HTTP response.</summary>
+public sealed record LaunchRequestOwner(string Token, int Pid, DateTime StartedUtc);
 public sealed record LaunchAttachment(string Id, string DefinitionId, string Name, string MimeType,
     long Size, DateTime CreatedUtc, DateTime? RemovedUtc = null);
 public sealed record LaunchAttachmentContent(LaunchAttachment Attachment, byte[] Content);

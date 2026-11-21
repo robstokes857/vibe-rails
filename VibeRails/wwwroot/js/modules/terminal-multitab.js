@@ -95,7 +95,9 @@ export function selectBlankPlaceholderTabIds(states, { startsHere, isPendingClos
     const hasLiveSession = list.some((state) => state.hasActiveSession === true && !isAutomationTab(state));
     if (!hasLiveSession) return [];
     return list
-        .filter((state) => state.hasActiveSession !== true
+        .filter((state) => state.statusAvailable === true
+            && state.hasActiveSession === false
+            && !state.sessionId
             && !isAutomationTab(state)
             && state.pinned !== true
             && state.customLabel !== true
@@ -261,6 +263,7 @@ export class TerminalManager {
         this.windowSessionValue = this.container.querySelector('#vb-terminal-window-session-value');
 
         this.startBtn = this.container.querySelector('#terminal-start-btn');
+        this.startProgress = this.container.querySelector('#terminal-start-progress');
         this.reconnectBtn = this.container.querySelector('#terminal-reconnect-btn');
         this.cardLinkBtn = this.container.querySelector('#terminal-card-link-btn');
         this.cardLinkLabel = this.container.querySelector('#terminal-card-link-label');
@@ -443,6 +446,8 @@ export class TerminalManager {
             const active = this.getActiveTab();
             if (active && !active.state.hasActiveSession) {
                 this.applySelection(active, selection);
+            } else {
+                this.updateStartButtonState();
             }
         });
 
@@ -826,6 +831,7 @@ export class TerminalManager {
             workingDirectory,
             renaming: false,
             hasActiveSession: tabInfo.hasActiveSession === true,
+            statusAvailable: tabInfo.statusAvailable === true,
             sessionId: tabInfo.sessionId || null,
             boardCard: readTabBoardCard(tabInfo.boardCard),
             needsAttention: tabInfo.needsAttention === true,
@@ -1257,12 +1263,12 @@ export class TerminalManager {
         this.updateUi();
     }
 
-    // Backend DELETE plus local teardown for one tab. Shared by the undo-window
+    // Backend close plus local teardown for one tab. Shared by the undo-window
     // commit and the placeholder prune; what shows next (the next tab, or a
     // fresh placeholder for an empty strip) is the caller's decision. `quiet` is
-    // for removals nobody asked for (the automatic prune): a failed DELETE is
-    // logged instead of shown. A tab already being removed is left to that call.
-    async _removeTab(tabId, { quiet = false } = {}) {
+    // for quiet closes; automatic cleanup additionally requires the guarded /prune
+    // endpoint. A tab already being removed is left to that call.
+    async _removeTab(tabId, { quiet = false, onlyIfUnused = false } = {}) {
         const tab = this.tabs.get(tabId);
         if (!tab || this._removingTabs.has(tabId)) {
             return false;
@@ -1271,8 +1277,13 @@ export class TerminalManager {
         try {
             const endingSessionId = tab.state.hasActiveSession ? tab.state.sessionId : null;
             try {
-                await this.app.apiCall(`/api/v1/terminal/tabs/${encodeURIComponent(tabId)}`, 'DELETE');
+                const path = `/api/v1/terminal/tabs/${encodeURIComponent(tabId)}`;
+                await this.app.apiCall(onlyIfUnused ? `${path}/prune` : path,
+                    onlyIfUnused ? 'POST' : 'DELETE', null, onlyIfUnused ? { showLoading: false } : undefined);
             } catch (error) {
+                // A refusal, an older backend without /prune, or an unreadable result must
+                // retain the tab and its viewer. Explicit user closes keep their existing behavior.
+                if (onlyIfUnused) return false;
                 // 404 means tab already expired server-side (e.g. LLM never selected) — close silently
                 if (error.message !== 'API call failed: Not Found') {
                     if (quiet) console.warn('[Terminal] Could not close a placeholder tab on the server:', error);
@@ -1308,8 +1319,8 @@ export class TerminalManager {
 
     // Closes every blank "Select LLM to launch." placeholder once an ordinary
     // tab has a live session (see selectBlankPlaceholderTabIds). There is
-    // nothing in a placeholder to restore, so it skips the undo window and
-    // deletes the server-side tab at once; each is also a child process that
+    // nothing in a confirmed placeholder to restore, so it skips the undo window and
+    // asks the backend to remove only a never-started host; each is also a child process that
     // would otherwise sit idle. Callers run this where the live tab is (or is
     // about to be) the active one, so no activation happens here. Returns the
     // ids it removed.
@@ -1331,21 +1342,10 @@ export class TerminalManager {
             return [];
         }
 
-        // Hide the chips before the DELETEs so the strip never shows them beside
-        // the live tab while the requests are in flight.
-        for (const tabId of doomed) {
-            const tab = this.tabs.get(tabId);
-            if (!tab) continue;
-            tab.state.ui.item.style.display = 'none';
-            tab.state.ui.panel.style.display = 'none';
-            tab.state.ui.item.classList.remove('active');
-            tab.instance.setActive(false);
-        }
+        // Keep every tab visible until the backend confirms it was unused and removed.
         const removed = [];
         for (const tabId of doomed) {
-            // Nobody asked for this close, so a refusal is logged rather than toasted. A tab an
-            // overlapping call removed meanwhile returns false and is not counted here.
-            if (await this._removeTab(tabId, { quiet: true })) removed.push(tabId);
+            if (await this._removeTab(tabId, { quiet: true, onlyIfUnused: true })) removed.push(tabId);
             if (this._destroyed) {
                 return removed;
             }
@@ -2659,19 +2659,6 @@ export class TerminalManager {
                 : 'Open a new terminal tab';
         }
 
-        if (this.startBtn) {
-            const canUseActiveBlankTab = !!active && !active.state.hasActiveSession && !isAutomationTab(active.state);
-            const disabled = atLimit && !canUseActiveBlankTab;
-            this.startBtn.disabled = disabled;
-            const title = disabled
-                ? `Maximum of ${this.maxTabs} tabs reached`
-                : active?.state.hasActiveSession
-                    ? 'Start selected CLI in a new terminal tab'
-                    : 'Start selected CLI';
-            this.startBtn.title = title;
-            this.startBtn.setAttribute('aria-label', title);
-        }
-
         if (this.headerSelect) {
             const ts = this.headerSelect.tomselect;
             if (ts) {
@@ -2690,6 +2677,28 @@ export class TerminalManager {
             }
             setLlmPickerValue(this.app, this.headerSelect, nextValue);
         }
+        this.updateStartButtonState();
+    }
+
+    // Launch progress only changes control chrome: never refit or reconnect a live terminal.
+    updateStartButtonState() {
+        if (this._destroyed || !this.startBtn) return;
+        const active = this.getActiveTab();
+        const selection = this.getLaunchSelection();
+        const opening = !!(selection?.startsWith('preset:')
+            && this.app.aiAgentsController?.launching?.has(selection.split(':')[1]));
+        const canUseActiveBlankTab = !!active && !active.state.hasActiveSession && !isAutomationTab(active.state);
+        const atLimit = !this.canCreateTab() && !canUseActiveBlankTab;
+        this.startBtn.disabled = opening || atLimit;
+        this.startBtn.setAttribute('aria-busy', String(opening));
+        this.startProgress?.classList.toggle('invisible', !opening);
+        const title = opening ? 'Opening terminal…'
+            : atLimit ? `Maximum of ${this.maxTabs} tabs reached`
+                : active?.state.hasActiveSession
+                    ? 'Start selected CLI in a new terminal tab'
+                    : 'Start selected CLI';
+        this.startBtn.title = title;
+        this.startBtn.setAttribute('aria-label', title);
     }
 
     getLaunchSelection() {
@@ -3394,6 +3403,7 @@ export class TerminalController {
             const tab = manager.addLocalTab({
                 tabId: id,
                 hasActiveSession: authoritative?.hasActiveSession !== false,
+                statusAvailable: authoritative?.statusAvailable === true,
                 sessionId: authoritative?.sessionId || null,
                 cli: authoritative?.cli || rememberedCli,
                 workingDirectory: authoritative?.workingDirectory || null,
@@ -3834,6 +3844,10 @@ export class TerminalController {
                             </svg>
                             <span>Start</span>
                         </button>
+                        <span class="d-inline-flex align-items-center invisible" id="terminal-start-progress" role="status" title="Opening terminal…">
+                            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                            <span class="visually-hidden">Opening terminal…</span>
+                        </span>
                         <button class="btn btn-sm btn-outline-light d-none d-inline-flex align-items-center gap-1" id="terminal-reconnect-btn" title="Reconnect to active session">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
                                 <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>

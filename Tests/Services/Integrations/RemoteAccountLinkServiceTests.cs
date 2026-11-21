@@ -434,13 +434,104 @@ public sealed class RemoteAccountLinkServiceTests
     {
         using var fixture = new Fixture();
         await fixture.Service.StartAsync();
-        fixture.Clock.Advance(TimeSpan.FromMinutes(11));
+        // The open dialog keeps polling, so the attempt is still being watched when it expires.
+        for (var i = 0; i < 5; i++)
+        {
+            fixture.Clock.Advance(TimeSpan.FromSeconds(100));
+            Assert.Equal("pending", (await fixture.Service.PollAsync()).Status);
+        }
+        var before = fixture.Requests.Count(r => r.Uri.AbsolutePath.EndsWith("/token"));
+        fixture.Clock.Advance(TimeSpan.FromSeconds(101));
 
         var status = await fixture.Service.PollAsync();
 
         Assert.Equal("expired", status.Status);
         Assert.Equal("expired_token", status.Error);
+        Assert.Equal(before, fixture.Requests.Count(r => r.Uri.AbsolutePath.EndsWith("/token")));
+        Assert.Equal(0, fixture.Keys.SaveCalls);
+    }
+
+    // The dialog was closed on a pending sign-in. Whatever ended that attempt later, reopening the
+    // dialog must show the saved account, not the failure of a sign-in that was given up.
+    [Fact]
+    public async Task AnAttemptNobodyWatchedExpiresWithoutReportingAFailure()
+    {
+        using var fixture = new Fixture();
+        await fixture.Service.StartAsync();
+        fixture.Clock.Advance(TimeSpan.FromMinutes(11));
+
+        var status = await fixture.Service.PollAsync();
+
+        Assert.Equal("idle", status.Status);
+        Assert.Null(status.Error);
         Assert.DoesNotContain(fixture.Requests, r => r.Uri.AbsolutePath.EndsWith("/token"));
+        // The hosted request expired on its own: nothing is left to cancel.
+        Assert.DoesNotContain(fixture.Requests, r => r.Method == HttpMethod.Delete);
+        Assert.Equal("idle", (await fixture.Service.PollAsync()).Status);
+    }
+
+    [Fact]
+    public async Task AnotherWindowSigningInDoesNotBecomeAFailedSignInInThisOne()
+    {
+        using var fixture = new Fixture(request => Task.FromResult(request.Method == HttpMethod.Delete
+            ? new HttpResponseMessage(HttpStatusCode.NoContent)
+            : request.Uri.AbsolutePath.EndsWith("/token") ? Approved() : Created()));
+        await fixture.Service.StartAsync();
+        // This window's dialog is closed; three minutes later another window has saved a key.
+        fixture.Clock.Advance(TimeSpan.FromMinutes(3));
+        fixture.Keys.Value = "key-saved-by-another-window";
+
+        var status = await fixture.Service.PollAsync();
+
+        Assert.Equal("idle", status.Status);
+        Assert.Null(status.Error);
+        Assert.Equal("key-saved-by-another-window", fixture.Keys.Value);
+        Assert.Equal(0, fixture.Keys.SaveCalls);
+        Assert.Empty(fixture.Events);
+        Assert.DoesNotContain(fixture.Requests, r => r.Uri.AbsolutePath.EndsWith("/token"));
+        // The code could still be approved in a browser, so the hosted request is expired.
+        var delete = Assert.Single(fixture.Requests, r => r.Method == HttpMethod.Delete);
+        Assert.Contains(DeviceSecret, delete.Body);
+    }
+
+    [Fact]
+    public async Task AnUnexpectedSaveFailureKeepsTheApprovedKeyAndRetries()
+    {
+        using var fixture = new Fixture(request => Task.FromResult(
+            request.Uri.AbsolutePath.EndsWith("/token") ? Approved() : Created()));
+        fixture.Keys.FailNextSaveWith = new InvalidOperationException("PRIVATE settings detail");
+        await fixture.Service.StartAsync();
+        fixture.Clock.Advance(TimeSpan.FromSeconds(4));
+
+        var failed = await fixture.Service.PollAsync();
+        Assert.Equal("pending", failed.Status);
+        Assert.Equal("save_failed", failed.Error);
+        Assert.DoesNotContain("PRIVATE settings detail", JsonSerializer.Serialize(failed));
+        var retried = await fixture.Service.PollAsync();
+
+        Assert.Equal("linked", retried.Status);
+        Assert.Equal(ApiKey, fixture.Keys.Value);
+        Assert.Single(fixture.Requests, r => r.Uri.AbsolutePath.EndsWith("/token"));
+        Assert.Single(fixture.Events);
+    }
+
+    [Theory]
+    [InlineData("{\"error\":\"key_limit\"}", "key_limit")]
+    [InlineData("{\"error\":\"access_denied\"}", "access_denied")]
+    [InlineData("{\"error\":\"<script>\"}", "access_denied")]
+    [InlineData("not JSON", "access_denied")]
+    [InlineData("", "access_denied")]
+    public async Task ARefusalNamesAFullKeyListAndNothingElseFromTheResponse(string body, string expected)
+    {
+        using var fixture = new Fixture(request => Task.FromResult(request.Uri.AbsolutePath.EndsWith("/token")
+            ? Json(HttpStatusCode.Forbidden, body) : Created()));
+        await fixture.Service.StartAsync();
+        fixture.Clock.Advance(TimeSpan.FromSeconds(4));
+
+        var status = await fixture.Service.PollAsync();
+
+        Assert.Equal("denied", status.Status);
+        Assert.Equal(expected, status.Error);
         Assert.Equal(0, fixture.Keys.SaveCalls);
     }
 
@@ -522,12 +613,18 @@ public sealed class RemoteAccountLinkServiceTests
         public string Value { get; set; } = "";
         public string? AccountEmail { get; private set; }
         public bool FailNextSave { get; set; }
+        public Exception? FailNextSaveWith { get; set; }
         public int SaveCalls { get; private set; }
         public string Read() => Value;
         public string ComputerName => "Test workstation";
         public bool TrySave(string apiKey, string expectedApiKey, string? accountEmail = null)
         {
             SaveCalls++;
+            if (FailNextSaveWith is { } failure)
+            {
+                FailNextSaveWith = null;
+                throw failure;
+            }
             if (FailNextSave)
             {
                 FailNextSave = false;

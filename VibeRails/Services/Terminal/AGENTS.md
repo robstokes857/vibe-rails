@@ -828,6 +828,14 @@ are empty. Missing readiness is retained. No recordings are deleted.
 the owner, so test fakes need no change. Tests: `TerminalTabsRoutesTests`, `script-agent-pane.test.mjs`.
 
 ## Local API Surface
+Automatic placeholder cleanup uses `POST /api/v1/terminal/tabs/{tabId}/prune`.
+`PruneUnusedTabAsync` holds the same per-child gate as Start and removes only an ordinary,
+never-started host whose child status confirms it is inactive, sessionless and reclaimable.
+Unavailable status, a pending or earlier Start, and owned/Automation hosts refuse cleanup
+with 409. The frontend retains the tab and viewer on refusal or request failure.
+Explicit user closes continue to use `DELETE /api/v1/terminal/tabs/{tabId}`; automatic
+cleanup must never fall back to that destructive endpoint, including with older backends.
+
 From `Routes/TerminalRoutes.cs`:
 - `GET /api/v1/terminal/status`
 - `POST /api/v1/terminal/start`

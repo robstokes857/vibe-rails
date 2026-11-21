@@ -91,19 +91,26 @@ public static class LaunchRoutes
             IBoardProjectResolver projects, IHostApplicationLifetime lifetime, CancellationToken ct) =>
         {
             var project = await projects.ResolveAsync(ct);
+            var owner = LaunchDispatcher.CreateRequestOwner();
+            // Once a picker run is admitted, navigation must not abandon its durable claim.
+            var admissionToken = request.TerminalTab && request.DefinitionType == "preset" ? lifetime.ApplicationStopping : ct;
             var run = await service.EnqueueAsync(request.DefinitionType, request.DefinitionId,
                 new(project, project, "manual", "manual:" + (request.OccurrenceId ?? Guid.NewGuid().ToString("N")),
                     PromptPrefix: request.PromptPrefix, PromptOverride: request.InitialPrompt,
                     NativeTerminal: request.NativeTerminal, UserMessage: request.UserMessage,
-                    TerminalTab: request.TerminalTab), ct, request.ExpectedRevision);
-            return Results.Ok(await dispatcher.DispatchRequestedTabAsync(run, lifetime.ApplicationStopping));
+                    TerminalTab: request.TerminalTab), admissionToken, request.ExpectedRevision, owner);
+            return Results.Ok(await dispatcher.DispatchRequestedTabAsync(run, lifetime.ApplicationStopping, owner));
         });
         api.MapPost("/runs/{id}/resolve", async (string id, ResolveUncertainLaunchRequest request, LaunchService service, IBoardProjectResolver projects, CancellationToken ct) =>
             Results.Ok(await service.ResolveUncertainAsync(await projects.ResolveAsync(ct), id, request.ConfirmedStopped, ct)));
         api.MapPost("/runs/{id}/retry", async (string id, LaunchService service, LaunchDispatcher dispatcher,
             IBoardProjectResolver projects, IHostApplicationLifetime lifetime, CancellationToken ct) =>
-            Results.Ok(await dispatcher.DispatchRequestedTabAsync(
-                await service.RetryAsync(await projects.ResolveAsync(ct), id, ct), lifetime.ApplicationStopping)));
+        {
+            var project = await projects.ResolveAsync(ct);
+            var owner = LaunchDispatcher.CreateRequestOwner();
+            return Results.Ok(await dispatcher.DispatchRequestedTabAsync(
+                await service.RetryAsync(project, id, lifetime.ApplicationStopping, owner), lifetime.ApplicationStopping, owner));
+        });
         api.MapPost("/runs/{id}/cancel", async (string id, ILaunchStore store, IBoardProjectResolver projects, CancellationToken ct) =>
             await store.CancelAsync(id, LaunchService.ProjectKey(await projects.ResolveAsync(ct)), ct) ? Results.NoContent() : Results.NotFound());
 

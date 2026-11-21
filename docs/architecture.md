@@ -647,6 +647,16 @@ binaries and external file editors do not participate in that mutex. Failed loca
 retain the received key in memory for retry until cancellation, replacement or shutdown.
 The masked `remote-account-linked` event updates open Settings views without replacing
 their unrelated drafts. Closing the account modal stops UI polling; reopening it resumes the attempt.
+A retried save that finds the approved key already in the file succeeds, and any save failure
+keeps the received key for the next poll. An attempt nobody was polling when its code expired, or
+when the key was saved another way, is dropped without a failure status.
+
+Only the root that signs in, switches accounts or removes the key updates its own runtime key.
+`SavedAccountFollower` runs in every backend, tab children included: every two seconds it compares
+the settings file's write time with the one it last applied and, when another process changed the
+key, re-reads the file under the settings lock, applies it through `Init.ApplySavedAccount` and
+resets the HTTP relay. A root also publishes `account_settings_changed` so its dashboards read
+the saved account again. It stays idle in a host that never ran `Init.StartUpChecks`.
 
 The top navigation shows **Sign in** only without a saved API key; with one it shows an
 account chip and popover (`account-nav.js`). General Settings

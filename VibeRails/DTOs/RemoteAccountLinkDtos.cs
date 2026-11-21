@@ -13,3 +13,5 @@ internal sealed record DeviceLinkRequest(string ComputerName, string ClientVersi
 internal sealed record DeviceLinkSecret(string DeviceCode);
 internal sealed record DeviceLinkCreated(string DeviceCode, string UserCode, string VerificationUri, int ExpiresIn, int Interval);
 internal sealed record DeviceLinkToken(string ApiKey, string? KeyPrefix, string? KeySuffix, RemoteAccountIdentity? Account);
+/// <summary>The fixed code in a refused token response: <c>access_denied</c> or <c>key_limit</c>.</summary>
+internal sealed record DeviceLinkRefusal(string? Error);

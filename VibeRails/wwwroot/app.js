@@ -75,6 +75,8 @@ export class VibeControlApp {
         this.entitlementsReadAt = 0;
         this.appEventClient = new AppEventClient(this);
         this.appEventClient.on('remote-account-linked', () => void this.refreshAccountSettings());
+        // Another VibeRails window signed in, switched accounts or removed the key.
+        this.appEventClient.on('account_settings_changed', () => void this.refreshSavedAccount());
         this.appEventClient.on('account_key_changed', () => {
             this.showToast('Account security', 'The viberails.ai API key was changed.', 'warning');
             void this.refreshAccountSettings();
@@ -1197,6 +1199,8 @@ export class VibeControlApp {
             const root = controller._settingsRoot;
             if (root && settings.apiKey && root.querySelector('#setting-api-key')?.dataset.originalValue !== settings.apiKey) {
                 controller._applyLinkedApiKey(root, settings.apiKey);
+            } else if (root && !settings.apiKey) {
+                controller._applyRemovedApiKey(root);
             }
         } catch {
             // The next Settings visit reads authoritative state again.
@@ -1227,7 +1231,12 @@ export class VibeControlApp {
         const template = document.getElementById('remote-account-template');
         if (!template) return;
         let panel;
-        this.showModal('viberails.ai account', template.innerHTML, { onClose: () => panel?.unload() });
+        this.showModal('viberails.ai account', template.innerHTML, {
+            onClose: () => {
+                panel?.unload();
+                if (this.remoteAccountPanel === panel) this.remoteAccountPanel = null;
+            }
+        });
         const root = document.querySelector('#modal-container [data-remote-account-link]');
         if (!root) return;
         panel = new RemoteAccountLinkPanel(this, root, {
@@ -1241,7 +1250,20 @@ export class VibeControlApp {
                 this.updateAccountNav();
             }
         });
+        this.remoteAccountPanel = panel;
         void panel.mount();
+        // This page's copy of the saved account can be older than the file: another window may
+        // have signed in or out. Read it again so the dialog never offers sign-in to a signed-in
+        // computer, or shows an account that was removed.
+        void this.refreshSavedAccount();
+    }
+
+    // Reads the saved account again and, when it differs, redraws the open account dialog.
+    async refreshSavedAccount() {
+        const before = `${this.appSettings?.apiKey ?? ''}\n${this.appSettings?.remoteAccountEmail ?? ''}`;
+        await this.refreshAccountSettings();
+        const after = `${this.appSettings?.apiKey ?? ''}\n${this.appSettings?.remoteAccountEmail ?? ''}`;
+        if (after !== before) void this.remoteAccountPanel?.refresh();
     }
 
     showModal(title, content, { onClose = null, beforeClose = null } = {}) {

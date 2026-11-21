@@ -316,6 +316,33 @@ test('linking updates the key baseline while preserving unrelated settings draft
     assert.equal(key.value, '••••••••new1');
 });
 
+test('a key removed in another window clears the box and its baseline, but never a typed replacement', t => {
+    harness(t);
+    const key = { value: '••••••••old1', dataset: { originalValue: '••••••••old1' } };
+    const computerName = { value: 'Saved machine' };
+    const root = { querySelector: selector => ({ '#setting-api-key': key, '#setting-computer-name': computerName })[selector] || null };
+    const controller = new SettingsController({ setAppSettings() {} });
+    controller._settingsRoot = root;
+    controller._settingsSnapshot = controller._captureSettingsSnapshot(root);
+    computerName.value = 'Unsaved machine';
+
+    controller._applyRemovedApiKey(root);
+
+    assert.equal(key.value, '');
+    assert.equal(key.dataset.originalValue, '', 'a later Save does not send a remove-key request again');
+    assert.equal(computerName.value, 'Unsaved machine');
+    assert.equal(controller._settingsDirty, true, 'the unrelated draft is still unsaved');
+    computerName.value = 'Saved machine';
+    controller._updateDirtyState(root);
+    assert.equal(controller._settingsDirty, false, 'the removal alone does not dirty Settings');
+
+    key.value = 'a-key-being-pasted';
+    key.dataset.originalValue = '••••••••old2';
+    controller._applyRemovedApiKey(root);
+    assert.equal(key.value, 'a-key-being-pasted', 'a replacement the user is typing stays theirs to save');
+    assert.equal(key.dataset.originalValue, '••••••••old2');
+});
+
 test('a concurrent manual clear or save uses the current saved mask instead of an earlier linked event', async t => {
     harness(t);
     for (const savedMask of ['', '••••••••manual']) {

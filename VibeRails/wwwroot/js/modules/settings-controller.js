@@ -642,6 +642,21 @@ export class SettingsController {
         this._updateDirtyState(root);
     }
 
+    // The saved key was removed somewhere else (another window signed out). Clear the box and its
+    // baseline unless the user is typing a replacement, which stays theirs to save.
+    _applyRemovedApiKey(root) {
+        if (this._settingsRoot !== root) return;
+        const input = root.querySelector('#setting-api-key');
+        if (!input || !input.dataset.originalValue || input.value !== input.dataset.originalValue) return;
+        input.value = '';
+        input.dataset.originalValue = '';
+        this._linkedKeyVersion++;
+        const snapshot = JSON.parse(this._settingsSnapshot || '{}');
+        snapshot.apiKey = '';
+        this._settingsSnapshot = JSON.stringify(snapshot);
+        this._updateDirtyState(root);
+    }
+
     async _reconcileSavedApiKey(savedSettings, linkedKeyVersion) {
         if (linkedKeyVersion === this._linkedKeyVersion) return;
         // Save and sign-in can finish in either order. An event is not proof that its

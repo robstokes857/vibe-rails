@@ -1,5 +1,9 @@
 # AGENTS.md - VibeRails Project Documentation
 
+### Our slogan 
+A developer and enterprise friendly framework that keeps vibe coding from
+going off the rails
+
 ## Shared design system
 
 Read and follow [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) before creating or changing

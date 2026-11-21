@@ -2305,6 +2305,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(DeviceLinkSecret))]
     [JsonSerializable(typeof(DeviceLinkCreated))]
     [JsonSerializable(typeof(DeviceLinkToken))]
+    [JsonSerializable(typeof(DeviceLinkRefusal))]
     [JsonSerializable(typeof(UserScriptLibrary))]
     [JsonSerializable(typeof(PythonScriptSettingsRequest))]
 [JsonSerializable(typeof(SavePresetRequest))]

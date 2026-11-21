@@ -591,6 +591,16 @@ namespace VibeRails
             // settings changes so API-key rotation is reflected by the next handshake.
             serviceCollection.AddSingleton<IRemoteHttpRelayClient, RemoteHttpRelayClient>();
 
+            // Every backend, tab children included, follows the saved account: only the root that
+            // signs in, switches or removes it updates its own runtime key. Roots also tell their
+            // open dashboards. It stays idle until Init.StartUpChecks has applied the saved account.
+            serviceCollection.AddSingleton(sp => new SavedAccountFollower(
+                Config.Store,
+                static () => global::VibeRails.Init.SavedAccountStamp,
+                sp.GetRequiredService<IRemoteHttpRelayClient>(),
+                isActiveRootBackendProcess ? sp.GetRequiredService<IAppEventBus>() : null));
+            serviceCollection.AddHostedService(sp => sp.GetRequiredService<SavedAccountFollower>());
+
             // Authentication service (singleton - one token per instance)
             serviceCollection.AddSingleton<IAuthService, AuthService>();
             serviceCollection.AddSingleton<IAuthBootstrapService, AuthBootstrapService>();

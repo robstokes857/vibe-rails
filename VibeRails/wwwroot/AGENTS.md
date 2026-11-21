@@ -33,11 +33,20 @@ per-definition guard only until the request returns, so the same Agent or Quick 
 be started again while an earlier tab is open, and the server claims picker
 tabs outside the agent limits ([Launches README](../Services/Launches/README.md)).
 The backend opens the tab before it answers `POST /runs`, so `launch()` shows "Opening
-<name>…" before the request, not after. The tab the launch was picked in is not the
-tab that runs it: a sessionless tab holding a `preset:` selection counts as a blank
-placeholder (`selectBlankPlaceholderTabIds`, `startsHere`) and is pruned once the run's
-tab is live, and until then it is labelled with the launch's name
-(`LlmPickerController.savedLaunchName`), never the generic "Saved launch".
+<name>…" before the request, not after. While the selected launch's request is pending,
+Start is disabled with `aria-busy` and a small adjacent spinner (`terminal-start-progress`). The spinner's
+space stays reserved to avoid layout shifts. `updateStartButtonState` reads the existing
+per-definition launch guard and only updates control chrome: no fit, resize or reconnect.
+Changing the selection updates the indicator; success, failure and prompt cancellation release it.
+The tab the launch was picked in is not the tab that runs it. Until the run's tab is live,
+the placeholder is labelled with the launch's name (`LlmPickerController.savedLaunchName`),
+never the generic "Saved launch". Cleanup considers a sessionless tab holding a `preset:`
+selection only after a successful status read reports no session ID
+(`selectBlankPlaceholderTabIds`, `startsHere`).
+Automatic cleanup uses `POST /terminal/tabs/{id}/prune`, never the user-close DELETE.
+The backend serializes it with Start and removes only a confirmed idle, never-started,
+ordinary host. Unknown status, earlier startup, a pending Start, owned/Automation hosts,
+refusal, or an older backend without the guarded endpoint retain the tab and viewer.
 `followLaunchTerminal` returns `{ opened, run }`; `openLaunchTerminal` is its boolean form.
 It gives up on a run still `queued` after 30 one-second polls, and `followTerminalTab` then
 cancels that run so no tab opens later unasked. A claimed run is followed for 120 polls.
@@ -396,6 +405,13 @@ account superseded by a manual key save. Settings saves also refresh account sta
 and linking overlap, re-read the saved key rather than assuming event arrival order wins.
 Link completion refreshes only the masked key and its dirty-tracking baseline. It must
 preserve unrelated Settings drafts and must not call `_markSettingsClean` on the whole form.
+
+Another VibeRails window can sign in, switch accounts or remove the key. The root then sends
+`account_settings_changed` (no payload), and `app.refreshSavedAccount` reads `/api/v1/settings`
+again; opening the account dialog does the same read. Only a changed mask or email redraws the
+open dialog. A key removed elsewhere clears the Settings box and its baseline through
+`_applyRemovedApiKey`, unless the user is typing a replacement. Never show sign-in or an account
+from this page's own copy of the settings when the saved file may be newer.
 
 ## Settings signing keys
 

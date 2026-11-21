@@ -74,9 +74,18 @@ async function openSettings(page, { bridge = false, signedIn = false, email = 'r
             settings.remoteAccountEmail = 'rob@example.com';
             state = { status: 'linked', keyHint: MASK, account: { email: 'rob@example.com' } };
         },
+        // Another VibeRails window changed the saved account. This backend ran no sign-in of its own.
+        savedElsewhere: ({ apiKey, email }) => {
+            settings.apiKey = apiKey;
+            settings.remoteAccountEmail = email;
+            state = { status: 'idle' };
+        },
         nextStart: value => { nextStart = value; }
     };
 }
+
+const accountChangedElsewhere = page => page.evaluate(() => window.app.appEventClient._handleMessage(
+    JSON.stringify({ type: 'account_settings_changed', payload: {} })));
 
 test('account menu keeps pre-commit review requests accessible', async ({ page }) => {
     await openSettings(page, { signedIn: true });
@@ -377,6 +386,40 @@ test('sign-in completed from another tab fills an open Account settings page', a
     await expect(root.locator('[data-account-status]')).toHaveText('Logged in rob@example.com');
     await expect(root.locator('#setting-api-key')).toHaveValue(MASK);
     await expect(root.locator('#settings-save-button')).toBeDisabled();
+});
+
+test('signing in or out in another VibeRails window updates this one without a reload', async ({ page }) => {
+    const { root, calls, savedElsewhere } = await openSettings(page);
+    await root.locator('[data-account-settings-action]').click();
+    const status = page.locator('[data-remote-link-status]');
+    await expect(status).toContainText('Sign in to connect this VibeRails instance');
+
+    savedElsewhere({ apiKey: MASK, email: 'rob@example.com' });
+    await accountChangedElsewhere(page);
+    await expect(status).toHaveText('Logged in rob@example.com');
+    await expect(page.locator('[data-remote-link-start]')).toHaveText('Switch account');
+    // The open dialog hides the page behind it from assistive technology, so read the label itself.
+    await expect(page.locator('[data-action="account-menu"]')).toHaveAttribute('aria-label', 'Account menu. Signed in as rob@example.com');
+    await expect(root.locator('#setting-api-key')).toHaveValue(MASK);
+    await expect(root.locator('#settings-save-button')).toBeDisabled();
+
+    savedElsewhere({ apiKey: '', email: null });
+    await accountChangedElsewhere(page);
+    await expect(status).toContainText('Sign in to connect this VibeRails instance');
+    await expect(page.locator('[data-remote-link-start]')).toHaveText('Sign in to viberails.ai');
+    await expect(page.locator('[data-account-menu-host]')).toBeHidden();
+    await expect(root.locator('#setting-api-key')).toHaveValue('');
+    await expect(root.locator('#settings-save-button')).toBeDisabled();
+    // Nothing here started a sign-in or saved a key: the window only read what was saved.
+    expect(calls.filter(call => call.method !== 'GET' && call.pathname.startsWith('/api/v1/settings'))).toHaveLength(0);
+});
+
+test('the account dialog reads the saved account when it opens, even if this window missed the change', async ({ page }) => {
+    const { root, savedElsewhere } = await openSettings(page);
+    savedElsewhere({ apiKey: MASK, email: 'rob@example.com' });
+    await root.locator('[data-account-settings-action]').click();
+    await expect(page.locator('[data-remote-link-status]')).toHaveText('Logged in rob@example.com');
+    await expect(page.locator('[data-remote-link-start]')).toHaveText('Switch account');
 });
 
 test('manual keys have an honest fallback and account emails render as text', async ({ page }) => {

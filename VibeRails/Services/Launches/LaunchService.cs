@@ -148,7 +148,8 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
         return await store.SaveBindingAsync(binding, request.ExpectedRevision, ct);
     }
 
-    public async Task<LaunchRun> EnqueueAsync(string type, string id, LaunchExecutionContext context, CancellationToken ct = default, long? expectedRevision = null)
+    public async Task<LaunchRun> EnqueueAsync(string type, string id, LaunchExecutionContext context, CancellationToken ct = default,
+        long? expectedRevision = null, LaunchRequestOwner? requestOwner = null)
     {
         if (await store.FindOccurrenceAsync(ProjectKey(context.ProjectPath), context.OccurrenceId, ct) is { } existing)
         {
@@ -160,7 +161,8 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
         var snapshot = await SnapshotAsync(type, id, Keyed(context), ct);
         if (expectedRevision is not null && snapshot.Revision != expectedRevision)
             throw new LaunchConflictException("Definition changed while composing the launch. Try again.", snapshot.Revision);
-        return await store.EnqueueAsync(snapshot, ct: ct);
+        return requestOwner is null ? await store.EnqueueAsync(snapshot, ct: ct)
+            : await store.EnqueueRequestedTabAsync(snapshot, requestOwner, ct: ct);
     }
 
     /// <summary>
@@ -173,13 +175,14 @@ public sealed class LaunchService(ILaunchStore store, IAutomationScriptService s
         ProjectRoot = context.ProjectRoot ?? ProjectRoot(context.ProjectPath)
     };
 
-    public async Task<LaunchRun> RetryAsync(string project, string id, CancellationToken ct = default)
+    public async Task<LaunchRun> RetryAsync(string project, string id, CancellationToken ct = default, LaunchRequestOwner? requestOwner = null)
     {
         var run = await GetRunAsync(project, id, ct) ?? throw new LaunchValidationException("Run not found in this project.");
         if (!run.IsTerminal) throw new LaunchConflictException("Wait for the original run to finish before retrying.");
         await ValidateSnapshotAsync(run.Snapshot, ct);
         var snapshot = run.Snapshot with { Context = run.Snapshot.Context with { OccurrenceId = "retry:" + Guid.NewGuid().ToString("N") } };
-        var retry = await store.EnqueueAsync(snapshot, id, ct);
+        var retry = requestOwner is null ? await store.EnqueueAsync(snapshot, id, ct)
+            : await store.EnqueueRequestedTabAsync(snapshot, requestOwner, id, ct);
         if (snapshot.Context.LaneEntryId is { } priorEntry && boards is not null)
             await boards.UpdateLaunchEventAsync(priorEntry, id, run.Status, ct);
         if (snapshot.Context.LaneEntryId is { } entry && boards is not null

@@ -63,6 +63,44 @@ test('an account refresh replaces the organization with the saved one, or clears
     assert.equal(app.appSettings.remoteAccountOrganization, null);
 });
 
+// Another VibeRails window signed in or out: this page's saved-account copy is older than the file.
+test('an account change made in another window redraws the open account dialog', async () => {
+    const app = appFixture();
+    const refreshes = [];
+    app.remoteAccountPanel = { refresh: () => { refreshes.push(app.appSettings.apiKey); } };
+    app.apiCall = async () => ({ apiKey: 'mask-from-another-window', remoteAccountEmail: 'rob@example.com' });
+    await app.refreshSavedAccount();
+    assert.deepEqual(refreshes, ['mask-from-another-window'], 'the dialog redraws after the saved account is read');
+
+    await app.refreshSavedAccount();
+    assert.equal(refreshes.length, 1, 'an unchanged account costs the dialog nothing');
+
+    app.apiCall = async () => ({ apiKey: '', remoteAccountEmail: null });
+    await app.refreshSavedAccount();
+    assert.deepEqual(refreshes, ['mask-from-another-window', ''], 'signing out elsewhere redraws it too');
+
+    app.remoteAccountPanel = null;
+    app.apiCall = async () => ({ apiKey: 'later-mask', remoteAccountEmail: 'rob@example.com' });
+    await app.refreshSavedAccount();
+    assert.equal(app.appSettings.apiKey, 'later-mask', 'with no dialog open only the saved account updates');
+});
+
+test('a key removed in another window clears the open Settings box, a pasted one replaces it', async () => {
+    const app = appFixture();
+    const root = { querySelector: () => ({ dataset: { originalValue: 'old-mask' } }) };
+    const applied = [];
+    app.settingsController = {
+        _settingsRoot: root,
+        _applyLinkedApiKey: (target, mask) => applied.push(['linked', target === root, mask]),
+        _applyRemovedApiKey: target => applied.push(['removed', target === root])
+    };
+    app.apiCall = async () => ({ apiKey: '', remoteAccountEmail: null });
+    await app.refreshAccountSettings();
+    app.apiCall = async () => ({ apiKey: 'new-mask', remoteAccountEmail: 'rob@example.com' });
+    await app.refreshAccountSettings();
+    assert.deepEqual(applied, [['removed', true], ['linked', true, 'new-mask']]);
+});
+
 test('unavailable account refresh retains the last known display', async () => {
     const app = appFixture();
     app.setAppSettings({ apiKey: 'saved-mask', remoteAccountEmail: 'rob@example.com' });

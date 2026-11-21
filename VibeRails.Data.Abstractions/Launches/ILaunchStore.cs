@@ -18,6 +18,8 @@ public interface ILaunchStore
     Task ApproveScriptAsync(string projectPath, string definitionId, string hash, CancellationToken ct = default);
     Task<bool> IsScriptApprovedAsync(string projectPath, string definitionId, string hash, CancellationToken ct = default);
     Task<LaunchRun> EnqueueAsync(LaunchSnapshot snapshot, string? sourceRunId = null, CancellationToken ct = default);
+    /// <summary>Enqueues and claims a new interactive picker run in one transaction. Other presentations remain queued; duplicate deliveries retain their original owner.</summary>
+    Task<LaunchRun> EnqueueRequestedTabAsync(LaunchSnapshot snapshot, LaunchRequestOwner owner, string? sourceRunId = null, CancellationToken ct = default);
     Task<LaunchRun?> GetRunAsync(string id, CancellationToken ct = default);
     Task<LaunchRun?> FindOccurrenceAsync(string project, string occurrence, CancellationToken ct = default);
     Task<LaunchRunPage> ListRunsAsync(string projectPath, string? definitionId = null, long? before = null, int limit = 50, CancellationToken ct = default);

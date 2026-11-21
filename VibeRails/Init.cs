@@ -208,11 +208,7 @@ namespace VibeRails
             using var settingsLease = Config.AcquireWriteLock();
             var settings = Config.LoadFresh();
             ParserConfigs.SetRemoteAccess(settings.RemoteAccess);
-            ParserConfigs.SetApiKey(settings.ApiKey);
-            // A hand-edited legacy/inconsistent file must never make the relay effective without
-            // a credential, even if RouteThroughVibeRailsAi was set to true.
-            ParserConfigs.SetRouteThroughVibeRailsAi(
-                settings.RouteThroughVibeRailsAi && !string.IsNullOrWhiteSpace(settings.ApiKey));
+            ApplySavedAccount(settings);
             ParserConfigs.SetUseVsCodeTheme(settings.UseVsCodeTheme);
             if (!settings.McpEnabled || !settings.DataExportOptIn || !settings.DataRetentionEnabled)
             {
@@ -222,6 +218,28 @@ namespace VibeRails
                 Config.Save(settings);
             }
             ParserConfigs.SetMcpEnabled(true);
+            // Still inside the lock: the file as this process applied it.
+            SavedAccountStamp = Config.Store.Stamp() ?? default((DateTime, long));
+        }
+
+        /// <summary>
+        /// Identifies the settings file <see cref="InitAppSettings"/> took the account from. Null
+        /// until startup has run, which keeps <c>SavedAccountFollower</c> idle in a host that was
+        /// composed without it.
+        /// </summary>
+        internal static (DateTime WriteTimeUtc, long Length)? SavedAccountStamp { get; private set; }
+
+        /// <summary>
+        /// Makes this process use the saved viberails.ai account: at startup, and again whenever
+        /// another VibeRails process links, switches or removes it (<c>SavedAccountFollower</c>).
+        /// </summary>
+        internal static void ApplySavedAccount(Settings settings)
+        {
+            ParserConfigs.SetApiKey(settings.ApiKey);
+            // A hand-edited legacy/inconsistent file must never make the relay effective without
+            // a credential, even if RouteThroughVibeRailsAi was set to true.
+            ParserConfigs.SetRouteThroughVibeRailsAi(
+                settings.RouteThroughVibeRailsAi && !string.IsNullOrWhiteSpace(settings.ApiKey));
         }
 
         public static async Task TryInstallGitHooksIfEnabledAsync(

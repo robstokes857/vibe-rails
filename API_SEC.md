@@ -1357,6 +1357,13 @@ responses. Compare the original saved key before replacement so manual changes w
 email is response-only, written with the key and its full SHA-256 fingerprint; a mismatch hides
 it. Never return the raw credential/fingerprint. See [account-link flow](docs/account-link-auth-flow.md).
 
+Every backend follows the saved key (`SavedAccountFollower`): a key another VibeRails process
+saved or removed replaces this process's runtime key within seconds, so removing the key stops
+uploads from every window and tab child without a restart. It reads only the user's own
+settings file, under the settings lock; it adds no route, listener or credential. The root's
+`account_settings_changed` event has an empty payload. A refused token response contributes one
+fixed code (`key_limit`) to the dialog; no other text from the site reaches it.
+
 ### Jira (VB-40 / VIBE-102)
 
 **Owner-requested automatic activity sharing (2026-10-09):** new Board comments on connected

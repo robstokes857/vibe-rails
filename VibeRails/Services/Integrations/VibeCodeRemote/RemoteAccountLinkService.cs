@@ -16,6 +16,9 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote;
 public sealed class RemoteAccountLinkService : IDisposable
 {
     private const int MaxBodyBytes = 16 * 1024;
+    // The dialog polls every 3 to 60 seconds, and a browser slows a background tab's timers to
+    // about one a minute, so two quiet minutes mean nobody is looking at this attempt.
+    internal static readonly TimeSpan UnwatchedAfter = TimeSpan.FromMinutes(2);
     private readonly HttpClient _client;
     private readonly Uri _endpoint;
     private readonly IRemoteAccountKeyStore _keys;
@@ -85,6 +88,7 @@ public sealed class RemoteAccountLinkService : IDisposable
                 attempt.DeviceCode = created.DeviceCode;
                 attempt.ExpiresAt = _clock.GetUtcNow().AddSeconds(created.ExpiresIn);
                 attempt.NextPoll = _clock.GetUtcNow().AddSeconds(created.Interval);
+                attempt.LastPolled = _clock.GetUtcNow();
                 _status = new("pending", created.UserCode, verification.AbsoluteUri, attempt.ExpiresAt, created.Interval);
                 return _status;
             }
@@ -103,16 +107,45 @@ public sealed class RemoteAccountLinkService : IDisposable
                 _status = new("idle");
             if (_attempt is not { } attempt || _status.Status != "pending" || attempt.DeviceCode is null)
                 return Task.FromResult(_status);
+            var now = _clock.GetUtcNow();
+            // The account dialog polls while it is open. A long silence means it was closed.
+            var unwatched = now - attempt.LastPolled > UnwatchedAfter;
+            attempt.LastPolled = now;
             if (attempt.Poll is { IsCompleted: false }) return attempt.Poll;
             if (attempt.Token is not null) return Task.FromResult(Save(attempt));
-            if (!string.Equals(_keys.Read(), attempt.OriginalKey, StringComparison.Ordinal))
-                return Task.FromResult(Finish(attempt, new("error", Error: "key_changed")));
-            if (_clock.GetUtcNow() >= attempt.ExpiresAt)
-                return Task.FromResult(Finish(attempt, new("expired", Error: "expired_token")));
-            if (_clock.GetUtcNow() < attempt.NextPoll) return Task.FromResult(_status);
-            attempt.NextPoll = _clock.GetUtcNow().AddSeconds(_status.Interval);
+            var keyChanged = !string.Equals(_keys.Read(), attempt.OriginalKey, StringComparison.Ordinal);
+            var expired = now >= attempt.ExpiresAt;
+            // An attempt nobody was watching when it ended has nothing to report. Its code may
+            // have expired, or the key was saved some other way (another window signed in, or a
+            // key was pasted): opening the dialog later must show the saved account, not the
+            // failure of a sign-in that was given up.
+            if (unwatched && (keyChanged || expired)) return AbandonAsync(attempt, cancelRemote: !expired);
+            if (keyChanged) return Task.FromResult(Finish(attempt, new("error", Error: "key_changed")));
+            if (expired) return Task.FromResult(Finish(attempt, new("expired", Error: "expired_token")));
+            if (now < attempt.NextPoll) return Task.FromResult(_status);
+            attempt.NextPoll = now.AddSeconds(_status.Interval);
             attempt.Poll = PollCoreAsync(attempt);
             return attempt.Poll;
+        }
+    }
+
+    // Caller holds the gate. The remote request, if still pending, is expired best-effort so a
+    // late approval in the browser cannot mint a key that nothing will collect.
+    private Task<RemoteAccountLinkStatus> AbandonAsync(Attempt attempt, bool cancelRemote)
+    {
+        // No token request is in flight here: PollAsync returns the running one before it gets
+        // this far, so there is nothing to cancel.
+        var code = attempt.DeviceCode;
+        _attempt = null;
+        attempt.Token = null;
+        attempt.DeviceCode = null;
+        var result = _status = new("idle");
+        return cancelRemote && code is not null ? Remote() : Task.FromResult(result);
+
+        async Task<RemoteAccountLinkStatus> Remote()
+        {
+            await CancelRemoteAsync(code);
+            return result;
         }
     }
 
@@ -135,9 +168,10 @@ public sealed class RemoteAccountLinkService : IDisposable
                     return Save(attempt);
                 }
             }
-            if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Gone or HttpStatusCode.NotFound)
-                return Finish(attempt, response.StatusCode == HttpStatusCode.Forbidden
-                    ? new("denied", Error: "access_denied") : new("expired", Error: "expired_token"));
+            if (response.StatusCode == HttpStatusCode.Forbidden)
+                return Finish(attempt, new("denied", Error: await DeniedReasonAsync(response, deadline.Token)));
+            if (response.StatusCode is HttpStatusCode.Gone or HttpStatusCode.NotFound)
+                return Finish(attempt, new("expired", Error: "expired_token"));
             lock (_gate)
             {
                 if (!Current(attempt)) return _status;
@@ -170,8 +204,13 @@ public sealed class RemoteAccountLinkService : IDisposable
         var token = attempt.Token!;
         bool saved;
         try { saved = _keys.TrySave(token.ApiKey, attempt.OriginalKey, token.Account?.Email); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        // Any failure, not only a busy or locked file: the approved key cannot be redeemed twice,
+        // so it stays in memory and the next poll saves it again. An unexpected exception used to
+        // escape as a failed request, and the retry then read its own saved key as a competing edit.
+        catch (Exception ex)
         {
+            Serilog.Log.Warning("[Account] Could not save the approved account key ({ExceptionType}); retrying",
+                ex.GetType().Name);
             _status = _status with { Error = "save_failed", ExpiresAt = null };
             return _status; // Keep the received key in memory; do not redeem it again.
         }
@@ -201,17 +240,34 @@ public sealed class RemoteAccountLinkService : IDisposable
             if (attempt is not null) attempt.Token = null;
         }
         attempt?.Cancellation.Cancel();
-        if (attempt?.DeviceCode is { } code)
-        {
-            try
-            {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                using var message = SecretRequest(HttpMethod.Delete, "/api/v1/device-links", code);
-                using var response = await _client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
-            }
-            catch (Exception ex) when (ex is HttpRequestException or IOException or OperationCanceledException) { }
-        }
+        if (attempt?.DeviceCode is { } code) await CancelRemoteAsync(code);
         return result;
+    }
+
+    private async Task CancelRemoteAsync(string code)
+    {
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var message = SecretRequest(HttpMethod.Delete, "/api/v1/device-links", code);
+            using var response = await _client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or OperationCanceledException) { }
+    }
+
+    // The site refuses a request for two different reasons with the same status. The fixed code
+    // for a full key list lets the dialog say what to do; anything else is a plain denial.
+    private static async Task<string> DeniedReasonAsync(HttpResponseMessage response, CancellationToken token)
+    {
+        try
+        {
+            var body = await ReadAsync(response, AppJsonSerializerContext.Default.DeviceLinkRefusal, token);
+            return body.Error == "key_limit" ? "key_limit" : "access_denied";
+        }
+        catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException or OperationCanceledException)
+        {
+            return "access_denied";
+        }
     }
 
     private bool Current(Attempt attempt) => ReferenceEquals(_attempt, attempt) && !_disposed;
@@ -281,6 +337,7 @@ public sealed class RemoteAccountLinkService : IDisposable
         public string? DeviceCode { get; set; }
         public DateTimeOffset ExpiresAt { get; set; }
         public DateTimeOffset NextPoll { get; set; }
+        public DateTimeOffset LastPolled { get; set; }
         public DeviceLinkToken? Token { get; set; }
         public Task<RemoteAccountLinkStatus>? Poll { get; set; }
     }

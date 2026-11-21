@@ -233,10 +233,15 @@ export class AiAgentsController {
         if (type === 'preset') nativeTerminal = !terminalTab;
         if (this.launching.has(id)) return;
         this.launching.add(id);
+        const refreshLaunchButton = () => this.app.terminalController?.manager?.updateStartButtonState?.();
+        refreshLaunchButton();
         // The guard covers composing and queuing one run, so a double click queues it once.
         let composing = true;
         const composed = () => {
-            if (composing) this.launching.delete(id);
+            if (composing) {
+                this.launching.delete(id);
+                refreshLaunchButton();
+            }
             composing = false;
         };
         try {

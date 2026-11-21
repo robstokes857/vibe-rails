@@ -51,14 +51,30 @@ public sealed class ApiKeyStore : IRemoteAccountKeyStore
         using (_settings.AcquireWriteLock())
         {
             var settings = _settings.LoadFresh();
-            if (!string.Equals(settings.ApiKey, expectedApiKey, StringComparison.Ordinal))
+            // A retry finds the approved key already in the file when an earlier attempt wrote it
+            // and then failed. That is this sign-in, not a competing edit: reporting "key changed"
+            // here told the user a completed sign-in had failed.
+            var alreadySaved = string.Equals(settings.ApiKey, apiKey, StringComparison.Ordinal);
+            if (!alreadySaved && !string.Equals(settings.ApiKey, expectedApiKey, StringComparison.Ordinal))
                 return false;
-            settings.ApiKey = apiKey;
-            settings.RemoteAccountEmail = accountEmail;
-            settings.RemoteAccountKeyFingerprint = Fingerprint(apiKey);
-            _settings.Save(settings);
+            var fingerprint = Fingerprint(apiKey);
+            if (!alreadySaved || settings.RemoteAccountEmail != accountEmail
+                || settings.RemoteAccountKeyFingerprint != fingerprint)
+            {
+                settings.ApiKey = apiKey;
+                settings.RemoteAccountEmail = accountEmail;
+                settings.RemoteAccountKeyFingerprint = fingerprint;
+                _settings.Save(settings);
+            }
             ParserConfigs.SetApiKey(apiKey);
-            _relay.Reset();
+            // The key is saved and active. The relay reconnects with the current key on its next
+            // request anyway, so a failed reset must not turn the saved key into a failed sign-in.
+            try { _relay.Reset(); }
+            catch (Exception ex)
+            {
+                Serilog.Log.Warning("[Account] Could not reset the HTTP relay after saving the account key ({ExceptionType})",
+                    ex.GetType().Name);
+            }
             return true;
         }
     }

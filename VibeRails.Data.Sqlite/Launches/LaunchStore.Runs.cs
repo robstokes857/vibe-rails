@@ -18,7 +18,13 @@ public sealed partial class LaunchStore
     private static int? Number(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : r.GetInt32(i);
     private static DateTime? Time(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : Date(r.GetString(i));
 
-    public async Task<LaunchRun> EnqueueAsync(LaunchSnapshot snapshot, string? sourceRunId = null, CancellationToken ct = default)
+    public Task<LaunchRun> EnqueueAsync(LaunchSnapshot snapshot, string? sourceRunId = null, CancellationToken ct = default) =>
+        EnqueueCoreAsync(snapshot, sourceRunId, null, ct);
+
+    public Task<LaunchRun> EnqueueRequestedTabAsync(LaunchSnapshot snapshot, LaunchRequestOwner owner, string? sourceRunId = null, CancellationToken ct = default) =>
+        EnqueueCoreAsync(snapshot, sourceRunId, owner, ct);
+
+    private async Task<LaunchRun> EnqueueCoreAsync(LaunchSnapshot snapshot, string? sourceRunId, LaunchRequestOwner? owner, CancellationToken ct)
     {
         LaunchValidation.ValidateSnapshot(snapshot);
         using var db = Open();
@@ -61,13 +67,20 @@ public sealed partial class LaunchStore
             sourceRunId is null ? snapshot.Revision : null, snapshot.Context.ProjectPath,
             automatic: sourceRunId is null && snapshot.Context.TriggerKind != "manual", ct);
         var id = "run_" + Guid.NewGuid().ToString("N");
+        // Apply only after restoring a retry's authoritative snapshot. No scheduler, including
+        // an older version, can observe a new picker run between its enqueue and its claim.
+        var requestOwner = snapshot.IsInteractiveTerminal ? owner : null;
         using (var cmd = Command(db, """
-            INSERT INTO Runs(Id,DefinitionId,DefinitionType,ProjectPath,OccurrenceId,Snapshot,Status,QueuedUTC,SourceRunId)
-            VALUES($id,$definition,$type,$project,$event,$snapshot,'queued',$now,$source);
+            INSERT INTO Runs(Id,DefinitionId,DefinitionType,ProjectPath,OccurrenceId,Snapshot,Status,QueuedUTC,SourceRunId,
+                ClaimToken,OwnerPid,OwnerStartedUTC,ClaimedUTC)
+            VALUES($id,$definition,$type,$project,$event,$snapshot,$status,$now,$source,
+                $token,$pid,$started,CASE WHEN $token IS NULL THEN NULL ELSE $now END);
             """, tx, ("$id", id), ("$definition", snapshot.DefinitionId), ("$type", snapshot.DefinitionType),
             ("$project", snapshot.Context.ProjectPath), ("$event", snapshot.Context.OccurrenceId),
             ("$snapshot", JsonSerializer.Serialize(snapshot, StorageJsonSerializerContext.Default.LaunchSnapshot)),
-            ("$now", Stamp(DateTime.UtcNow)), ("$source", sourceRunId)))
+            ("$now", Stamp(DateTime.UtcNow)), ("$source", sourceRunId),
+            ("$status", requestOwner is null ? "queued" : "claimed"), ("$token", requestOwner?.Token),
+            ("$pid", requestOwner?.Pid), ("$started", requestOwner is null ? null : Stamp(requestOwner.StartedUtc))))
             await cmd.ExecuteNonQueryAsync(ct);
         tx.Commit();
         return (await GetRunAsync(id, ct))!;

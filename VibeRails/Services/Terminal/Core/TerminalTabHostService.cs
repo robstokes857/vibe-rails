@@ -44,6 +44,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         public SemaphoreSlim SessionGate { get; } = new(1, 1);
         public string? LastStartedSessionId { get; set; }
         public bool HasUnconfirmedStart { get; set; }
+        public bool StartRequested { get; set; }
         public HashSet<string> PendingAgentClosures { get; } = new(StringComparer.Ordinal);
     }
 
@@ -440,6 +441,35 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         }
     }
 
+    /// <inheritdoc />
+    public async Task<bool> PruneUnusedTabAsync(string tabId, CancellationToken cancellationToken = default)
+    {
+        var child = GetChildOrNull(tabId);
+        if (child is null || child.Owner is not null || child.Automation is not null
+            || !await child.SessionGate.WaitAsync(0, cancellationToken)) return false;
+        try
+        {
+            if (!ReferenceEquals(GetChildOrNull(tabId), child) || child.StartRequested
+                || child.LastStartedSessionId is not null || child.HasUnconfirmedStart) return false;
+            try
+            {
+                var status = await GetTerminalStatusFromChildAsync(child, cancellationToken);
+                if (status is not { HasActiveSession: false, SessionId: null, CanReclaim: true }) return false;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "[TerminalTabs] Keeping tab {TabId}; unused status could not be confirmed", tabId);
+                return false;
+            }
+            // StartSessionAsync must acquire this same gate and recheck registry identity.
+            // Never turn a stale browser snapshot into permission to stop a session.
+            cancellationToken.ThrowIfCancellationRequested();
+            return await DeleteTabAsync(tabId, CancellationToken.None);
+        }
+        finally { child.SessionGate.Release(); }
+    }
+
     public async Task<bool> DeleteTabAsync(string tabId, CancellationToken cancellationToken = default)
     {
         TerminalChildProcess? child;
@@ -503,6 +533,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         {
             if (!ReferenceEquals(GetChildOrNull(tabId), child))
                 throw new InvalidOperationException("Terminal tab has closed.");
+            child.StartRequested = true; // Monotonic: even a stopped or failed launch is not a blank placeholder.
             child.LastStartedSessionId = null; // An uncertain start must never inherit an old close.
             child.Automation?.BeginSessionStart();
             startBegan = true;

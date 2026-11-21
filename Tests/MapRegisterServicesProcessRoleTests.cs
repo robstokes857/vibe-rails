@@ -78,6 +78,26 @@ public sealed class MapRegisterServicesProcessRoleTests
                 descriptor.ServiceType == typeof(IHostedService) && descriptor.ImplementationType == job));
     }
 
+    // Signing in, switching accounts or removing the key happens in one root. Every other backend,
+    // the tab children that run the CLIs included, has to follow the saved key or it keeps
+    // uploading with the previous one until it is restarted.
+    [Theory]
+    [MemberData(nameof(ProcessRoles))]
+    public async Task Register_FollowsTheSavedAccountInEveryBackendProcess(string[] args, bool expectedActiveRoot)
+    {
+        _ = expectedActiveRoot;
+        var services = new ServiceCollection();
+        MapRegisterServices.Register(services, args, "http://127.0.0.1:12345");
+        // The follower resets the HTTP relay, which the container can only dispose asynchronously.
+        await using var provider = services.BuildServiceProvider();
+
+        var follower = provider.GetRequiredService<VibeRails.Services.Integrations.VibeCodeRemote.SavedAccountFollower>();
+        Assert.Contains(services, item => item.ServiceType == typeof(IHostedService) && item.ImplementationFactory is not null);
+
+        // This test host never ran startup, so nothing here may read the developer's settings file.
+        Assert.False(follower.Check());
+    }
+
     [Fact]
     public async Task RetiredJobTick_IsRecognizedButPerformsNoWork()
     {
