@@ -79,13 +79,14 @@ public sealed partial class BoardStore
         await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
         var board = await ReadBoardAsync(connection, transaction, project, boardId, cancellationToken);
         if (board is null || board.Name != expectedBoard.Name || board.DisplayPrefix != expectedBoard.DisplayPrefix) return null;
-        var columns = await ReadSharingColumnsAsync(connection, transaction, project, boardId, cancellationToken);
+        var columns = await ReadColumnsAsync(connection, transaction, project, boardId, cancellationToken);
         static string Signature(IEnumerable<BoardColumnRecord> rows) => string.Join('\n', rows.OrderBy(c => c.Position)
-            .Select(c => $"{c.Id}\t{c.Name}\t{c.Color}\t{c.Position}"));
+            .Select(c => $"{c.Id}\t{c.Name}\t{c.Color}\t{c.Position}\t{c.IsDefaultForNewCards}"));
         if (Signature(columns) != Signature(expectedColumns)) return null;
+        var defaultColumnId = columns.FirstOrDefault(c => c.IsDefaultForNewCards)?.Id;
         var unchangedHash = BoardLayoutHash.Compute(board.Name, remote.KeyPrefix, board.EffectiveDisplayPrefix,
-            columns.Select(c => new BoardRemoteLane(c.Id, c.Name, c.Color, c.Position)));
-        if (unchangedHash == BoardLayoutHash.Compute(remote.Name, remote.KeyPrefix, remote.DisplayPrefix ?? remote.KeyPrefix, remote.Lanes))
+            columns.Select(c => new BoardRemoteLane(c.Id, c.Name, c.Color, c.Position)), defaultColumnId);
+        if (unchangedHash == BoardLayoutHash.Compute(remote.Name, remote.KeyPrefix, remote.DisplayPrefix ?? remote.KeyPrefix, remote.Lanes, defaultColumnId))
             return unchangedHash;
         var now = DateTime.UtcNow;
         await ExecuteSharingAsync(connection, transaction,
@@ -114,9 +115,10 @@ public sealed partial class BoardStore
                 "UPDATE BoardCards SET ColumnId=$fallback WHERE ColumnId=$id; DELETE FROM BoardColumns WHERE Id=$id AND BoardId=$board;",
                 cancellationToken, ("$fallback", remote.Lanes[0].Id), ("$id", removed.Id), ("$board", boardId));
         }
-        var finalColumns = await ReadSharingColumnsAsync(connection, transaction, project, boardId, cancellationToken);
+        var finalColumns = await ReadColumnsAsync(connection, transaction, project, boardId, cancellationToken);
         var hash = BoardLayoutHash.Compute(remote.Name, remote.KeyPrefix, remote.DisplayPrefix ?? remote.KeyPrefix,
-            finalColumns.Select(c => new BoardRemoteLane(c.Id, c.Name, c.Color, c.Position)));
+            finalColumns.Select(c => new BoardRemoteLane(c.Id, c.Name, c.Color, c.Position)),
+            finalColumns.FirstOrDefault(c => c.IsDefaultForNewCards)?.Id);
         await ExecuteSharingAsync(connection, transaction, "UPDATE BoardSyncLinks SET LayoutHash=$hash WHERE BoardId=$board;",
             cancellationToken, ("$hash", hash), ("$board", boardId));
         await transaction.CommitAsync(cancellationToken);
@@ -210,19 +212,6 @@ public sealed partial class BoardStore
 
     private static async Task<bool> ColumnExistsAsync(SqliteConnection db, SqliteTransaction tx, string id, CancellationToken ct)
         => await ScalarLongAsync(db, tx, "SELECT COUNT(*) FROM BoardColumns WHERE Id=$id", ("$id", id), ct) != 0;
-
-    private static async Task<List<BoardColumnRecord>> ReadSharingColumnsAsync(SqliteConnection db, SqliteTransaction tx,
-        string project, string board, CancellationToken ct)
-    {
-        await using var command = db.CreateCommand(); command.Transaction = tx;
-        command.CommandText = "SELECT Id,Name,Position,Color,CreatedUTC,UpdatedUTC FROM BoardColumns WHERE BoardId=$board ORDER BY Position";
-        command.Parameters.AddWithValue("$board", board);
-        var rows = new List<BoardColumnRecord>();
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) rows.Add(new(reader.GetString(0), project, reader.GetString(1), reader.GetInt32(2), reader.GetString(3),
-            ParseDb(reader.GetString(4)), ParseDb(reader.GetString(5)), board));
-        return rows;
-    }
 
     private static async Task ExecuteSharingAsync(SqliteConnection db, SqliteTransaction tx, string sql, CancellationToken ct,
         params (string Key, object? Value)[] args)

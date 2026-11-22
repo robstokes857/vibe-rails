@@ -144,6 +144,10 @@ and failures appear only in Vibe AI; there are no new MCP tools or status fields
 
 ## Local board discovery (VIBE-28)
 
+`create_board_card` should omit `column` unless an explicit destination is wanted. It resolves
+the selected board's saved default lane inside the card transaction, falling back to the
+left-most lane only when none is selected. Explicit destinations take precedence.
+
 Board MCP tools can address all boards in the local Board store. `list_boards` lists the resolved
 current project's boards first and other local projects in a separate section with project paths.
 Use `board=<id>` with `list_board_columns`, `list_board_cards` or `create_board_card` to select

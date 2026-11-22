@@ -265,7 +265,10 @@ stops the run-order write. One lane per local board can be selected; choosing an
 The card editor and card creation through the service/MCP use that lane when no lane is
 explicitly chosen, even when it is collapsed. Existing cards and explicit lane choices stay
 where directed. Clearing the choice or deleting its lane restores the first-lane fallback.
-The preference is local board metadata, not part of the hosted sync protocol.
+The owner desktop includes the preference in hosted lane metadata as `isDefaultForNewCards`.
+Hosted MCP creation uses it too; older desktop layouts that omit every flag preserve the last
+synced selection. Explicit false flags clear it. Layout fingerprints include the selection so
+a settings-only change is pushed without a card edit. Deploy the hosted reader before the desktop writer.
 `IsDefaultForNewCards` is projected onto lane records/responses; omitted updates preserve it.
 
 ## New-board review defaults (VIBE-23)

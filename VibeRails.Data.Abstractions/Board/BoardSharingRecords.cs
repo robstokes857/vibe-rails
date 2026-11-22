@@ -41,14 +41,17 @@ public partial interface IBoardStore
 /// <summary>Shared layout fingerprint used by transactional persistence and the transport.</summary>
 public static class BoardLayoutHash
 {
-    /// <summary>Hashes the portable layout in canonical lane order.</summary>
-    public static string Compute(string name, string prefix, string? displayPrefix, IEnumerable<BoardRemoteLane> lanes)
+    /// <summary>Hashes the portable layout and the owner's selected new-card lane in canonical lane order.</summary>
+    public static string Compute(string name, string prefix, string? displayPrefix, IEnumerable<BoardRemoteLane> lanes,
+        string? defaultColumnId = null)
     {
         var canonical = new System.Text.StringBuilder().Append(name).Append('\n').Append(prefix).Append('\n').Append(displayPrefix);
         var index = 0;
         foreach (var lane in lanes.OrderBy(l => l.Position))
             canonical.Append('\n').Append(lane.Id).Append('\t').Append(lane.Name).Append('\t')
                 .Append(string.IsNullOrWhiteSpace(lane.Color) ? null : lane.Color).Append('\t').Append(index++);
+        // Preserve the existing fingerprint for boards without a selected default.
+        if (defaultColumnId is not null) canonical.Append("\ndefault:").Append(defaultColumnId);
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical.ToString())));
     }
 }
