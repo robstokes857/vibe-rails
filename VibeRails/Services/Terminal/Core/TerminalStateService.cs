@@ -14,6 +14,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     private readonly IRemoteStateService _remoteStateService;
     private readonly ITerminalIoObserverService _ioObserverService;
     private readonly IAccountEntitlements? _entitlements;
+    private readonly Func<bool> _isRemoteEnabled;
 
     // Shared across scoped TerminalStateService instances so terminal state remains
     // consistent across start/WS/reconnect/stop requests.
@@ -34,7 +35,8 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         IRemoteStateService remoteStateService,
         ITerminalIoObserverService ioObserverService,
         UserInputRecordingService? inputRecordingService = null,
-        IAccountEntitlements? entitlements = null)
+        IAccountEntitlements? entitlements = null,
+        Func<bool>? isRemoteEnabled = null)
     {
         _repository = repository;
         _inputRecordingService = inputRecordingService ?? new UserInputRecordingService(repository);
@@ -42,6 +44,9 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         _remoteStateService = remoteStateService;
         _ioObserverService = ioObserverService;
         _entitlements = entitlements;
+        // The app always asks RemoteConfig, which reads the shared settings file. Tests pass
+        // their own answer instead of writing a PIN into that file.
+        _isRemoteEnabled = isRemoteEnabled ?? (() => RemoteConfig.IsEnabled);
     }
 
     public async Task<string> CreateSessionAsync(
@@ -53,7 +58,8 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         string? initialUserInput = null,
         string? jobRunId = null,
         int initialCols = Terminal.DefaultCols,
-        int initialRows = Terminal.DefaultRows)
+        int initialRows = Terminal.DefaultRows,
+        string? consoleHost = null)
     {
         var sessionId = Guid.NewGuid().ToString();
         await _repository.CreateSessionAsync(sessionId, cli, envName, workDir, Environment.ProcessId, jobRunId);
@@ -95,9 +101,9 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         {
             lock (s_stateLock)
             {
-                s_remoteRegistrations[sessionId] = new RemoteRegistration(cli, workDir, envName);
+                s_remoteRegistrations[sessionId] = new RemoteRegistration(cli, workDir, envName, consoleHost);
             }
-            _ = RegisterRemoteSessionAsync(sessionId, cli, workDir, envName);
+            _ = RegisterRemoteSessionAsync(sessionId, cli, workDir, envName, consoleHost);
         }
 
         return sessionId;
@@ -108,10 +114,11 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     /// relay or on the plan. Remote terminals are a Pro feature of the hosted service: an account
     /// known not to have it sends no registration at all.
     /// </summary>
-    internal async Task RegisterRemoteSessionAsync(string sessionId, string cli, string workDir, string? envName)
+    internal async Task RegisterRemoteSessionAsync(string sessionId, string cli, string workDir, string? envName,
+        string? consoleHost = null)
     {
         if (await RemoteTerminalsAllowedAsync(CancellationToken.None))
-            await _remoteStateService.RegisterTerminalAsync(sessionId, cli, workDir, envName);
+            await _remoteStateService.RegisterTerminalAsync(sessionId, cli, workDir, envName, consoleHost: consoleHost);
     }
 
     private async Task<bool> RemoteTerminalsAllowedAsync(CancellationToken ct) =>
@@ -260,11 +267,14 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         // Never registers anything that was not registered at creation (Job sessions, sessions
         // started without remote), and stops once remote access or its PIN has been turned off,
         // or the account's plan is known not to include remote terminals.
-        if (registration is null || !RemoteConfig.IsEnabled || !await RemoteTerminalsAllowedAsync(ct))
+        if (registration is null || !_isRemoteEnabled() || !await RemoteTerminalsAllowedAsync(ct))
             return false;
 
+        // With the console host it was first registered with: the relay replaces the whole row,
+        // and a row without it would give a bundled-host terminal a viewer that answers queries.
         return await _remoteStateService.RegisterTerminalAsync(
-            sessionId, registration.Cli, registration.WorkDir, registration.EnvName, ct: ct);
+            sessionId, registration.Cli, registration.WorkDir, registration.EnvName,
+            consoleHost: registration.ConsoleHost, ct: ct);
     }
 
     public async Task<bool> SendRemoteCommandAsync(string sessionId, string command, string? payload = null, CancellationToken ct = default)
@@ -369,9 +379,9 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         // Shared state is session-managed via CompleteSessionAsync.
     }
 
-    private sealed record RemoteRegistration(string Cli, string WorkDir, string? EnvName);
+    private sealed record RemoteRegistration(string Cli, string WorkDir, string? EnvName, string? ConsoleHost);
 
-    private static bool ShouldRegisterRemoteSession(bool makeRemoteRequested, string? jobRunId = null)
+    private bool ShouldRegisterRemoteSession(bool makeRemoteRequested, string? jobRunId = null)
     {
         _ = makeRemoteRequested;
         // Automated Job sessions are never remotely attachable, even when remote is fully configured.
@@ -380,7 +390,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         // Must match TerminalRunner.ShouldEnableRemote: only register a session remotely when
         // remote access is fully configured INCLUDING a PIN. (Deregistration below stays on the
         // broad check so cleanup still runs if the PIN was cleared mid-session.)
-        return RemoteConfig.IsEnabled;
+        return _isRemoteEnabled();
     }
 
     private void StartIdleMonitor(string sessionId)

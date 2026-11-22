@@ -38,7 +38,7 @@ public sealed class BoardToolAuthorizationTests
         var checkout = nativeWorker ? Path.GetTempPath() : Path.Combine(Path.GetTempPath(), "resolved-worktree");
         var state = new Mock<ITerminalStateService>();
         state.Setup(s => s.CreateSessionAsync(It.IsAny<string>(), checkout, It.IsAny<string>(), It.IsAny<bool>(),
-                It.IsAny<CancellationToken>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
+                It.IsAny<CancellationToken>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync("board-authorization-session");
         var command = new Mock<ICommandService>(MockBehavior.Strict);
         var reachedPreparation = new ReachedPreparation();

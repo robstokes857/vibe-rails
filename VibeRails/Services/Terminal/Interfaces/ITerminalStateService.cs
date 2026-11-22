@@ -2,6 +2,10 @@ namespace VibeRails.Services.Terminal;
 
 public interface ITerminalStateService
 {
+    /// <param name="consoleHost">
+    /// The console host the terminal is about to be started on, as the relay registration names
+    /// it: "bundled" or null. Known before the PTY exists, so the first registration carries it.
+    /// </param>
     Task<string> CreateSessionAsync(
         string cli,
         string workDir,
@@ -11,7 +15,8 @@ public interface ITerminalStateService
         string? initialUserInput = null,
         string? jobRunId = null,
         int initialCols = Terminal.DefaultCols,
-        int initialRows = Terminal.DefaultRows);
+        int initialRows = Terminal.DefaultRows,
+        string? consoleHost = null);
     void PublishSessionStart(string sessionId, string cli, string workDir, string? envName, IReadOnlyList<string> setupCommands, string launchCommand);
     void LogOutput(string sessionId, ReadOnlyMemory<byte> data, TerminalIoSource source = TerminalIoSource.Pty);
     void RecordInput(string sessionId, string input, TerminalIoSource source = TerminalIoSource.Unknown);

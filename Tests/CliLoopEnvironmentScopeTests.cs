@@ -205,7 +205,7 @@ public sealed class CliLoopEnvironmentScopeTests
             .ReturnsAsync((string value, PromptPlaceholderContext _, CancellationToken _) => new ResolvedPrompt(value, here));
         Mock.Get(services.GetRequiredService<ITerminalStateService>())
             .Setup(s => s.CreateSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<bool>(),
-                It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>()))
+                It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync("session-1");
         Func<bool, Task<IReadOnlyList<ContextLevels.Level>>>? childResolver = _ => Task.FromResult<IReadOnlyList<ContextLevels.Level>>([]);
         Mock.Get(services.GetRequiredService<ICommandService>())
@@ -240,7 +240,7 @@ public sealed class CliLoopEnvironmentScopeTests
             .ReturnsAsync(new ResolvedPrompt("work in " + checkout, checkout));
         var state = Mock.Get(services.GetRequiredService<ITerminalStateService>());
         state.Setup(s => s.CreateSessionAsync(LlmParser.ToWireName(LLM.Claude), checkout, "my-env", It.IsAny<bool>(),
-                It.IsAny<CancellationToken>(), "work in " + checkout, null, It.IsAny<int>(), It.IsAny<int>()))
+                It.IsAny<CancellationToken>(), "work in " + checkout, null, It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ThrowsAsync(new ReachedThePromptStage());
 
         await Assert.ThrowsAsync<ReachedThePromptStage>(() => CliLoop.RunTerminalWithWebAsync(

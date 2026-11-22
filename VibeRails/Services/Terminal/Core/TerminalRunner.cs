@@ -143,6 +143,12 @@ public class TerminalRunner
         var initialSize = isNativeCli && NativeConsoleGeometry.TryGetSize(out var nativeSize)
             ? nativeSize
             : new NativeConsoleSize(Terminal.DefaultCols, Terminal.DefaultRows);
+        // Opt-in (Settings > Modern Windows console host). Null keeps the ConPTY built into Windows.
+        // Resolved before the session exists because creating it sends the relay registration,
+        // and a remote viewer has to know the host before it reads any output (VIBE-171). If
+        // Windows then falls back to the built-in host, the registration still says "bundled":
+        // the viewer stays silent and loses nothing, because that host answers queries itself.
+        var bundledConsoleHostPath = ResolveBundledConsoleHost(isNativeCli);
         var sessionId = await _stateService.CreateSessionAsync(
             LlmParser.ToWireName(llm),
             workDir,
@@ -152,7 +158,8 @@ public class TerminalRunner
             initialUserInput: userInputToRecord,
             jobRunId: jobRunId,
             initialCols: initialSize.Cols,
-            initialRows: initialSize.Rows);
+            initialRows: initialSize.Rows,
+            consoleHost: bundledConsoleHostPath is null ? null : TerminalSessionService.BundledConsoleHostWireName);
         Terminal? terminal = null;
         IRemoteTerminalConnection? activeRemoteConn = null;
         IDisposable? openCodeProxyLease = null;
@@ -245,8 +252,6 @@ public class TerminalRunner
             // the real argv at spawn instead. Jobs retain their exit-with-CLI semantics, while
             // ordinary macOS tabs return to an interactive shell as before.
             var spawnInteractiveMac = OperatingSystem.IsMacOS() && preparedSession.Executable is not null;
-            // Opt-in (Settings > Modern Windows console host). Null keeps the ConPTY built into Windows.
-            var bundledConsoleHostPath = ResolveBundledConsoleHost(isNativeCli);
             if (spawnCliDirectly || spawnInteractiveMac)
             {
                 var (app, argv) = spawnCliDirectly

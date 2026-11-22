@@ -76,19 +76,19 @@ public sealed class RemoteTerminalRegistrationProPlanTests : IAsyncDisposable
     {
         var entitlements = new FakeAccountEntitlements();
         var relayRegistration = new Mock<IRemoteStateService>();
-        relayRegistration.Setup(r => r.RegisterTerminalAsync(Session, "codex", "/project", "env", null, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        relayRegistration.Setup(r => r.RegisterTerminalAsync(Session, "codex", "/project", "env", null, null, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         using var state = State(relayRegistration.Object, entitlements);
 
         entitlements.Off.Add(ProFeatures.RemoteTerminals);
         await state.RegisterRemoteSessionAsync(Session, "codex", "/project", "env");
         relayRegistration.Verify(r => r.RegisterTerminalAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(),
-            It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         // A reconnect cannot register what creation did not.
         Assert.False(await state.ReregisterRemoteSessionAsync(Session, Ct));
 
         entitlements.Off.Clear(); // Pro again, or a plan that could not be read
         await state.RegisterRemoteSessionAsync(Session, "codex", "/project", "env");
-        relayRegistration.Verify(r => r.RegisterTerminalAsync(Session, "codex", "/project", "env", null, It.IsAny<CancellationToken>()), Times.Once);
+        relayRegistration.Verify(r => r.RegisterTerminalAsync(Session, "codex", "/project", "env", null, null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private RemoteStateService Remote(FakeAccountEntitlements entitlements) =>

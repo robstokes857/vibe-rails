@@ -425,6 +425,16 @@ Settings page does not show the switch.
   `TerminalTab` applies it before it attaches, and does not attach while the host of a session
   that may be running is unknown (it retries like a dropped socket). Never add a second
   responder.
+- **The hosted viewer is told through the relay registration** (VIBE-171). `TerminalRunner`
+  resolves the host before it creates the session, because creating it sends the first
+  registration and a remote viewer has to know before it reads any output.
+  `TerminalStateService` sends `ConsoleHost: "bundled"` with that registration and with every
+  re-registration (`RemoteStateService.RegisterTerminalRequest`); the relay replaces the whole
+  row each time, so a registration without it would bring the answers back. For every other
+  terminal the member is left out and the request is byte for byte what it was. A terminal that
+  asked for this host and fell back still registers `bundled`: the silent viewer loses nothing,
+  because the built-in host answers for itself. VibeRails-Front stores the value and both of
+  its viewers (the HTML screen and the xterm.js one) answer nothing for such a terminal.
 - **Nothing repaints after a resize**, so the viewer and the emulator have to lay the screen out
   alike without help. The emulator never re-wraps a line: cells stay where they are and the cursor
   is clamped. The viewer therefore turns xterm.js re-wrapping off (`BUNDLED_HOST_WINDOWS_PTY`) and
@@ -435,8 +445,13 @@ Settings page does not show the switch.
 
 Known limits. One card owns them all, VB-G9STX-427; each limit names its part of that card:
 
-- The remote viewer (VibeRails-Front) still answers queries, so a remote viewer on such a session
-  types its answers into the program (part A).
+- A remote viewer is silent only on a hosted site that has VIBE-171 (VibeRails-Front, with its
+  `ActiveTerminalConsoleHost` migration). An older site ignores the member and its viewer still
+  types its answers into the program, so the site is released before a desktop that sends it.
+- Neither remote viewer learns the PTY's size after this desktop resizes it, on any console
+  host. The HTML viewer keeps the grid of its last snapshot until the next attach or unlock, and
+  a larger desktop grid then wraps there. A snapshot pushed to the remote consumer after a
+  resize would carry the new grid; not built (part F).
 - Lines are not re-wrapped when the width changes: text beyond the right edge is hidden until the
   terminal is that wide again. The viewer keeps that text; the emulator drops it, so a snapshot
   taken after a terminal was made narrower and wider again has less on those lines than the live
@@ -456,6 +471,7 @@ Known limits. One card owns them all, VB-G9STX-427; each limit names its part of
 
 Tests: `BundledConsoleHostTests` (the real host and a throwaway child), `BundledHostResizeTests`,
 `EmulatorParseBoundaryTests`, `TerminalQueryScannerTests`, `TerminalQueryResponderTests`, `AppSettingsModernConsoleHostTests`,
+`RemoteTerminalRegistrationConsoleHostTests` (the registration's bytes with and without the host),
 `ConsoleHostPackagingTests`, `terminal-device-queries.test.mjs`,
 `settings-modern-console-host.test.mjs` and `UITests/tests/xterm-device-queries.spec.js` (the real
 xterm.js; `npm run test:node`). The resize tables in that spec and in

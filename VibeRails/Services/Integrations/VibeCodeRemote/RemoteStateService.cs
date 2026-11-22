@@ -17,8 +17,14 @@ public interface IRemoteStateService
     /// Registers (or re-registers: the server upserts by session id) a terminal with the relay.
     /// Never throws for transport or HTTP failures; returns true only when the relay accepted it.
     /// </summary>
+    /// <param name="consoleHost">
+    /// "bundled" for a terminal on the console host shipped with VibeRails for Windows, where this
+    /// desktop answers terminal queries; null for every other terminal. The relay hands it to the
+    /// remote viewer, which then answers none (VIBE-171). Every registration of a session has to
+    /// carry the same value: the relay replaces the whole row.
+    /// </param>
     Task<bool> RegisterTerminalAsync(string sessionId, string cli, string workingDirectory, string? environmentName,
-        string? title = null, CancellationToken ct = default);
+        string? title = null, string? consoleHost = null, CancellationToken ct = default);
     Task DeregisterTerminalAsync(string sessionId);
 }
 
@@ -35,7 +41,10 @@ public record RegisterTerminalRequest(
     string WorkingDirectory,
     string? EnvironmentName,
     string? Title,
-    string HostUrl
+    string HostUrl,
+    // Left out when null, so the registration of every terminal that is not on the bundled
+    // console host is byte for byte what it was before this member existed (VIBE-171).
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ConsoleHost = null
 );
 
 public record DeregisterTerminalRequest(string SessionId);
@@ -59,7 +68,7 @@ public class RemoteStateService : IRemoteStateService
     }
 
     public async Task<bool> RegisterTerminalAsync(string sessionId, string cli, string workingDirectory, string? environmentName,
-        string? title = null, CancellationToken ct = default)
+        string? title = null, string? consoleHost = null, CancellationToken ct = default)
     {
         var apiKey = ParserConfigs.GetApiKey();
         var frontendUrl = ParserConfigs.GetFrontendUrl();
@@ -79,7 +88,8 @@ public class RemoteStateService : IRemoteStateService
             workingDirectory,
             environmentName,
             title,
-            hostUrl
+            hostUrl,
+            consoleHost
         );
 
         var json = JsonSerializer.Serialize(payload, RemoteStateJsonContext.Default.RegisterTerminalRequest);

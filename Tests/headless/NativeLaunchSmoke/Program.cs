@@ -133,7 +133,7 @@ static ServiceProvider BuildServices(string directory)
         .Returns(Task.CompletedTask);
     var state = new Mock<ITerminalStateService>();
     state.Setup(x => x.CreateSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(),
-            It.IsAny<CancellationToken>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
+            It.IsAny<CancellationToken>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>()))
         .ReturnsAsync(() => Guid.NewGuid().ToString());
     state.Setup(x => x.LogOutput(It.IsAny<string>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<TerminalIoSource>()))
         .Callback<string, ReadOnlyMemory<byte>, TerminalIoSource>((_, bytes, _) =>
