@@ -65,7 +65,7 @@ public static class BoardSyncWire
     }
 }
 
-public sealed record BoardSyncLaneWire(string Id, string Name, string? Color, int Position);
+public sealed record BoardSyncLaneWire(string Id, string Name, string? Color, int Position, bool IsDefaultForNewCards = false);
 
 public sealed record BoardSyncAuthorWire(string Kind, string Label, string? Cli);
 

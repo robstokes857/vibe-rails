@@ -10,7 +10,13 @@ the selection so the editor can seed new drafts without considering collapse sta
 Explicit destinations win. Clearing/deleting the selected lane restores the first-lane
 fallback, and changing the preference never moves existing cards. The additive
 `board-default-column/1` migration runs automatically and leaves older writers compatible;
-the preference does not extend hosted Board sync.
+the owner desktop also publishes `isDefaultForNewCards` in the hosted lane layout. The hosted
+creation service uses that selection for omitted destinations. Layout fingerprints include the
+selected lane and an explicit unset state, so changing or clearing it syncs without a card edit
+even after an older writer saves its layout receipt. Remote layout refreshes
+preserve the local owner's selection and include it in their concurrency check and saved hash.
+Hosted readers retain the previous selection for older writers that omit every flag; explicit
+false flags clear it. No hosted schema change is needed. Release the hosted reader first.
 
 ## AI board manager (VIBE-52 follow-up, VIBE-204)
 

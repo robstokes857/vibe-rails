@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -392,7 +391,8 @@ public sealed partial class BoardSyncService(
         var columns = await store.GetColumnsAsync(link.ProjectPath, ct, link.BoardId);
         var prefix = link.RemoteKeyPrefix ?? await store.EnsureProjectKeyPrefixAsync(link.ProjectPath, ct);
         var hash = BoardLayoutHash.Compute(board.Name, prefix, board.EffectiveDisplayPrefix,
-            columns.Select(c => new BoardRemoteLane(c.Id, c.Name, c.Color, c.Position)));
+            columns.Select(c => new BoardRemoteLane(c.Id, c.Name, c.Color, c.Position)),
+            columns.FirstOrDefault(c => c.IsDefaultForNewCards)?.Id);
         // A local change made during the network request belongs to the next push.
         if (hash != link.LayoutHash) return link;
         var applied = await store.ApplyRemoteLayoutAsync(link.ProjectPath, link.BoardId, remote, board, columns, ct);
@@ -704,12 +704,11 @@ public sealed partial class BoardSyncService(
         var prefix = link?.RemoteKeyPrefix ?? await store.EnsureProjectKeyPrefixAsync(projectPath, cancellationToken);
         var lanes = (await store.GetColumnsAsync(projectPath, cancellationToken, board.Id))
             .OrderBy(c => c.Position)
-            .Select((c, index) => new BoardSyncLaneWire(c.Id, c.Name, string.IsNullOrWhiteSpace(c.Color) ? null : c.Color, index))
+            .Select((c, index) => new BoardSyncLaneWire(c.Id, c.Name, string.IsNullOrWhiteSpace(c.Color) ? null : c.Color, index, c.IsDefaultForNewCards))
             .ToList();
-        var canonical = new StringBuilder().Append(board.Name).Append('\n').Append(prefix).Append('\n').Append(board.EffectiveDisplayPrefix);
-        foreach (var lane in lanes)
-            canonical.Append('\n').Append(lane.Id).Append('\t').Append(lane.Name).Append('\t').Append(lane.Color).Append('\t').Append(lane.Position);
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString())));
+        var hash = BoardLayoutHash.Compute(board.Name, prefix, board.EffectiveDisplayPrefix,
+            lanes.Select(l => new BoardRemoteLane(l.Id, l.Name, l.Color, l.Position)),
+            lanes.FirstOrDefault(l => l.IsDefaultForNewCards)?.Id);
         return (prefix, lanes, hash);
     }
 

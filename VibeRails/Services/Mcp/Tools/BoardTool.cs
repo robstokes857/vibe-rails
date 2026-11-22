@@ -451,6 +451,7 @@ public sealed partial class BoardTool(
         + "the stored attachment is unchanged.";
 
     [McpServerTool, Description("Create a kanban card on any local board using board=<id> from list_boards. Returns its permanent key. Omit board for the launching card's board, else the current project's first board. "
+        + "Omit column to respect that board's configured default lane for new cards; supply it only for an explicit destination. "
         + "Pass agentName, and sessionId when you have one: the Board shows which agent made the card, in which session, and when.")]
     public async Task<string> CreateBoardCard(
         [Description("Card title (required).")] string title,
