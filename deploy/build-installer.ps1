@@ -48,6 +48,8 @@ try {
     # Payload folders under Models\ that setup materializes into models\<lowercase name>:
     # the BERT embedder and the search re-ranker (VIBE-258).
     $models = @('BertV2', 'Reranker')
+    # The modern Windows console host (VIBE-354): exactly these two files, side by side in conpty\.
+    $consoleHost = @('conpty.dll', 'OpenConsole.exe')
     $required = @('vb.exe', 'appsettings.json', 'wwwroot/index.html', 'onnxruntime.dll',
         'e_sqlite3.dll', 'vec0.dll', 'scripts/pre-commit-hook.sh', 'scripts/commit-msg-hook.sh',
         'Models/BertV2/model.onnx.gz', 'Models/BertV2/vocab.txt',
@@ -86,6 +88,7 @@ try {
             # Owned model assets are versioned payload. Preserve on uninstall,
             # but repair/upgrade when their bytes differ from this package.
         }
+        elseif ($relative -imatch '^conpty\\([^\\]+)$' -and $consoleHost -icontains $Matches[1]) { }
         elseif (($rootFiles + $crtFiles) -icontains $relative) {
             $preserve = $relative -ilike 'appsettings*.json'
         }

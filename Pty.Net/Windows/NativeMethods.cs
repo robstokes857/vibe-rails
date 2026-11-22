@@ -320,10 +320,16 @@ namespace Pty.Net.Windows
                 this.SetHandle(handle);
             }
 
+            /// <summary>
+            /// Gets or sets the API that created the handle. Only that API may resize or close it:
+            /// a bundled conpty.dll's handle is not one kernel32 can release. Set before the handle.
+            /// </summary>
+            internal ConPtyApi Api { get; set; } = ConPtyApi.Inbox;
+
             [SecurityCritical]
             protected override bool ReleaseHandle()
             {
-                NativeMethods.ClosePseudoConsole(this.handle);
+                this.Api.Close(this.handle);
                 return true;
             }
         }

@@ -44,6 +44,8 @@ public sealed class Terminal : IAsyncDisposable
     private int _agentCompletion;
     private int _cols;
     private int _rows;
+    // Set only for a PTY whose console host forwards terminal queries (a bundled conpty.dll).
+    private TerminalQueryResponder? _queryResponder;
 
     /// <summary>
     /// How long the read loop may keep draining after the PTY process itself has exited before the
@@ -67,6 +69,17 @@ public sealed class Terminal : IAsyncDisposable
         _ => null
     };
     public bool EncodeBareLineFeedAsWin32ShiftEnter { get; set; }
+
+    /// <summary>
+    /// The console host behind the PTY. <see cref="PtyConsoleHost.Bundled"/> means output reaches
+    /// viewers as the program wrote it and this terminal answers device queries itself, so a
+    /// viewer must not (VIBE-354). <see cref="PtyConsoleHost.None"/> outside Windows.
+    /// </summary>
+    public PtyConsoleHost ConsoleHost => _pty.ConsoleHost;
+
+    /// <summary>Device-attribute and device-status queries this terminal has answered. Zero unless the host is bundled.</summary>
+    internal long AnsweredTerminalQueries => _queryResponder?.AnsweredCount ?? 0;
+
     public bool IsSyncOutputActive
     {
         get
@@ -192,6 +205,11 @@ public sealed class Terminal : IAsyncDisposable
     /// what it wants into it. Pass <paramref name="app"/>/<paramref name="argv"/> to run a specific
     /// program instead — the Job path does this so the PTY terminates when the program does, rather
     /// than sitting at a shell prompt forever.
+    ///
+    /// <paramref name="bundledConsoleHostPath"/> names a bundled conpty.dll to host the PTY with
+    /// on Windows (see <see cref="BundledConsoleHost"/>). Null, the default, is the ConPTY built
+    /// into Windows. The built-in host is also what a terminal gets when the bundled one cannot be
+    /// used; the log says which host each such terminal got and why.
     /// </summary>
     public static async Task<Terminal> CreateAsync(
         string workingDirectory,
@@ -201,7 +219,8 @@ public sealed class Terminal : IAsyncDisposable
         string? title = null,
         CancellationToken ct = default,
         string? app = null,
-        IReadOnlyList<string>? argv = null)
+        IReadOnlyList<string>? argv = null,
+        string? bundledConsoleHostPath = null)
     {
         var executable = string.IsNullOrWhiteSpace(app) ? GetDefaultShellPath() : app;
         var options = new PtyOptions
@@ -212,14 +231,69 @@ public sealed class Terminal : IAsyncDisposable
             Cwd = workingDirectory,
             App = executable,
             CommandLine = argv is { Count: > 0 } ? [.. argv] : [],
-            Environment = environment
+            Environment = environment,
+            WindowsConPtyLibraryPath = bundledConsoleHostPath
         };
 
         var pty = await PtyProvider.SpawnAsync(options, ct);
+        LogConsoleHost(pty, bundledConsoleHostPath);
         var terminal = new Terminal(pty, cols, rows);
-        terminal.Subscribe(new TerminalEmulatorConsumer(terminal._emulator, terminal._emulatorLock));
+        terminal.AttachEmulator();
 
         return terminal;
+    }
+
+    /// <summary>
+    /// One line for every Windows PTY, naming the console host it got (VIBE-354). A fallback to
+    /// the built-in host is silent everywhere else: the terminal works, with the re-rendered
+    /// output the setting was turned on to avoid, so the warning is the only evidence of it.
+    /// Other platforms have no console host and log nothing.
+    /// </summary>
+    private static void LogConsoleHost(IPtyConnection pty, string? requestedPath)
+    {
+        int pid;
+        try { pid = pty.Pid; } catch { pid = -1; }
+        if (DescribeConsoleHost(pty.ConsoleHost, pid, requestedPath, pty.ConsoleHostFallbackReason) is { } entry)
+            Log.Write(entry.Level, entry.Template, entry.Values);
+    }
+
+    /// <summary>The log entry for a new PTY's console host; null where there is no host to name.</summary>
+    internal static (Serilog.Events.LogEventLevel Level, string Template, object?[] Values)? DescribeConsoleHost(
+        PtyConsoleHost host, int pid, string? requestedPath, string? fallbackReason)
+    {
+        if (host == PtyConsoleHost.Bundled)
+        {
+            return (Serilog.Events.LogEventLevel.Information,
+                "[Terminal] PTY {Pid} is hosted by the bundled console host {Path}", [pid, requestedPath]);
+        }
+
+        if (requestedPath is not null)
+        {
+            return (Serilog.Events.LogEventLevel.Warning,
+                "[Terminal] PTY {Pid} is hosted by the built-in console host although the modern host is turned on: {Reason}",
+                [pid, fallbackReason ?? "this platform has no bundled console host"]);
+        }
+
+        return host == PtyConsoleHost.Inbox
+            ? (Serilog.Events.LogEventLevel.Information, "[Terminal] PTY {Pid} is hosted by the built-in console host", [pid])
+            : null;
+    }
+
+    /// <summary>
+    /// Subscribes the headless emulator. Under a bundled console host the same consumer also
+    /// answers the device queries that host forwards; under any other host nothing changes.
+    /// Call once, before the read loop starts.
+    /// </summary>
+    internal void AttachEmulator()
+    {
+        if (_pty.ConsoleHost == PtyConsoleHost.Bundled)
+        {
+            _queryResponder = new TerminalQueryResponder(WriteBytesAsync, _cts.Token);
+            Subscribe(new QueryAnsweringEmulatorConsumer(_emulator, _emulatorLock, _queryResponder));
+            return;
+        }
+
+        Subscribe(new TerminalEmulatorConsumer(_emulator, _emulatorLock));
     }
 
     private static string GetFallbackTerminalName(string workingDirectory)
@@ -643,11 +717,55 @@ public sealed class Terminal : IAsyncDisposable
     /// </summary>
     public void Resize(int cols, int rows)
     {
+        if (_queryResponder is not null)
+        {
+            // After a resize a bundled console host asks for the cursor position, as soon as the
+            // program next touches the console, and adopts whatever it is told. The answer is read
+            // under this lock, so resizing the emulator inside it means the reply can never
+            // describe the grid before the resize.
+            lock (_emulatorLock)
+            {
+                _pty.Resize(cols, rows);
+                _cols = cols;
+                _rows = rows;
+                KeepCursorLineOnScreen(_emulator, rows);
+                _emulator.Resize(cols, rows);
+            }
+            return;
+        }
+
         _pty.Resize(cols, rows);
         _cols = cols;
         _rows = rows;
         lock (_emulatorLock)
             _emulator.Resize(cols, rows);
+    }
+
+    /// <summary>
+    /// What a terminal does when it gets shorter and its cursor is below the new last row: the
+    /// rows at the top scroll into history, so the line being written stays on screen. xterm.js
+    /// does that in the viewer. The emulator's own resize keeps the top rows and drops the bottom
+    /// ones, which nobody saw while the built-in console host repainted the whole screen after
+    /// every resize. A bundled host repaints nothing, so without this the next snapshot (a
+    /// reconnect, an agent reading the screen) shows the top of the old screen and no prompt.
+    /// Call it before <see cref="TerminalEmulator.Terminal.Resize"/>, under the emulator lock.
+    /// </summary>
+    /// <remarks>
+    /// The emulator can only be driven through its input, so this scrolls it the way a program
+    /// would: margins back to the full screen (xterm.js resets them on every resize too), line
+    /// feeds from the last row, then the cursor back onto its line. It leaves the alternate
+    /// screen alone: that has no history, and whatever owns it repaints after a resize. These
+    /// bytes go to the emulator only; no viewer and no recording sees them.
+    /// </remarks>
+    internal static void KeepCursorLineOnScreen(TerminalEmulator.Terminal emulator, int newRows)
+    {
+        var cursorRow = emulator.CursorRow;
+        var overflow = cursorRow - (newRows - 1);
+        if (overflow <= 0 || emulator.IsAlternateScreen)
+            return;
+
+        emulator.Write(
+            $"\u001b[r\u001b[{emulator.Rows};1H{new string('\n', overflow)}\u001b[{cursorRow - overflow + 1};{emulator.CursorCol + 1}H");
     }
 
     internal void KillProcessTree() => _pty.KillProcessTree();

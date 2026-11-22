@@ -61,5 +61,17 @@ namespace Pty.Net
         /// <param name="cols">The number of columns.</param>
         /// <param name="rows">The number of rows.</param>
         void Resize(int cols, int rows);
+
+        /// <summary>
+        /// Gets the console host this pseudoterminal runs under. <see cref="PtyConsoleHost.None"/>
+        /// for anything that is not a Windows pseudoconsole.
+        /// </summary>
+        PtyConsoleHost ConsoleHost => PtyConsoleHost.None;
+
+        /// <summary>
+        /// Gets why <see cref="PtyOptions.WindowsConPtyLibraryPath"/> was not honored, or
+        /// <c>null</c> when the bundled host is in use or was never asked for.
+        /// </summary>
+        string? ConsoleHostFallbackReason => null;
     }
 }

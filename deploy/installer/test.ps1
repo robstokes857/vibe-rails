@@ -103,6 +103,14 @@ try {
     Assert (Test-Path -LiteralPath (Join-Path $root 'models/reranker/vocab.txt')) 'Re-ranker vocabulary was not installed'
     Assert (Test-Path -LiteralPath (Join-Path $root 'models/reranker/LICENSE.txt')) 'Re-ranker license was not installed'
     Assert (-not (Test-Path -LiteralPath (Join-Path $root 'models/reranker/model.onnx.gz'))) 'Setup installed the compressed re-ranker archive'
+    # The modern console host (VIBE-354) ships as a pair in conpty\. A payload that carries it
+    # must install both files; one without the other silently uses the built-in host.
+    $consoleHost = Join-Path $root 'conpty/OpenConsole.exe'
+    $shipsConsoleHost = Test-Path -LiteralPath (Join-Path $PayloadDirectory 'conpty/OpenConsole.exe')
+    if ($shipsConsoleHost) {
+        Assert (Test-Path -LiteralPath $consoleHost) 'Console host OpenConsole.exe was not installed'
+        Assert (Test-Path -LiteralPath (Join-Path $root 'conpty/conpty.dll')) 'Console host conpty.dll was not installed'
+    }
     Assert (Test-Path -LiteralPath $desktop) 'Desktop shortcut is missing'
     Assert (Test-Path -LiteralPath $startMenu) 'Start menu shortcut is missing'
     $shell = New-Object -ComObject WScript.Shell
@@ -175,6 +183,15 @@ try {
     } finally { $lock.Dispose() }
     Assert ((Get-FileHash -LiteralPath $vb).Hash -eq $hash) 'A locked installation was modified'
 
+    # OpenConsole.exe runs for as long as a terminal that uses it is open. An upgrade then is
+    # refused before anything is replaced, exactly as it is for a running vb.exe.
+    if ($shipsConsoleHost) {
+        $hostLock = [IO.File]::Open($consoleHost, 'Open', 'Read', 'None')
+        try { Invoke-Installer $setup 'locked-console-host-upgrade' $false }
+        finally { $hostLock.Dispose() }
+        Assert ((Get-FileHash -LiteralPath $vb).Hash -eq $hash) 'An installation with a running console host was modified'
+    }
+
     $mutexHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::Unicode.GetBytes([Environment]::GetFolderPath('UserProfile')))).ToLowerInvariant()
     $mutex = [Threading.Mutex]::new($false, "Global\VibeRailsInstaller-$mutexHash")
     try { Invoke-Installer $setup 'concurrent-setup' $false }
@@ -202,6 +219,7 @@ try {
 
     Invoke-Installer $uninstaller 'uninstall'
     Assert (-not (Test-Path -LiteralPath $vb)) 'Application executable remained after uninstall'
+    Assert (-not (Test-Path -LiteralPath $consoleHost)) 'Console host remained after uninstall'
     Assert (-not (Test-Path -LiteralPath $desktop)) 'Desktop shortcut remained after uninstall'
     Assert (-not (Test-Path -LiteralPath $startMenu)) 'Start menu shortcut remained after uninstall'
     Assert ((Get-RawUserPath) -eq "$oldPath;$root-backup") 'Uninstall changed unrelated PATH entries'

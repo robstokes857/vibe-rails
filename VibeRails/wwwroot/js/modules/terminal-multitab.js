@@ -836,6 +836,11 @@ export class TerminalManager {
             boardCard: readTabBoardCard(tabInfo.boardCard),
             needsAttention: tabInfo.needsAttention === true,
             cli: tabInfo.cli || null,
+            // The session's Windows console host (VIBE-354), when the tab list read it from the
+            // tab's host. Left undefined otherwise, and TerminalTab reads it before attaching.
+            consoleHost: tabInfo.statusAvailable === true
+                ? (tabInfo.consoleHost === 'bundled' ? 'bundled' : null) : undefined,
+            consoleHostSessionId: tabInfo.statusAvailable === true ? (tabInfo.sessionId || null) : null,
             status: tabInfo.hasActiveSession ? 'disconnected' : 'not-started',
             viewState: {
                 mode: 'normal',
@@ -3406,6 +3411,7 @@ export class TerminalController {
                 statusAvailable: authoritative?.statusAvailable === true,
                 sessionId: authoritative?.sessionId || null,
                 cli: authoritative?.cli || rememberedCli,
+                consoleHost: authoritative?.consoleHost || null,
                 workingDirectory: authoritative?.workingDirectory || null,
                 boardCard: authoritative?.boardCard || null,
                 needsAttention: authoritative?.needsAttention === true

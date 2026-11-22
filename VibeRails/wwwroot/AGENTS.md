@@ -1395,6 +1395,31 @@ Rendering → Auto-reconnect (`viberails_terminal_autoReconnect` = `off`). Tests
 (the fake CLI echoes its command line, so assert replay fidelity as text equality, never as a
 marker count).
 
+## Console host and terminal queries (VIBE-354)
+
+A session on the bundled Windows console host (App settings > **Modern Windows console host**) has
+its terminal queries answered by the server and gets no repaint after a resize. The contract is in
+the [Terminal guide](../Services/Terminal/AGENTS.md#windows-console-host-vibe-354). In the browser:
+
+- `terminal-device-queries.js` holds the xterm.js parser handlers that keep the viewer from
+  answering (`installServerAnsweredQueries`) and the `windowsPty` value that turns re-wrapping off
+  (`BUNDLED_HOST_WINDOWS_PTY`). `VibeTerminal.setConsoleHost({ bundled })` applies both and undoes
+  both. Every other session keeps xterm.js's defaults.
+- The host belongs to the session, not the tab. `TerminalTab` keeps `state.consoleHost`
+  (`'bundled'`, `null` for known and not bundled, `undefined` for not known yet) with the session
+  it describes in `state.consoleHostSessionId`. It reads the tab status once when the host is not
+  known and applies it after the terminal exists and before the socket is created. Start, status,
+  tab-list and adoption responses all carry `consoleHost`; new code that builds tab state has to
+  copy it.
+- `shouldResetDisplayBeforeResize` is false for these sessions: nothing would repaint the screen.
+- The switch is `#setting-modern-console-host` in the App settings form. Its row is shown only when
+  the server reports `modernConsoleHostAvailable` as a boolean (Windows x64). `false` keeps the row
+  and shows the reason, and the switch can then only turn a saved "on" off. The value is sent only
+  while the row is shown, so saving on another platform never changes it.
+
+Tests: `terminal-device-queries.test.mjs`, `settings-modern-console-host.test.mjs`,
+`terminal-multitab-adoption.test.mjs` and `UITests/tests/xterm-device-queries.spec.js`.
+
 ## Terminal tab card link (VIBE-36)
 
 `GET /api/v1/terminal/tabs` names the Board card each tab's session is linked to as

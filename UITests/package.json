@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "npm run test:node && npm run test:e2e",
-    "test:node": "cd .. && node --test UITests/tests/xterm-scrollback.spec.js Tests/wwwroot/js/*.test.mjs",
+    "test:node": "cd .. && node --test UITests/tests/xterm-scrollback.spec.js UITests/tests/xterm-device-queries.spec.js Tests/wwwroot/js/*.test.mjs",
     "test:e2e": "playwright test",
     "test:install": "playwright install --with-deps chromium"
   },

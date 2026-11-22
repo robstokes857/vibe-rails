@@ -1241,7 +1241,11 @@ namespace VibeRails.DTOs
         string? SessionId = null,
         string? Cli = null,
         string? WorkingDirectory = null,
-        bool CanReclaim = false
+        bool CanReclaim = false,
+        // "bundled" while the session's PTY runs under the bundled Windows console host
+        // (VIBE-354); absent otherwise. Such a session's server answers device-attribute and
+        // device-status queries, so its viewer must not, and its host does not repaint on resize.
+        string? ConsoleHost = null
     );
 
     public record TerminalTabStatusResponse(
@@ -1259,7 +1263,9 @@ namespace VibeRails.DTOs
         bool AutomationCompleted = false,
         // The view that owns this tab (VIBE-159: "script-agent:{id}" for the script workbench's
         // agent pane). Owned tabs never appear in the Terminals page's strip.
-        string? Owner = null
+        string? Owner = null,
+        // See TerminalStatusResponse. Only meaningful while StatusAvailable is true.
+        string? ConsoleHost = null
     );
 
     /// <summary>The Board card a tab's session is linked to (VIBE-36); only the tab list fills it.</summary>
@@ -1479,7 +1485,14 @@ namespace VibeRails.DTOs
         bool CodexInheritedBaseBypassesRelay = false,
         bool ClaudeInheritedBaseBypassesRelay = false,
         // Opt-in Board spelling; omitted requests preserve the saved choice.
-        bool? VsCodeSpellCheck = null
+        bool? VsCodeSpellCheck = null,
+        // Opt-in modern Windows console host for new terminal tabs (VIBE-354). Omitted requests
+        // preserve the saved choice; responses always contain an explicit value.
+        bool? ModernConsoleHost = null,
+        // Response-only: whether this build and platform can use it, and why not when it cannot.
+        // The saved choice is kept either way; an unavailable host falls back to the built-in one.
+        bool? ModernConsoleHostAvailable = null,
+        string? ModernConsoleHostUnavailableReason = null
     );
     // Append new fields at the END of this record, with a default. Inserting one in the middle
     // shifts every positional argument after it: call sites only fail to compile when the types

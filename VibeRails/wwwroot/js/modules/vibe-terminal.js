@@ -1,3 +1,5 @@
+import { installServerAnsweredQueries, windowsPtyOptionFor } from './terminal-device-queries.js';
+
 const DEFAULT_THEME = {
     background: '#1e1e1e',
     foreground: '#d4d4d4',
@@ -108,6 +110,8 @@ export class VibeTerminal {
         this._onScrollDispose = null;
         this._theme = buildTerminalTheme();
         this._cursorSuppressed = false;
+        this._bundledConsoleHost = false;
+        this._restoreDeviceQueryReplies = null;
 
         const metrics = this._getResponsiveMetrics();
         this._terminal = new window.Terminal({
@@ -467,6 +471,46 @@ export class VibeTerminal {
         }
 
         this._terminal.paste(text);
+    }
+
+    /**
+     * Tells the renderer which Windows console host the session's PTY runs under (VIBE-354).
+     * `bundled` is true only for a session the server reported as running on the bundled
+     * conpty.dll host. Call it before attaching to a session; it is cheap and idempotent.
+     *
+     * For such a session two things change, and nothing else:
+     *  - xterm.js stops answering terminal queries; the server is the one responder
+     *    (terminal-device-queries.js). A second or a late answer types into the program.
+     *  - xterm.js stops re-wrapping lines on a resize and grows by adding rows at the bottom
+     *    (`windowsPty`). That host repaints nothing after a resize and is told the cursor of the
+     *    server's emulator, which lays the screen out that way.
+     * Every other session keeps xterm.js's defaults exactly as before.
+     */
+    setConsoleHost({ bundled = false } = {}) {
+        if (!this._terminal) {
+            return;
+        }
+
+        const next = bundled === true;
+        if (next && !this._restoreDeviceQueryReplies) {
+            this._restoreDeviceQueryReplies = installServerAnsweredQueries(this._terminal);
+        } else if (!next && this._restoreDeviceQueryReplies) {
+            this._restoreDeviceQueryReplies();
+            this._restoreDeviceQueryReplies = null;
+        }
+
+        const windowsPty = windowsPtyOptionFor({ bundled: next });
+        const current = this._terminal.options.windowsPty || {};
+        if (current.backend !== windowsPty.backend || current.buildNumber !== windowsPty.buildNumber) {
+            this._terminal.options.windowsPty = windowsPty;
+        }
+
+        this._bundledConsoleHost = next;
+    }
+
+    /** True while this renderer is attached to a session on the bundled Windows console host. */
+    get usesBundledConsoleHost() {
+        return this._bundledConsoleHost === true;
     }
 
     isBracketedPasteModeEnabled() {
@@ -1029,6 +1073,9 @@ export class VibeTerminal {
             cancelAnimationFrame(this._fitRafId);
             this._fitRafId = null;
         }
+
+        this._restoreDeviceQueryReplies = null;
+        this._bundledConsoleHost = false;
 
         if (this._terminal) {
             this._terminal.dispose();

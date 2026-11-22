@@ -41,7 +41,7 @@ public static class TerminalRoutes
             var success = await terminal.StartLaunchSessionAsync(execution, () => prompts.ResolveLaunchAsync(template,
                 new PromptPlaceholderContext(snapshot.Context.WorkingDirectory, EnvironmentName: snapshot.Preset.Name,
                     BoardCardKey: boardCard?.Key, UserMessage: snapshot.Context.UserMessage), ct));
-            return success ? Results.Ok(new TerminalStatusResponse(true, terminal.ActiveSessionId, terminal.ActiveCli, terminal.ActiveWorkingDirectory))
+            return success ? Results.Ok(BuildStatus(terminal, hasActiveSession: true))
                 : Results.Conflict(new ErrorResponse("The terminal already has a session."));
         }
         catch (Exception ex) when (ex is LaunchValidationException or LaunchConflictException or PromptTooLongException)
@@ -50,17 +50,29 @@ public static class TerminalRoutes
         }
     }
 
+    /// <summary>
+    /// The session's status as the viewer needs it. The console host travels with every status
+    /// and start response because the viewer has to know it before it attaches (VIBE-354).
+    /// </summary>
+    internal static TerminalStatusResponse BuildStatus(ITerminalSessionService terminal, bool hasActiveSession)
+    {
+        return new TerminalStatusResponse(
+            hasActiveSession,
+            terminal.ActiveSessionId,
+            terminal.ActiveCli,
+            terminal.ActiveWorkingDirectory,
+            ConsoleHost: terminal.ActiveConsoleHost);
+    }
+
     public static void Map(WebApplication app, string launchDirectory)
     {
         // GET /api/v1/terminal/status - Check if terminal session is active
         app.MapGet("/api/v1/terminal/status", (ITerminalSessionService terminalService) =>
         {
-            return Results.Ok(new TerminalStatusResponse(
-                terminalService.HasActiveSession,
-                terminalService.ActiveSessionId,
-                terminalService.ActiveCli,
-                terminalService.ActiveWorkingDirectory,
-                CanReclaim: terminalService.CanReclaim));
+            return Results.Ok(BuildStatus(terminalService, terminalService.HasActiveSession) with
+            {
+                CanReclaim = terminalService.CanReclaim
+            });
         }).WithName("GetTerminalStatus");
 
         // POST /api/v1/terminal/start - Start a terminal session with LLM CLI
@@ -181,11 +193,7 @@ public static class TerminalRoutes
                     await sessionResumeService.LinkParentSessionAsync(terminalService.ActiveSessionId, request.ResumeSessionId, LlmParser.ToWireName(llm), cancellationToken);
                 }
 
-                return Results.Ok(new TerminalStatusResponse(
-                    true,
-                    terminalService.ActiveSessionId,
-                    terminalService.ActiveCli,
-                    terminalService.ActiveWorkingDirectory));
+                return Results.Ok(BuildStatus(terminalService, hasActiveSession: true));
             }
             catch (PromptTooLongException ex)
             {

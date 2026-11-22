@@ -11,6 +11,11 @@ public interface ITerminalSessionService
     bool CanReclaim => false;
     string? ActiveSessionId { get; }
     string? ActiveCli { get; }
+    /// <summary>
+    /// "bundled" while the active session's PTY runs under the bundled Windows console host, else
+    /// null. The viewer uses it to leave device queries to the server (VIBE-354).
+    /// </summary>
+    string? ActiveConsoleHost => null;
     string? ActiveWorkingDirectory { get; }
     bool IsExternallyOwned { get; }
     /// <param name="resolveInitialPrompt">

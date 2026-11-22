@@ -217,6 +217,25 @@ foreach ($platform in $platforms) {
         Write-Host "    Copied $($dir.Name)/" -ForegroundColor Green
     }
 
+    # Stage the modern Windows console host (VIBE-354): conpty/conpty.dll and the
+    # OpenConsole.exe it starts. It is a subdirectory, so the top-level loop above never sees
+    # it, and the two files only work as a pair: a conpty.dll that cannot find OpenConsole.exe
+    # beside it starts conhost.exe and still reports success. Fail the build instead of
+    # shipping a setting that silently does nothing.
+    if ($platform.Name -eq "win32-x64") {
+        $consoleHostSource = Join-Path $sourceDir "conpty"
+        $consoleHostDest = Join-Path $platformDir "conpty"
+        New-Item -ItemType Directory -Force -Path $consoleHostDest | Out-Null
+        foreach ($consoleHostName in @("conpty.dll", "OpenConsole.exe")) {
+            $consoleHostFile = Join-Path $consoleHostSource $consoleHostName
+            if (-not (Test-Path -LiteralPath $consoleHostFile -PathType Leaf)) {
+                throw "Console host file conpty/$consoleHostName is missing from $sourceDir. Did the AOT publish copy the Microsoft.Windows.Console.ConPTY files (see VibeRails.csproj)?"
+            }
+            Copy-Item -LiteralPath $consoleHostFile -Destination (Join-Path $consoleHostDest $consoleHostName) -Force
+        }
+        Write-Host "    Staged conpty/ (modern console host)" -ForegroundColor Green
+    }
+
     # Stage the search re-ranker (VIBE-258) already extracted, in Models/Reranker beside the
     # binary. The extension never writes to ~/.vibe_rails, so the backend falls back to this
     # copy (SearchRerankerSettings.BundledDirectory) when no installer has put a model in

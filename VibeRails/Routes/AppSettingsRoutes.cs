@@ -192,6 +192,9 @@ public static class AppSettingsRoutes
             settings.UseVsCodeTheme = settingsDto.UseVsCodeTheme;
             if (settingsDto.VsCodeSpellCheck.HasValue)
                 settings.VsCodeSpellCheck = settingsDto.VsCodeSpellCheck.Value;
+            // Read when a terminal starts (BundledConsoleHost), so nothing running is touched.
+            if (settingsDto.ModernConsoleHost.HasValue)
+                settings.ModernConsoleHost = settingsDto.ModernConsoleHost.Value;
             ApplyContextNudge(settings, settingsDto.CreateVibeStoryTracking, settingsDto.CreateVibeStoryTrackingCustomEnvs);
             // MCP registration is always on. Keep the field true for old clients/settings files.
             settings.McpEnabled = true;
@@ -302,6 +305,12 @@ public static class AppSettingsRoutes
 
     private static AppSettingsDto BuildAppSettingsDto(Settings settings)
     {
+        // Null where the host cannot apply at all (not Windows x64), so the page omits the switch.
+        string? consoleHostUnavailable = null;
+        bool? consoleHostAvailable = VibeRails.Services.Terminal.BundledConsoleHost.IsSupportedPlatform
+            ? VibeRails.Services.Terminal.BundledConsoleHost.IsAvailable(out consoleHostUnavailable)
+            : null;
+
         var maskedKey = string.IsNullOrWhiteSpace(settings.ApiKey)
             ? ""
             : settings.ApiKey.Length <= 4
@@ -354,7 +363,10 @@ public static class AppSettingsRoutes
             ClaudeGatewaySupportsToolSearch: settings.ClaudeGatewaySupportsToolSearch,
             CodexInheritedBaseBypassesRelay: InheritedBaseBypassesRelay("OPENAI_BASE_URL", null),
             ClaudeInheritedBaseBypassesRelay: InheritedBaseBypassesRelay(LlmProxyClaudeConfig.BaseUrlVariable, LlmProxyUpstream.ClaudeVariable),
-            VsCodeSpellCheck: settings.VsCodeSpellCheck
+            VsCodeSpellCheck: settings.VsCodeSpellCheck,
+            ModernConsoleHost: settings.ModernConsoleHost,
+            ModernConsoleHostAvailable: consoleHostAvailable,
+            ModernConsoleHostUnavailableReason: consoleHostUnavailable
         );
     }
 

@@ -1446,6 +1446,16 @@
                                 </div>
                                 <small class="form-text text-muted" id="setting-vscode-spell-check-help">Enable offline English spelling suggestions in Board titles, descriptions and comments, including in VS Code. Off by default. Applies after saving.</small>
                             </div>
+                            <!-- VIBE-354. Shown only where the server reports the host can apply (Windows x64). -->
+                            <div class="mb-4" id="setting-modern-console-host-row" hidden>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="setting-modern-console-host"
+                                        aria-describedby="setting-modern-console-host-help setting-modern-console-host-unavailable">
+                                    <label class="form-check-label" for="setting-modern-console-host">Modern Windows console host</label>
+                                </div>
+                                <small class="form-text text-muted" id="setting-modern-console-host-help">Experimental. Runs new terminal tabs on the console host that ships with VibeRails instead of the one built into Windows, so a program's output reaches the terminal unchanged. Off by default. Applies to terminals started after saving.</small>
+                                <small class="form-text text-muted d-block" id="setting-modern-console-host-unavailable" role="status" hidden></small>
+                            </div>
                         </form>
                     </div>
                 </div>

@@ -96,6 +96,23 @@ public class TerminalSessionService : ITerminalSessionService
         }
     }
 
+    // Read from the live terminal rather than remembered at start: an externally owned (native)
+    // session reports its own host, and a session that fell back to the built-in host reports none.
+    public string? ActiveConsoleHost
+    {
+        get
+        {
+            lock (s_lock)
+                return ConsoleHostWireName(s_terminal);
+        }
+    }
+
+    /// <summary>The wire value of a terminal's console host; only the bundled host has one.</summary>
+    internal static string? ConsoleHostWireName(Terminal? terminal) =>
+        terminal?.ConsoleHost == Pty.Net.PtyConsoleHost.Bundled ? BundledConsoleHostWireName : null;
+
+    internal const string BundledConsoleHostWireName = "bundled";
+
     public bool IsExternallyOwned { get { lock (s_lock) return s_externallyOwned; } }
 
     public TerminalSessionService(

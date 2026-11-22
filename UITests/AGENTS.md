@@ -32,7 +32,8 @@ Pure-Node tests (no browser) run via the built-in test runner:
 ```powershell
 npm run test:node
 ```
-This runs `tests/xterm-scrollback.spec.js` plus every pure frontend module regression under
+This runs `tests/xterm-scrollback.spec.js` and `tests/xterm-device-queries.spec.js` (both drive
+the real xterm.js through `@xterm/headless`) plus every pure frontend module regression under
 `../Tests/wwwroot/js/*.test.mjs` using `node --test`.
 
 ### Playwright E2E Only
@@ -221,7 +222,7 @@ npx playwright show-report
 - **Fake CLI:** `VIBERAILS_TEST_FAKE_CLI=1` (set by global-setup) makes `CommandService.PrepareSessionAsync` short-circuit to a portable echo+sleep so PTY+WS+xterm are exercised without a real LLM CLI.
 - **Custom backend:** Set `VIBERAILS_E2E_BACKEND_DLL` to point the suite at an already-built isolated DLL instead of `dotnet run`.
 - **Workers:** 1 (one backend instance per run, shared via saved `storageState`).
-- **Tests:** Playwright specs live in `./tests`; `xterm-scrollback.spec.js` is excluded from Playwright and runs via `npm run test:node` with `node --test` + `@xterm/headless`. That command also runs every `../Tests/wwwroot/js/*.test.mjs` frontend module regression from the repository root.
+- **Tests:** Playwright specs live in `./tests`; `xterm-scrollback.spec.js` and `xterm-device-queries.spec.js` are excluded from Playwright and run via `npm run test:node` with `node --test` + `@xterm/headless`. That command also runs every `../Tests/wwwroot/js/*.test.mjs` frontend module regression from the repository root.
 
 ## Adding New Tests
 

@@ -38,6 +38,20 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.32.0" />
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="3.0.0" />
   </ItemGroup>
+  <!-- The modern Windows console host (VIBE-354): conpty.dll and the OpenConsole.exe it starts,
+       copied side by side into conpty\ for Services/Terminal/Pty/BundledConsoleHost.cs. It is used
+       only when Settings > Modern Windows console host is on; Pty.Net loads the DLL by absolute path.
+       Only the package's files are taken (ExcludeAssets): its own targets put OpenConsole.exe in an
+       x64\ subfolder and only when PlatformTarget names an architecture, which an AnyCPU build never
+       does, and a conpty.dll that cannot find OpenConsole.exe silently starts conhost.exe instead.
+       x64 only: there is no win-arm64 build of VibeRails. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.Console.ConPTY" Version="1.25.261109001" GeneratePathProperty="true" ExcludeAssets="all" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(PkgMicrosoft_Windows_Console_ConPTY)' != '' and ('$(RuntimeIdentifier)' == 'win-x64' or ('$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Windows'))))">
+    <Content Include="$(PkgMicrosoft_Windows_Console_ConPTY)\runtimes\win-x64\native\conpty.dll" Link="conpty\conpty.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+    <Content Include="$(PkgMicrosoft_Windows_Console_ConPTY)\build\native\runtimes\x64\OpenConsole.exe" Link="conpty\OpenConsole.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\VibeRails.Data.Sqlite\VibeRails.Data.Sqlite.csproj" />
     <ProjectReference Include="..\VibeRails.Data.Abstractions\VibeRails.Data.Abstractions.csproj" />

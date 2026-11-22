@@ -149,6 +149,7 @@ test('adoptLaunchedTab restores authoritative CLI and session identity', async (
                 statusAvailable: true,
                 sessionId: 'session-1',
                 cli: 'OpenCode',
+                consoleHost: 'bundled',
                 workingDirectory: 'C:/source/project/.workspace/run-1',
                 boardCard: { id: 'card-1', key: 'VB-1', title: 'Story', displayId: 'VIBE-1' },
                 needsAttention: true
@@ -170,6 +171,10 @@ test('adoptLaunchedTab restores authoritative CLI and session identity', async (
         statusAvailable: true,
         sessionId: 'session-1',
         cli: 'OpenCode',
+        // VIBE-354: and the session's console host, so its viewer leaves device queries to the
+        // server from the first byte. Dropping it would attach a bundled-host session as if it
+        // were on the built-in host, and both sides would answer.
+        consoleHost: 'bundled',
         workingDirectory: 'C:/source/project/.workspace/run-1',
         // VIBE-36: the adopted tab keeps the Board card the list links its session to.
         boardCard: { id: 'card-1', key: 'VB-1', title: 'Story', displayId: 'VIBE-1' },

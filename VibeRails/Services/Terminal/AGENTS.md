@@ -390,6 +390,68 @@ PTY launch, process-exit, final-output, and Automation-capacity suites. The stan
 fixture is `Tests/headless/WindowsProcessTree`; it never starts the app or opens its databases.
 Changes still require Windows Native AOT validation and live provider/VS Code checks.
 
+### Windows console host (VIBE-354)
+
+App settings > **Modern Windows console host** (`Settings.ModernConsoleHost`, default off) starts
+new terminals on the console host shipped with VibeRails (`conpty\conpty.dll` and
+`conpty\OpenConsole.exe` beside the executable, from the `Microsoft.Windows.Console.ConPTY`
+package) instead of the one built into Windows. Off is the `kernel32` path with nothing changed.
+The setting is read when a terminal starts (`TerminalRunner.ResolveBundledConsoleHost`), so a
+running terminal keeps the host it has. It is experimental and Windows x64 only; elsewhere the
+Settings page does not show the switch.
+
+- **Load by absolute path, fall back, and say so.** `Pty/BundledConsoleHost.cs` builds the path
+  from `AppContext.BaseDirectory`. `Pty.Net/Windows/ConPtyApi.cs` loads it with `NativeLibrary` and
+  delegates (no unsafe code, no `LibraryImport`) and refuses a relative path, a missing
+  `OpenConsole.exe` (the DLL would start `conhost.exe` and still report success), a DLL that does
+  not load and a missing export. Any refusal, and a create call that fails, uses the built-in
+  host. Every Windows PTY logs `PTY {Pid} is hosted by ...`; a fallback is a warning with its
+  reason, and it is the only sign of one.
+- **Sessions that stay on the built-in host:** native console launches (`isNativeCli`, which
+  includes the inner session of `vb --job-run`) and the private script terminal.
+- **The server is the only responder to terminal queries.** This host passes output through and
+  forwards every query to the terminal. It also asks on its own account: device attributes at
+  startup, and the cursor position after a resize once the program next touches the console. It
+  keeps the first device-attributes answer it ever receives; any further answer, and any report
+  nobody asked for, is typed into the program (a cursor report arrives as F3).
+  `Protocol/TerminalQueryScanner.cs` finds queries in the output,
+  `Consumers/QueryAnsweringEmulatorConsumer.cs` feeds the emulator up to each one, and
+  `Pty/TerminalQueryResponder.cs` writes the reply from emulator state without blocking the read
+  loop. Answered: DA1, DA2, DSR 5, CPR, DECXCPR and DECRQM (private and ANSI). Everything else
+  goes unanswered, as colour queries do on the built-in host.
+- **The viewer answers nothing** for such a session. `terminal-device-queries.js` registers
+  xterm.js parser handlers that consume those queries; no byte is removed from the stream. The
+  host travels as `consoleHost: "bundled"` in start, status and tab-list responses, and
+  `TerminalTab` applies it before it attaches. Never add a second responder.
+- **Nothing repaints after a resize**, so the viewer and the emulator have to lay the screen out
+  alike without help. The emulator never re-wraps a line: cells stay where they are and the cursor
+  is clamped. The viewer therefore turns xterm.js re-wrapping off (`BUNDLED_HOST_WINDOWS_PTY`) and
+  does not clear its screen before a shrink, and `Terminal.KeepCursorLineOnScreen` scrolls the
+  emulator before a shorter screen would cut off the line the cursor is on. The host is told the
+  emulator's cursor. Code that relies on a repaint after a resize must check the host first.
+
+Known limits, with the card that owns each:
+
+- The remote viewer (VibeRails-Front) still answers queries, so a remote viewer on such a session
+  types its answers into the program (VB-G9STX-427).
+- Lines are not re-wrapped when the width changes: text beyond the right edge is hidden until the
+  terminal is that wide again. The screen behind an alternate-screen program, and such a program
+  that does not repaint after a resize, can differ from the viewer in a snapshot (VB-WU97H-428).
+- No real Codex, Claude or agy session has run on this host. `WaitingForUserInputObserver` and
+  the Codex cursor handling were tuned to re-rendered output and have not been checked against
+  it; replies start with the read loop, so a slow relay connect delays the first one; Windows 10
+  is untested (VB-Y4SFI-429).
+- Native console sessions are excluded by decision, not by measurement (VB-R23BE-430).
+- The script installer waits for `vb.exe` to be free before an update, not for
+  `OpenConsole.exe` (VB-IHMN0-431).
+
+Tests: `BundledConsoleHostTests` (the real host and a throwaway child), `BundledHostResizeTests`,
+`TerminalQueryScannerTests`, `TerminalQueryResponderTests`, `AppSettingsModernConsoleHostTests`,
+`ConsoleHostPackagingTests`, `terminal-device-queries.test.mjs`,
+`settings-modern-console-host.test.mjs` and `UITests/tests/xterm-device-queries.spec.js` (the real
+xterm.js; `npm run test:node`). The resize tables in that spec and in
+`TerminalQueryResponderTests` state one rule: change them together.
+
 ### `ITerminalConsumer.cs`
 - Contract: `void OnOutput(ReadOnlyMemory<byte> data)`.
 - Called synchronously from `Terminal.ReadLoopAsync()`.
@@ -415,6 +477,11 @@ Changes still require Windows Native AOT validation and live provider/VS Code ch
 `TerminalEmulatorConsumer.cs`
 - Internal consumer that feeds all PTY output bytes into the headless `TerminalEmulator` so `GetGridReplay()` always reflects the current screen state.
 - Thread-safe via the shared emulator lock.
+
+`QueryAnsweringEmulatorConsumer.cs`
+- Takes the place of `TerminalEmulatorConsumer` for a terminal on the bundled console host
+  (VIBE-354): it feeds the emulator in pieces that end at each terminal query, so the reply is
+  built from the state the program saw when it asked. See "Windows console host" above.
 
 `NativeConsoleOutputFilter.cs`
 - Not a consumer, but lives in `Consumers/`. Strips XTWINOPS window-geometry operations from PTY output on its way to the **real OS console** of a native session, so an inner app cannot resize the outer console window out from under the geometry poll. Narrow on purpose; `DbLoggingConsumer`, `WebSocketConsumer`, and `RemoteOutputConsumer` still receive the unmodified stream.

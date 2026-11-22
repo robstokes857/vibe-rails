@@ -3,8 +3,8 @@ const { defineConfig, devices } = require('@playwright/test');
 
 module.exports = defineConfig({
   testDir: './tests',
-  // xterm-scrollback uses node:test, not Playwright. It's run via `npm run test:node`.
-  testIgnore: ['**/xterm-scrollback.spec.js'],
+  // These use node:test, not Playwright. They run via `npm run test:node`.
+  testIgnore: ['**/xterm-scrollback.spec.js', '**/xterm-device-queries.spec.js'],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

@@ -242,7 +242,11 @@ jobs:
                   "scripts/commit-msg-hook.sh",
                   "onnxruntime.dll",
                   "e_sqlite3.dll",
-                  "vec0.dll"
+                  "vec0.dll",
+                  # The modern console host (VIBE-354). One without the other silently
+                  # falls back to the built-in host, so require the pair.
+                  "conpty/conpty.dll",
+                  "conpty/OpenConsole.exe"
               )
               foreach ($relativePath in $requiredFiles) {
                   $path = Join-Path $verifyDir $relativePath

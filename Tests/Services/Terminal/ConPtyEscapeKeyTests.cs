@@ -17,19 +17,37 @@ public sealed class ConPtyEscapeKeyTests
 {
     public static bool IsWindows => OperatingSystem.IsWindows();
 
-    [Theory(SkipUnless = nameof(IsWindows), Skip = "Requires Windows ConPTY")]
-    [InlineData(false, "")]
-    [InlineData(true, "")]
-    [InlineData(true, "arrow")]
-    [InlineData(true, "paste")]
-    [InlineData(false, "backtab")]
-    [InlineData(true, "backtab")]
-    [InlineData(false, "escape-backtab")]
-    [InlineData(true, "escape-backtab")]
-    [InlineData(false, "native-backtab")]
-    [InlineData(true, "native-backtab")]
-    public async Task SemanticEscape_ArrivesWithoutAnotherKey_AndDoesNotModifyFollowingKey(bool afterModifiedEnter, string between)
+    /// <summary>
+    /// Every case runs under the console host built into Windows and under the bundled one
+    /// (VIBE-354). Input has to reach a program as the same key records under both.
+    /// </summary>
+    public static TheoryData<bool, bool, string> Cases()
     {
+        var cases = new TheoryData<bool, bool, string>();
+        foreach (var bundledHost in new[] { false, true })
+        {
+            cases.Add(bundledHost, false, "");
+            cases.Add(bundledHost, true, "");
+            cases.Add(bundledHost, true, "arrow");
+            cases.Add(bundledHost, true, "paste");
+            cases.Add(bundledHost, false, "backtab");
+            cases.Add(bundledHost, true, "backtab");
+            cases.Add(bundledHost, false, "escape-backtab");
+            cases.Add(bundledHost, true, "escape-backtab");
+            cases.Add(bundledHost, false, "native-backtab");
+            cases.Add(bundledHost, true, "native-backtab");
+        }
+
+        return cases;
+    }
+
+    [Theory(SkipUnless = nameof(IsWindows), Skip = "Requires Windows ConPTY")]
+    [MemberData(nameof(Cases))]
+    public async Task SemanticEscape_ArrivesWithoutAnotherKey_AndDoesNotModifyFollowingKey(
+        bool bundledHost, bool afterModifiedEnter, string between)
+    {
+        Assert.SkipUnless(!bundledHost || BundledConsoleHost.IsAvailable(out _),
+            "Requires the bundled console host (Windows x64, conpty.dll and OpenConsole.exe in the build output)");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(25));
         var ct = timeout.Token;
@@ -44,12 +62,16 @@ public sealed class ConPtyEscapeKeyTests
             App = executable,
             CommandLine = ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
                 Convert.ToBase64String(Encoding.Unicode.GetBytes(script))],
-            Cwd = Path.GetTempPath(), Cols = 100, Rows = 30
+            Cwd = Path.GetTempPath(), Cols = 100, Rows = 30,
+            WindowsConPtyLibraryPath = bundledHost ? BundledConsoleHost.LibraryPath : null
         }, ct);
         await using var terminal = new TerminalPty(pty, cols: 100, rows: 30)
         {
             EncodeBareLineFeedAsWin32ShiftEnter = true
         };
+        // A silent fallback to the built-in host would make the bundled cases prove nothing.
+        Assert.Equal(bundledHost ? PtyConsoleHost.Bundled : PtyConsoleHost.Inbox, terminal.ConsoleHost);
+        terminal.AttachEmulator(); // As Terminal.CreateAsync does; under the bundled host it answers the host's queries.
         terminal.StartReadLoop(); // Drain output continuously so the child cannot block on its output pipe.
         await pipe.WaitForConnectionAsync(ct);
         using var reader = new StreamReader(pipe, leaveOpen: true);

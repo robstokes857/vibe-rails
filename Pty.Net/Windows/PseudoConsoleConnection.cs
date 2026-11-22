@@ -22,8 +22,10 @@ namespace Pty.Net.Windows
         /// Initializes a new instance of the <see cref="PseudoConsoleConnection"/> class.
         /// </summary>
         /// <param name="handles">The set of handles associated with the pseudoconsole.</param>
-        public PseudoConsoleConnection(PseudoConsoleConnectionHandles handles)
+        /// <param name="consoleHostFallbackReason">Why a requested bundled console host was not used, if it was not.</param>
+        public PseudoConsoleConnection(PseudoConsoleConnectionHandles handles, string? consoleHostFallbackReason = null)
         {
+            this.ConsoleHostFallbackReason = consoleHostFallbackReason;
             this.ReaderStream = new AnonymousPipeClientStream(PipeDirection.In, new Microsoft.Win32.SafeHandles.SafePipeHandle(handles.OutPipeOurSide.Handle, ownsHandle: false));
             this.WriterStream = new AnonymousPipeClientStream(PipeDirection.Out, new Microsoft.Win32.SafeHandles.SafePipeHandle(handles.InPipeOurSide.Handle, ownsHandle: false));
 
@@ -47,6 +49,12 @@ namespace Pty.Net.Windows
 
         /// <inheritdoc/>
         public int ExitCode => this.process.ExitCode;
+
+        /// <inheritdoc/>
+        public PtyConsoleHost ConsoleHost => this.handles.PseudoConsoleHandle.Api.Host;
+
+        /// <inheritdoc/>
+        public string? ConsoleHostFallbackReason { get; }
 
         /// <inheritdoc/>
         public void Dispose()
@@ -90,7 +98,8 @@ namespace Pty.Net.Windows
         /// <inheritdoc/>
         public void Resize(int cols, int rows)
         {
-            int hr = ResizePseudoConsole(this.handles.PseudoConsoleHandle, new Coord(cols, rows));
+            var console = this.handles.PseudoConsoleHandle;
+            int hr = console.Api.Resize(console, new Coord(cols, rows));
             if (hr != S_OK)
             {
                 Marshal.ThrowExceptionForHR(hr);

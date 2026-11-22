@@ -984,7 +984,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             child.Automation?.Name,
             StatusAvailable: status is not null,
             AutomationCompleted: automationCompleted,
-            Owner: child.Owner);
+            Owner: child.Owner,
+            ConsoleHost: status?.ConsoleHost);
     }
 
     private async Task<TerminalChildProcess> SpawnChildAsync(CancellationToken cancellationToken)

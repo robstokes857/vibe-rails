@@ -221,10 +221,33 @@ namespace Pty.Net.Windows
 
                 var coord = new Coord(options.Cols, options.Rows);
 
-                // Create the Pseudo Console, using the pipes
-                int hr = CreatePseudoConsole(coord, inPipePseudoConsoleSide.Handle, outPipePseudoConsoleSide.Handle, 0, out IntPtr hPC);
+                // Create the Pseudo Console, using the pipes. A bundled console host is used only
+                // when the caller named one and it loads; anything else is the host built into
+                // Windows, exactly as before, with the reason kept for the caller to log.
+                ConPtyApi api = ConPtyApi.Inbox;
+                string? fallbackReason = null;
+                if (!string.IsNullOrEmpty(options.WindowsConPtyLibraryPath))
+                {
+                    api = ConPtyApi.TryLoadBundled(options.WindowsConPtyLibraryPath, out fallbackReason) ?? ConPtyApi.Inbox;
+                }
 
-                // Remember the handle to prevent leakage
+                int hr = api.Create(coord, inPipePseudoConsoleSide.Handle, outPipePseudoConsoleSide.Handle, out IntPtr hPC);
+                if (hr != S_OK && !ReferenceEquals(api, ConPtyApi.Inbox))
+                {
+                    // The bundled host exists but would not start. Nothing has been spawned on the
+                    // pipes yet, so the built-in host can still take them.
+                    if (hPC != IntPtr.Zero && hPC != INVALID_HANDLE_VALUE)
+                    {
+                        api.Close(hPC);
+                    }
+
+                    fallbackReason = $"the bundled console host failed to start (HRESULT 0x{hr:X8})";
+                    api = ConPtyApi.Inbox;
+                    hr = api.Create(coord, inPipePseudoConsoleSide.Handle, outPipePseudoConsoleSide.Handle, out hPC);
+                }
+
+                // Remember the handle to prevent leakage, with the API that must close it.
+                pseudoConsoleHandle.Api = api;
                 if (hPC != IntPtr.Zero && hPC != INVALID_HANDLE_VALUE)
                 {
                     pseudoConsoleHandle.InitialSetHandle(hPC);
@@ -310,7 +333,7 @@ namespace Pty.Net.Windows
                     mainThreadHandle,
                     job);
 
-                var result = new PseudoConsoleConnection(connectionOptions);
+                var result = new PseudoConsoleConnection(connectionOptions, fallbackReason);
                 // From here the connection owns cleanup, including a failed resume. Its Dispose
                 // closes processHandle, so the launch finally must never try to use it again.
                 transferred = true;

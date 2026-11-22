@@ -267,6 +267,58 @@ export class TerminalTab {
         return false;
     }
 
+    // ---- Console host (VIBE-354) -------------------------------------------------------
+    // A session on the bundled Windows console host has its device queries answered by the
+    // server, so this viewer must not answer them (vibe-terminal.js setConsoleHost). The host is
+    // a property of the session, not of the tab: `consoleHostSessionId` records which session the
+    // remembered value describes, so a session started by someone else (a Board launch, an
+    // Automation, another window) is never attached with the previous session's answer.
+    //   state.consoleHost: 'bundled' | null (known, not bundled) | undefined (not known yet)
+
+    /** Records the console host a status or start response reported for its session. */
+    setConsoleHostFromStatus(status) {
+        this.state.consoleHost = status?.consoleHost === 'bundled' ? 'bundled' : null;
+        this.state.consoleHostSessionId = status?.sessionId || this.state.sessionId || null;
+    }
+
+    forgetConsoleHost() {
+        this.state.consoleHost = undefined;
+        this.state.consoleHostSessionId = null;
+    }
+
+    usesBundledConsoleHost() {
+        return this._consoleHostIsKnown() && this.state.consoleHost === 'bundled';
+    }
+
+    _consoleHostIsKnown() {
+        return this.state.consoleHost !== undefined
+            && (this.state.consoleHostSessionId || null) === (this.state.sessionId || null);
+    }
+
+    // One status read, only when the host of the session about to be attached is not known.
+    // A failed read leaves it unknown: the viewer then behaves as it always has.
+    async _loadConsoleHost() {
+        try {
+            const status = await this.manager.app.apiCall(
+                `/api/v1/terminal/tabs/${encodeURIComponent(this.state.id)}/status`,
+                'GET', null, { showLoading: false });
+            if (status?.hasActiveSession === true) {
+                if (status.sessionId && !this.state.sessionId) {
+                    this.state.sessionId = status.sessionId;
+                }
+                if (!status.sessionId || status.sessionId === this.state.sessionId) {
+                    this.setConsoleHostFromStatus(status);
+                }
+            }
+        } catch {
+            // Unknown stays unknown.
+        }
+    }
+
+    _applyConsoleHost() {
+        this.vibeTerminal?.setConsoleHost?.({ bundled: this.usesBundledConsoleHost() });
+    }
+
     ensureTerminal() {
         if (this.vibeTerminal || !this.state.ui?.terminalElement) {
             return;
@@ -668,6 +720,13 @@ export class TerminalTab {
             return false;
         }
 
+        // The clear relies on the console host built into Windows repainting the whole viewport
+        // after every resize. The bundled host sends no repaint (measured, conpty 1.25.2611), so
+        // clearing would leave a shell tab blank until the shell next printed (VIBE-354).
+        if (this.usesBundledConsoleHost()) {
+            return false;
+        }
+
         const previous = this.getLastResizeGeometry();
         if (!previous) {
             return false;
@@ -737,6 +796,18 @@ export class TerminalTab {
 
         this.disconnectSocketOnly();
         this._autoConnectDeferred = false;
+        // The console host must be settled before the first byte reaches xterm.js. The read only
+        // happens when this session's host is not already known (a start response and the tab
+        // list both carry it), so the usual connect stays synchronous up to the socket.
+        const attempt = this._connectAttempt = (this._connectAttempt || 0) + 1;
+        if (!this._consoleHostIsKnown()) {
+            await this._loadConsoleHost();
+            // A newer connect, a stop or a dispose took over while the status was read.
+            if (attempt !== this._connectAttempt || this._disposed || !this.state.hasActiveSession) {
+                return false;
+            }
+            this.disconnectSocketOnly();
+        }
         // Reuse the live xterm DOM across reconnects. Recreating it remounts
         // xterm's DOM children, and the synchronous fit() below can then
         // measure cell metrics before the browser paints them. Reusing the DOM
@@ -748,6 +819,7 @@ export class TerminalTab {
         if (hadExistingTerminal) {
             this.vibeTerminal?.resetForSnapshotReplay?.();
         }
+        this._applyConsoleHost();
         this.clearConnectFocusTimeouts();
         this._initialConnectActive = true;
         this.lastResizeSignature = null;
@@ -1058,6 +1130,11 @@ export class TerminalTab {
             this.state.boardCard = null;
             this.state.needsAttention = false;
             this.state.cli = response?.cli || body?.cli || null;
+            if (this.state.hasActiveSession) {
+                this.setConsoleHostFromStatus(response);
+            } else {
+                this.forgetConsoleHost();
+            }
             this.state.workingDirectory = response?.workingDirectory || body?.workingDirectory || this.state.workingDirectory || null;
             if (!this.state.hasActiveSession) {
                 this.state.status = 'not-started';
@@ -1083,6 +1160,7 @@ export class TerminalTab {
             this.state.boardCard = null;
             this.state.needsAttention = false;
             this.state.cli = null;
+            this.forgetConsoleHost();
             this.state.status = 'not-started';
             this.manager.updateUi();
             this.manager.app.showError(`Failed to start terminal: ${error.message}`);
@@ -1103,6 +1181,7 @@ export class TerminalTab {
         this.state.boardCard = null;
         this.state.needsAttention = false;
         this.state.cli = null;
+        this.forgetConsoleHost();
         this.state.status = 'not-started';
         this.disconnect({ disposeTerminal: true, preserveStatus: true });
         this.manager.updateUi();

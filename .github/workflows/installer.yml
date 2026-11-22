@@ -48,7 +48,8 @@ jobs:
           $files = @('vb.exe', 'appsettings.json', 'wwwroot/index.html', 'onnxruntime.dll',
               'e_sqlite3.dll', 'vec0.dll', 'scripts/pre-commit-hook.sh', 'scripts/commit-msg-hook.sh',
               'Models/BertV2/vocab.txt', 'Models/Reranker/vocab.txt', 'Models/Reranker/LICENSE.txt',
-              'msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
+              'msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll',
+              'conpty/conpty.dll', 'conpty/OpenConsole.exe')
           foreach ($relative in $files) {
               $path = Join-Path $payload $relative
               [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)) | Out-Null

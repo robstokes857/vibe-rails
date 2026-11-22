@@ -61,6 +61,9 @@ public class TerminalRunner
     private readonly VibeRails.Auth.AgentCredentialService? _agentCredentials;
     private readonly VibeRails.Services.Board.IBoardStore? _boardStore;
     private readonly VibeRails.Services.Integrations.VibeCodeRemote.IAccountEntitlements? _entitlements;
+    // Read when a terminal starts, never cached: the console host choice follows the shared
+    // settings file, which another window may have changed since this process started.
+    private readonly Func<Settings> _loadSettings;
 
     public TerminalRunner(
         ITerminalStateService stateService,
@@ -75,8 +78,10 @@ public class TerminalRunner
         IManagedWorktreeService? worktrees = null,
         VibeRails.Auth.AgentCredentialService? agentCredentials = null,
         VibeRails.Services.Board.IBoardStore? boardStore = null,
-        VibeRails.Services.Integrations.VibeCodeRemote.IAccountEntitlements? entitlements = null)
+        VibeRails.Services.Integrations.VibeCodeRemote.IAccountEntitlements? entitlements = null,
+        Func<Settings>? loadSettings = null)
     {
+        _loadSettings = loadSettings ?? Config.LoadFresh;
         _stateService = stateService;
         _commandService = commandService;
         _toolApiContext = toolApiContext;
@@ -240,6 +245,8 @@ public class TerminalRunner
             // the real argv at spawn instead. Jobs retain their exit-with-CLI semantics, while
             // ordinary macOS tabs return to an interactive shell as before.
             var spawnInteractiveMac = OperatingSystem.IsMacOS() && preparedSession.Executable is not null;
+            // Opt-in (Settings > Modern Windows console host). Null keeps the ConPTY built into Windows.
+            var bundledConsoleHostPath = ResolveBundledConsoleHost(isNativeCli);
             if (spawnCliDirectly || spawnInteractiveMac)
             {
                 var (app, argv) = spawnCliDirectly
@@ -253,7 +260,8 @@ public class TerminalRunner
                     title: sessionTitle,
                     ct: ct,
                     app: app,
-                    argv: argv);
+                    argv: argv,
+                    bundledConsoleHostPath: bundledConsoleHostPath);
             }
             else
             {
@@ -263,7 +271,8 @@ public class TerminalRunner
                     cols: initialSize.Cols,
                     rows: initialSize.Rows,
                     title: sessionTitle,
-                    ct: ct);
+                    ct: ct,
+                    bundledConsoleHostPath: bundledConsoleHostPath);
             }
             terminal.EncodeBareLineFeedAsWin32ShiftEnter = CodexWindowsInputRewriter.ShouldRewrite(llm);
             terminal.Exited += (_, _) => _agentCredentials?.Revoke(sessionId);
@@ -366,6 +375,26 @@ public class TerminalRunner
             await _stateService.CompleteSessionAsync(sessionId, -1);
             await VibeRails.Services.Launches.LaunchExecution.CompleteSessionAsync(sessionId, -1);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// The bundled console host for a new terminal, or null for the one built into Windows.
+    /// A settings file that cannot be read means the default, never a failed launch.
+    /// </summary>
+    internal string? ResolveBundledConsoleHost(bool isNativeCli)
+    {
+        if (!BundledConsoleHost.IsSupportedPlatform)
+            return null;
+
+        try
+        {
+            return BundledConsoleHost.ResolveForNewTerminal(_loadSettings(), isNativeCli);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[Terminal] Could not read the console host setting; using the built-in console host");
+            return null;
         }
     }
 

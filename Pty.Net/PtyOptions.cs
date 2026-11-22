@@ -52,5 +52,17 @@ namespace Pty.Net
         /// Gets or sets the process' environment variables.
         /// </summary>
         public IDictionary<string, string> Environment { get; set; } = new Dictionary<string, string>();
+
+        /// <summary>
+        /// Gets or sets the absolute path of a bundled conpty.dll to host the pseudoconsole with,
+        /// in place of the ConPTY built into Windows. OpenConsole.exe must sit beside it.
+        /// <c>null</c>, the default, uses the built-in host. Ignored outside Windows.
+        /// </summary>
+        /// <remarks>
+        /// A missing or unloadable file pair never fails the spawn: the built-in host is used and
+        /// <see cref="IPtyConnection.ConsoleHostFallbackReason"/> says why. The path is never
+        /// searched for: a relative path or a bare name is refused.
+        /// </remarks>
+        public string? WindowsConPtyLibraryPath { get; set; }
     }
 }
