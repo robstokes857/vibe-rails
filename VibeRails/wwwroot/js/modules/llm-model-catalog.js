@@ -96,14 +96,10 @@ export let LLM_MODEL_OPTIONS = Object.freeze({
     ],
     'antigravity': [
         ['', 'Default (Antigravity recommended)'],
-        ['Gemini 3.5 Flash (Medium)', 'Gemini 3.5 Flash (Medium)'],
-        ['Gemini 3.5 Flash (High)', 'Gemini 3.5 Flash (High)'],
-        ['Gemini 3.5 Flash (Low)', 'Gemini 3.5 Flash (Low)'],
-        ['Gemini 3.1 Pro (Low)', 'Gemini 3.1 Pro (Low)'],
-        ['Gemini 3.1 Pro (High)', 'Gemini 3.1 Pro (High)'],
-        ['Claude Sonnet 4.6 (Thinking)', 'Claude Sonnet 4.6 (Thinking)'],
-        ['Claude Opus 4.6 (Thinking)', 'Claude Opus 4.6 (Thinking)'],
-        ['GPT-OSS 120B (Medium)', 'GPT-OSS 120B (Medium)']
+        ['gemini-4-carbon', 'gemini-4-carbon'],
+        ['gemini-4-neon', 'gemini-4-neon'],
+        ['gemini-4-hydrogen', 'gemini-4-hydrogen'],
+        ['gemini-4-argon', 'gemini-4-argon']
     ],
     'opencode': [
         ['', 'Default (OpenCode recommended)'],

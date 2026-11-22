@@ -128,7 +128,9 @@ and no `/api/v1/antigravity/settings` route. All options are launch flags carrie
 - Sandbox → `--sandbox`
 - YOLO → `--dangerously-skip-permissions` (the only permission control)
 - Initial message → `agy --prompt-interactive=<text>`
-- Model → `--model <display>` (pinned UI dropdown via `renderAntigravityModelOptions`; emitted as a dedicated `--model` field before `additionalArgs`, not via Additional Arguments. The value is the full display string from `agy models`, e.g. `"Gemini 3.5 Flash (Low)"`, not an ID/slug.)
+- Model → `--model <slug>` (pinned UI dropdown via `renderAntigravityModelOptions` / remote catalog; base slugs such as `gemini-4-neon` compose cleanly with `--effort`, while legacy display strings with spaces/parens remain quoted as one arg).
+- Effort → `--effort <low|medium|high|xhigh>` (Board & AI Agents launch options; verified on `agy` 1.5.14, 2026-11-21).
+- Start mode → `--mode <accept-edits|auto|plan>` (Board & AI Agents launch options; verified on `agy` 1.5.14, 2026-11-21).
 
 `AntigravityLlmCliEnvironment.CreateEnvironment` only ensures the env subdirectory
 exists. The frontend builds/parses args via `buildAntigravityCustomArgs()` /

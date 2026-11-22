@@ -37,7 +37,7 @@ public static partial class BaseLlmOptionsBuilder
         {
             LLM.Claude => ["low", "medium", "high", "xhigh", "max"],
             LLM.Codex => ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
-            LLM.Antigravity => ["low", "medium", "high"],
+            LLM.Antigravity => ["low", "medium", "high", "xhigh"],
             LLM.Copilot => ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
             LLM.Grok46 => ["low", "medium", "high", "xhigh"],
             _ => []
@@ -46,7 +46,7 @@ public static partial class BaseLlmOptionsBuilder
         if (llm == LLM.Codex) effort = CodexModelCapabilities.NormalizeEffort(model, effort);
         string[] modes = llm switch
         {
-            LLM.Antigravity => ["accept-edits", "plan"],
+            LLM.Antigravity => ["accept-edits", "auto", "plan"],
             LLM.Copilot => ["interactive", "plan", "autopilot"],
             LLM.OpenCode or LLM.Glm52 or LLM.Glm53 or LLM.DeepSeekV4Pro or LLM.KimiK3 => ["build", "plan"],
             _ => ["plan"]

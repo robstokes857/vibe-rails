@@ -17,7 +17,7 @@ export function waitForBoardLaunchDefaults(root) {
 const efforts = Object.freeze({
     claude: ['low', 'medium', 'high', 'xhigh', 'max'],
     codex: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
-    antigravity: ['low', 'medium', 'high'],
+    antigravity: ['low', 'medium', 'high', 'xhigh'],
     copilot: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
     grok: ['low', 'medium', 'high', 'xhigh']
 });
@@ -58,7 +58,7 @@ export function normalizeBoardLaunchOptions(selection, options = {}) {
 function startModes(cli) {
     if (cli === 'codex') return [];
     if (cli === 'copilot') return ['interactive', 'plan', 'autopilot'];
-    if (cli === 'antigravity') return ['accept-edits', 'plan'];
+    if (cli === 'antigravity') return ['accept-edits', 'auto', 'plan'];
     return openCodeClis.includes(cli) ? ['build', 'plan'] : ['plan'];
 }
 

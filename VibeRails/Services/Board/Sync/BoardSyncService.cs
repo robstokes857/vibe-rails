@@ -778,7 +778,7 @@ public sealed partial class BoardSyncService(
             {
                 "model" => BaseLlmOptionsBuilder.IsValidModelName(text),
                 "effort" => text is "none" or "minimal" or "low" or "medium" or "high" or "xhigh" or "max" or "ultra",
-                "mode" => text is "plan" or "interactive" or "autopilot" or "accept-edits" or "build",
+                "mode" => text is "plan" or "interactive" or "autopilot" or "accept-edits" or "auto" or "build",
                 _ => text is "fast" or "ultrafast"
             };
             if (accepted) portable[name] = text;

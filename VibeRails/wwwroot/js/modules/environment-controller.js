@@ -386,8 +386,9 @@ export class EnvironmentController {
         const s = settings || {};
         const args = [];
 
-        // Model is the full display string from `agy models`, e.g. "Gemini 3.5 Flash (Low)"
-        // (spaces + parens) — quoteCustomArg wraps it so it survives as a single argument.
+        // Model is typically a base slug from `agy models` (e.g. "gemini-4-neon") so it
+        // composes with --effort, though legacy display strings with spaces/parens still
+        // survive because quoteCustomArg wraps them as a single argument.
         if (s.model) {
             args.push('--model', s.model);
         }
@@ -416,8 +417,8 @@ export class EnvironmentController {
             const arg = args[i];
             const next = args[i + 1];
 
-            // Model value is a display string with spaces/parens; parseArgString already
-            // unquoted it, so `next` is the whole "Gemini 3.5 Flash (Low)" token.
+            // parseArgString already unquoted the token, preserving both base slugs (e.g.
+            // "gemini-4-neon") and legacy display strings with spaces/parens.
             if (arg === '--model' && next) {
                 settings.model = next;
                 i++;

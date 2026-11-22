@@ -20,6 +20,13 @@ test('base selections expose provider options; saved environments keep their set
     assert.equal(normalizeBoardLaunchOptions('base:codex', { mode: 'plan' }).mode, '');
     assert.match(renderBoardLaunchOptions('base:copilot'), /value="autopilot"/);
     assert.match(renderBoardLaunchOptions('base:antigravity'), /value="accept-edits"/);
+    assert.match(renderBoardLaunchOptions('base:antigravity'), /value="auto"/);
+    assert.match(renderBoardLaunchOptions('base:antigravity'), /value="xhigh"/);
+    assert.doesNotMatch(renderBoardLaunchOptions('base:antigravity'), /value="max"/);
+    assert.deepEqual(normalizeBoardLaunchOptions('base:antigravity', { model: 'gemini-4-neon', effort: 'xhigh', mode: 'auto' }), {
+        model: 'gemini-4-neon', effort: 'xhigh', mode: 'auto', yolo: false, speed: ''
+    });
+    assert.equal(normalizeBoardLaunchOptions('base:antigravity', { effort: 'max' }).effort, '');
     for (const cli of ['claude', 'codex', 'antigravity', 'copilot', 'grok', 'opencode', 'glm-5.2', 'glm-5.3', 'deepseek-v4-pro', 'kimi-k3']) {
         assert.match(renderBoardLaunchOptions(`base:${cli}`), /data-board-launch-yolo/);
         assert.equal(normalizeBoardLaunchOptions(`base:${cli}`, { yolo: true }).yolo, true);
@@ -43,6 +50,7 @@ test('model lists come from the exact same catalog as the environment editor', (
         for (const [model] of LLM_MODEL_OPTIONS[cli]) assert.ok(renderBoardLaunchOptions(`base:${cli}`).includes(`value="${model}"`), `${cli}: ${model}`);
     }
     assert.deepEqual(LLM_MODEL_OPTIONS.codex.map(([model]) => model), ['', 'gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+    assert.deepEqual(LLM_MODEL_OPTIONS.antigravity.map(([model]) => model), ['', 'gemini-4-carbon', 'gemini-4-neon', 'gemini-4-hydrogen', 'gemini-4-argon']);
 });
 
 test('OpenCode-backed providers display fixed models and omit unsupported effort', () => {

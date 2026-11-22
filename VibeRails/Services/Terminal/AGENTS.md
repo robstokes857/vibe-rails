@@ -250,7 +250,7 @@ closes its tab like closing it here. The grant allowlist gains that one read-onl
 | Copilot | Repeated `--allow-tool=viberails-mcp(<tool>)`; 1.0.71 permissions help. |
 | Grok | Repeated `--allow=MCPTool(viberails-mcp__<tool>)` per Board tool; 1.0.30 guide. |
 | OpenCode and GLM/DeepSeek/Kimi variants | `OPENCODE_PERMISSION` entries mapping exact `viberails-mcp_<tool>` names to `allow`; OpenCode 1.18.30. |
-| Antigravity | Prompt authorization only; its only native switch is the global `--dangerously-skip-permissions`, which is added only when the user explicitly enables the card's separate YOLO option. |
+| Antigravity | Session-only `--settings '{"permissions":{"allow":[...]}}'` naming each `mcp(viberails-mcp/<tool>)` (merged read-only with the user's `~/.gemini/antigravity-cli/settings.json` `permissions.allow`, omitting `deny`/`ask` so native rules stay intact, and skipped when the caller passed `--settings` or the file cannot be safely parsed); verified on `agy` 1.5.14 (2026-11-21). |
 
 The OpenCode helper preserves unrelated inherited rules and proxy configuration, and
 conservatively skips grants covered by inherited `OPENCODE_PERMISSION` deny rules. Native

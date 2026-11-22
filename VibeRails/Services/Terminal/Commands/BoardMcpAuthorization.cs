@@ -78,8 +78,8 @@ public static class BoardMcpAuthorization
             foreach (var tool in ToolNames)
                 grants.Add($"--allow=MCPTool({ServerName}__{tool})");
         }
-        // Antigravity (agy) has no per-server or per-tool grant — only a global
-        // --dangerously-skip-permissions — so a board launch adds nothing for it on purpose.
+        // Antigravity (agy) uses session-only --settings permissions.allow merged with the user's
+        // settings.json in BoardMcpAntigravityAuthorization (like OpenCode's companion helper).
 
         var result = new List<string>(arguments);
         var delimiter = result.IndexOf("--");

@@ -211,7 +211,10 @@ public class CommandService : ICommandService
         // The Board sets this explicitly on Start work. Never infer permission from
         // the prompt, title, environment name, or the mere presence of an MCP server.
         if (authorizeBoardTools)
+        {
             launchArgs = BoardMcpAuthorization.AppendArguments(llm, launchArgs);
+            launchArgs = await BoardMcpAntigravityAuthorization.AppendArgumentsAsync(llm, launchArgs, _fileService);
+        }
 
         var cliCommand = launchArgs.Length > 0
             ? $"{cli} {BuildSafeArgString(launchArgs)}"

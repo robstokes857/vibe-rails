@@ -8,6 +8,7 @@ test('worker labels read the saved argv, including quoting, aliases, equals synt
     assert.equal(workerModelSummary('claude', '--model "claude-opus-5-5[1m]" --effort max'), 'Opus 5.5 · Maximum effort');
     assert.equal(workerModelSummary('grok', '-m grok-4.6 --reasoning-effort=low --effort high'), 'Grok 4.6 · High effort');
     assert.equal(workerModelSummary('antigravity', '--model "Gemini 3.5 Flash (High)"'), 'Gemini 3.5 Flash (High)');
+    assert.equal(workerModelSummary('antigravity', '--model gemini-4-neon --effort xhigh'), 'Gemini 4 Neon · Extra high effort');
     assert.equal(workerModelSummary('opencode', '--model openai/gpt-5.5 --variant high'), 'GPT 5.5 · High effort');
 });
 

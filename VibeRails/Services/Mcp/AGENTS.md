@@ -375,8 +375,10 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   Board tools for that session through an explicit `ToolNames` allowlist. This grant path adds no
   server wildcard or unrelated MCP tool. Tests pin both the reviewed allowlist and exact
   provider grants.
-  Antigravity receives only the narrow authorization prompt because its native switch is a global
-  bypass. See
+  Antigravity receives session-only `--settings` grants (`BoardMcpAntigravityAuthorization`) naming
+  each `mcp(viberails-mcp/<tool>)` merged read-only with the user's `permissions.allow` (never
+  writing to disk, preserving `deny`/`ask`, and falling back to prompt-only if `--settings` is
+  already supplied or `settings.json` cannot be safely parsed). See
   [Terminal launch authorization](../Terminal/AGENTS.md#board-launch-options-and-input-sequences-2026-09-14).
   Separately, VIBE-237 gives every app-managed Codex launch (base or saved environment) the
   session-local `mcp_servers.viberails-mcp.default_tools_approval_mode="approve"` default for

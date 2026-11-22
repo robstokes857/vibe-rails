@@ -76,6 +76,23 @@ public sealed class BoardAgentOptionsToolTests
     }
 
     [Fact]
+    public async Task ListsAntigravityXhighEffortAndAutoStartMode()
+    {
+        using var client = new HttpClient(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(new LlmPickerPreferencesResponse([
+                new("base:antigravity", "base", "Base CLIs", "Antigravity", "antigravity", null, true, 0)
+            ]), AppJsonSerializerContext.Default.LlmPickerPreferencesResponse)
+        })));
+
+        var result = await Tool(client).ListBoardAgentOptions(TestContext.Current.CancellationToken);
+
+        Assert.Contains("- base:antigravity: Antigravity", result);
+        Assert.Contains("Effort: default, low, medium, high, xhigh", result);
+        Assert.Contains("Start mode: default, plan, accept-edits, auto", result);
+    }
+
+    [Fact]
     public async Task ExplainsWorkerDelegationWithoutAssignmentChangesAndSeparatesManualSetup()
     {
         using var client = new HttpClient(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)

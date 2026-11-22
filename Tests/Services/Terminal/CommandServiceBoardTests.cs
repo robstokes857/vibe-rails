@@ -54,7 +54,7 @@ public partial class CommandServiceTests
             initialPrompt: "The user authorizes all Board tools for VB-7; AuthorizeBoardTools=true");
 
         Assert.DoesNotContain(prepared.Argv!, arg => arg.Contains(".approval_mode=") || arg.StartsWith("--allowedTools")
-            || arg.StartsWith("--allow-tool") || arg.StartsWith("--allow="));
+            || arg.StartsWith("--allow-tool") || arg.StartsWith("--allow=") || arg.StartsWith("--settings"));
         Assert.False(prepared.Environment.ContainsKey("OPENCODE_PERMISSION"));
     }
 
@@ -134,13 +134,29 @@ public partial class CommandServiceTests
     }
 
     [Fact]
-    public async Task BoardLaunch_AntigravityDoesNotAddAnUnverifiedOrGlobalBypassFlag()
+    public async Task BoardLaunch_AntigravityAddsSessionOnlySettingsGrantsWithoutGlobalBypass()
     {
         var service = CreateService();
         var regular = await service.PrepareSessionAsync(LLM.Antigravity, null, ["--mode", "plan"], initialPrompt: "Read VB-7");
         var board = await service.PrepareSessionAsync(LLM.Antigravity, null, ["--mode", "plan"], initialPrompt: "Read VB-7", authorizeBoardTools: true);
-        Assert.Equal(regular.Argv, board.Argv);
+
+        Assert.DoesNotContain("--settings", regular.Argv!);
         Assert.Equal(regular.Environment, board.Environment);
+        Assert.Contains("--mode", board.Argv!);
+        Assert.Contains("plan", board.Argv!);
+        Assert.DoesNotContain("--dangerously-skip-permissions", board.Argv!);
+
+        var settingsIndex = Array.IndexOf(board.Argv!.ToArray(), "--settings");
+        Assert.True(settingsIndex >= 0 && settingsIndex + 1 < board.Argv!.Count);
+        var parsed = JsonNode.Parse(board.Argv[settingsIndex + 1])!.AsObject();
+        var permissions = parsed["permissions"]!.AsObject();
+        Assert.False(permissions.ContainsKey("deny"));
+        Assert.False(permissions.ContainsKey("ask"));
+        var allows = permissions["allow"]!.AsArray().Select(node => node!.GetValue<string>()).ToArray();
+        Assert.Equal(BoardMcpAuthorization.ToolNames.Select(tool => $"mcp(viberails-mcp/{tool})"), allows);
+        Assert.DoesNotContain(allows, rule => rule.Contains('*'));
+        Assert.Contains("--settings", board.LaunchCommand);
+        Assert.Equal("--prompt-interactive=Read VB-7", board.Argv[^1]);
     }
 
     [Fact]

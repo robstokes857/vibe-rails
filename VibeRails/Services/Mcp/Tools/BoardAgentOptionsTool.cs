@@ -85,7 +85,7 @@ public sealed class BoardAgentOptionsTool
             if (pinned is not null) builder.Append("  Fixed model: ").Append(pinned).Append('\n');
             AppendAllowed(builder, "Effort", selection.Llm, ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
                 value => new BaseLlmOptions(Effort: value), value => value?.Effort);
-            AppendAllowed(builder, "Start mode", selection.Llm, ["plan", "accept-edits", "interactive", "autopilot", "build"],
+            AppendAllowed(builder, "Start mode", selection.Llm, ["plan", "accept-edits", "auto", "interactive", "autopilot", "build"],
                 value => new BaseLlmOptions(Mode: value), value => value?.Mode);
         }
         builder.Append("\nCodex model / speed catalog (shared with the UI):\n");

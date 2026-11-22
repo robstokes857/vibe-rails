@@ -117,6 +117,15 @@ public sealed class BaseLlmOptionsTests
             BaseLlmOptionsBuilder.BuildArguments(LLM.Antigravity, new("Gemini 3.5 Flash (Low)", "low")));
 
     [Fact]
+    public void AntigravitySupportsBaseSlugsXhighEffortAndAutoMode()
+    {
+        Assert.Equal(["--model", "gemini-4-neon", "--effort", "xhigh", "--mode", "auto"],
+            BaseLlmOptionsBuilder.BuildArguments(LLM.Antigravity, new("gemini-4-neon", "xhigh", "auto")));
+        Assert.Equal(["--model", "gemini-4-hydrogen", "--effort", "xhigh", "--mode", "accept-edits"],
+            BaseLlmOptionsBuilder.BuildArguments(LLM.Antigravity, new("gemini-4-hydrogen", "xhigh", "accept-edits")));
+    }
+
+    [Fact]
     public void FixedModelIsNotDuplicated() =>
         Assert.Equal(["--agent", "build"], BaseLlmOptionsBuilder.BuildArguments(LLM.Glm53, new("zai-coding-plan/glm-5.3", Mode: "build")));
 
@@ -148,6 +157,8 @@ public sealed class BaseLlmOptionsTests
     [InlineData(LLM.OpenCode, "anthropic/claude-fable-5-1[1m]", "", "")]
     [InlineData(LLM.Glm53, "zai/glm-5.3", "", "")]
     [InlineData(LLM.Claude, "", "ultra", "")]
+    [InlineData(LLM.Antigravity, "", "max", "")]
+    [InlineData(LLM.Antigravity, "", "ultra", "")]
     [InlineData(LLM.Grok46, "", "none", "")]
     [InlineData(LLM.Grok46, "", "minimal", "")]
     [InlineData(LLM.Grok46, "", "max", "")]
