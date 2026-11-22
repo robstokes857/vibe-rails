@@ -422,12 +422,15 @@ Settings page does not show the switch.
 - **The viewer answers nothing** for such a session. `terminal-device-queries.js` registers
   xterm.js parser handlers that consume those queries; no byte is removed from the stream. The
   host travels as `consoleHost: "bundled"` in start, status and tab-list responses, and
-  `TerminalTab` applies it before it attaches. Never add a second responder.
+  `TerminalTab` applies it before it attaches, and does not attach while the host of a session
+  that may be running is unknown (it retries like a dropped socket). Never add a second
+  responder.
 - **Nothing repaints after a resize**, so the viewer and the emulator have to lay the screen out
   alike without help. The emulator never re-wraps a line: cells stay where they are and the cursor
   is clamped. The viewer therefore turns xterm.js re-wrapping off (`BUNDLED_HOST_WINDOWS_PTY`) and
   does not clear its screen before a shrink, and `Terminal.KeepCursorLineOnScreen` scrolls the
-  emulator before a shorter screen would cut off the line the cursor is on. The host is told the
+  emulator before a shorter screen would cut off the line the cursor is on, through the
+  emulator's input and therefore only between two sequences. The host is told the
   emulator's cursor. Code that relies on a repaint after a resize must check the host first.
 
 Known limits, with the card that owns each:
@@ -435,8 +438,13 @@ Known limits, with the card that owns each:
 - The remote viewer (VibeRails-Front) still answers queries, so a remote viewer on such a session
   types its answers into the program (VB-G9STX-427).
 - Lines are not re-wrapped when the width changes: text beyond the right edge is hidden until the
-  terminal is that wide again. The screen behind an alternate-screen program, and such a program
-  that does not repaint after a resize, can differ from the viewer in a snapshot (VB-WU97H-428).
+  terminal is that wide again. The viewer keeps that text; the emulator drops it, so a snapshot
+  taken after a terminal was made narrower and wider again has less on those lines than the live
+  viewer. The screen behind an alternate-screen program, and such a program that does not
+  repaint after a resize, can differ from the viewer in a snapshot too. A resize that arrives
+  while a read has ended inside an escape sequence resizes the emulator without the scroll that
+  keeps the cursor's line (`EmulatorParseBoundary`). All three end when the emulator's own
+  resize does this work (VB-WU97H-428).
 - No real Codex, Claude or agy session has run on this host. `WaitingForUserInputObserver` and
   the Codex cursor handling were tuned to re-rendered output and have not been checked against
   it; replies start with the read loop, so a slow relay connect delays the first one; Windows 10
@@ -446,7 +454,7 @@ Known limits, with the card that owns each:
   `OpenConsole.exe` (VB-IHMN0-431).
 
 Tests: `BundledConsoleHostTests` (the real host and a throwaway child), `BundledHostResizeTests`,
-`TerminalQueryScannerTests`, `TerminalQueryResponderTests`, `AppSettingsModernConsoleHostTests`,
+`EmulatorParseBoundaryTests`, `TerminalQueryScannerTests`, `TerminalQueryResponderTests`, `AppSettingsModernConsoleHostTests`,
 `ConsoleHostPackagingTests`, `terminal-device-queries.test.mjs`,
 `settings-modern-console-host.test.mjs` and `UITests/tests/xterm-device-queries.spec.js` (the real
 xterm.js; `npm run test:node`). The resize tables in that spec and in

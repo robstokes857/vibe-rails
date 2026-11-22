@@ -46,6 +46,7 @@ public sealed class Terminal : IAsyncDisposable
     private int _rows;
     // Set only for a PTY whose console host forwards terminal queries (a bundled conpty.dll).
     private TerminalQueryResponder? _queryResponder;
+    private QueryAnsweringEmulatorConsumer? _queryConsumer;
 
     /// <summary>
     /// How long the read loop may keep draining after the PTY process itself has exited before the
@@ -289,7 +290,8 @@ public sealed class Terminal : IAsyncDisposable
         if (_pty.ConsoleHost == PtyConsoleHost.Bundled)
         {
             _queryResponder = new TerminalQueryResponder(WriteBytesAsync, _cts.Token);
-            Subscribe(new QueryAnsweringEmulatorConsumer(_emulator, _emulatorLock, _queryResponder));
+            _queryConsumer = new QueryAnsweringEmulatorConsumer(_emulator, _emulatorLock, _queryResponder);
+            Subscribe(_queryConsumer);
             return;
         }
 
@@ -728,8 +730,7 @@ public sealed class Terminal : IAsyncDisposable
                 _pty.Resize(cols, rows);
                 _cols = cols;
                 _rows = rows;
-                KeepCursorLineOnScreen(_emulator, rows);
-                _emulator.Resize(cols, rows);
+                ResizeEmulatorWithoutRepaint(_emulator, _queryConsumer?.IsAtSequenceBoundary == true, cols, rows);
             }
             return;
         }
@@ -742,13 +743,32 @@ public sealed class Terminal : IAsyncDisposable
     }
 
     /// <summary>
+    /// Resizes the emulator of a terminal whose console host repaints nothing afterwards.
+    /// </summary>
+    /// <param name="atSequenceBoundary">
+    /// Whether the output fed so far ends between two sequences. When a read ended inside one
+    /// (<c>ESC [</c> with <c>31m</c> still to come, a window title, half a UTF-8 character),
+    /// writing to the emulator would end it and the rest would be read as text, which also moves
+    /// the cursor the host is told about. The scroll is skipped then: the emulator's own resize
+    /// keeps the top rows, as it always has, and only the next snapshot shows the difference.
+    /// </param>
+    internal static void ResizeEmulatorWithoutRepaint(
+        TerminalEmulator.Terminal emulator, bool atSequenceBoundary, int cols, int rows)
+    {
+        if (atSequenceBoundary)
+            KeepCursorLineOnScreen(emulator, rows);
+        emulator.Resize(cols, rows);
+    }
+
+    /// <summary>
     /// What a terminal does when it gets shorter and its cursor is below the new last row: the
     /// rows at the top scroll into history, so the line being written stays on screen. xterm.js
     /// does that in the viewer. The emulator's own resize keeps the top rows and drops the bottom
     /// ones, which nobody saw while the built-in console host repainted the whole screen after
     /// every resize. A bundled host repaints nothing, so without this the next snapshot (a
     /// reconnect, an agent reading the screen) shows the top of the old screen and no prompt.
-    /// Call it before <see cref="TerminalEmulator.Terminal.Resize"/>, under the emulator lock.
+    /// Call it before <see cref="TerminalEmulator.Terminal.Resize"/>, under the emulator lock, and
+    /// only between two sequences (<see cref="ResizeEmulatorWithoutRepaint"/>).
     /// </summary>
     /// <remarks>
     /// The emulator can only be driven through its input, so this scrolls it the way a program

@@ -41,6 +41,26 @@ public sealed class BundledHostResizeTests
         Assert.Equal((5, 7), (emulator.CursorRow, emulator.CursorCol));
     }
 
+    [Fact]
+    public void TheEmulatorDropsWhatANarrowerScreenCutsOffWhereTheViewerOnlyHidesIt()
+    {
+        // A known difference, found in review (VB-WU97H-428). xterm.js keeps the cells beyond a
+        // narrower width and shows them again when the terminal is widened
+        // (xterm-device-queries.spec.js, "text beyond the right edge is hidden, not lost").
+        // TerminalBuffer.Resize drops them, so a snapshot taken after a shrink and a grow has
+        // less text than the live viewer. If this fails the emulator has learned to keep them:
+        // take the limit out of the Terminal guide.
+        var emulator = new Emulator(cols: 20, rows: 5);
+        emulator.Write("ABCDEFGHIJKLMNOPQRS\r\nsecond");
+
+        emulator.Resize(10, 5);
+        emulator.Resize(20, 5);
+
+        Assert.Equal("ABCDEFGHIJ", emulator.GetRowText(0));
+        Assert.Equal("second", emulator.GetRowText(1));
+        Assert.Equal((1, 6), (emulator.CursorRow, emulator.CursorCol));
+    }
+
     [Theory]
     [InlineData(6)]  // the cursor is on the new last row
     [InlineData(8)]

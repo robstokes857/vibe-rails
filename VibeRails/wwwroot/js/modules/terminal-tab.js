@@ -296,23 +296,40 @@ export class TerminalTab {
     }
 
     // One status read, only when the host of the session about to be attached is not known.
-    // A failed read leaves it unknown: the viewer then behaves as it always has.
-    async _loadConsoleHost() {
+    // Null when the read fails. It changes nothing: connect() decides what a late answer is worth.
+    async _readTabStatus() {
         try {
-            const status = await this.manager.app.apiCall(
+            return await this.manager.app.apiCall(
                 `/api/v1/terminal/tabs/${encodeURIComponent(this.state.id)}/status`,
-                'GET', null, { showLoading: false });
-            if (status?.hasActiveSession === true) {
-                if (status.sessionId && !this.state.sessionId) {
-                    this.state.sessionId = status.sessionId;
-                }
-                if (!status.sessionId || status.sessionId === this.state.sessionId) {
-                    this.setConsoleHostFromStatus(status);
-                }
-            }
+                'GET', null, { showLoading: false }) || null;
         } catch {
-            // Unknown stays unknown.
+            return null;
         }
+    }
+
+    // Takes the console host from a status read. False while the host of a session that may be
+    // running is still not known: the read failed, or the tab's own process did not answer.
+    // connect() must not attach then. With xterm.js's replies on, a bundled-host session would
+    // get every answer twice, and the second one is typed into the program.
+    _adoptConsoleHost(status) {
+        if (!status || status.statusAvailable === false) {
+            return false;
+        }
+
+        if (status.hasActiveSession !== true) {
+            // The tab reports no session, so nothing can ask this viewer anything. The attach
+            // goes ahead and is refused the usual way.
+            this.setConsoleHostFromStatus({ sessionId: this.state.sessionId });
+            return true;
+        }
+
+        // The socket attaches to whatever session the tab is running now. That session's host
+        // is the one that counts, also when it is not the session this viewer remembered.
+        if (status.sessionId) {
+            this.state.sessionId = status.sessionId;
+        }
+        this.setConsoleHostFromStatus(status);
+        return this._consoleHostIsKnown();
     }
 
     _applyConsoleHost() {
@@ -529,6 +546,9 @@ export class TerminalTab {
     }
 
     disconnectSocketOnly() {
+        // connect() reads the session's console host before it creates a socket. A viewer that
+        // is released while that read is pending must not attach when it returns.
+        this._releaseCount = (this._releaseCount || 0) + 1;
         this.clearConnectFocusTimeouts();
         this.clearPendingResizeToPty();
         this._initialConnectActive = false;
@@ -801,12 +821,24 @@ export class TerminalTab {
         // list both carry it), so the usual connect stays synchronous up to the socket.
         const attempt = this._connectAttempt = (this._connectAttempt || 0) + 1;
         if (!this._consoleHostIsKnown()) {
-            await this._loadConsoleHost();
-            // A newer connect, a stop or a dispose took over while the status was read.
-            if (attempt !== this._connectAttempt || this._disposed || !this.state.hasActiveSession) {
+            const released = this._releaseCount;
+            const status = await this._readTabStatus();
+            // A newer connect, a disconnect, a stop or a dispose took over while the status was
+            // read. A released viewer that attached now would take the session from whoever
+            // has it (an Automation viewer the user has switched away from, for one).
+            if (attempt !== this._connectAttempt || released !== this._releaseCount
+                || this._disposed || !this.state.hasActiveSession) {
                 return false;
             }
-            this.disconnectSocketOnly();
+
+            if (!this._adoptConsoleHost(status)) {
+                // Not attached. The retry is the one a dropped socket gets: bounded, with backoff,
+                // and Connect starts it over.
+                this.state.status = 'disconnected';
+                this.manager.updateUi();
+                this.autoReconnect?.handleClose({ code: 1006, reason: '', hasActiveSession: true });
+                return false;
+            }
         }
         // Reuse the live xterm DOM across reconnects. Recreating it remounts
         // xterm's DOM children, and the synchronous fit() below can then

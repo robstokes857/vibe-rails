@@ -18,6 +18,7 @@ internal sealed class QueryAnsweringEmulatorConsumer : ITerminalConsumer
     private readonly Lock _lock;
     private readonly TerminalQueryResponder _responder;
     private TerminalQueryScanner _scanner;
+    private EmulatorParseBoundary _boundary;
 
     public QueryAnsweringEmulatorConsumer(
         TerminalEmulator.Terminal emulator,
@@ -29,6 +30,13 @@ internal sealed class QueryAnsweringEmulatorConsumer : ITerminalConsumer
         _responder = responder;
     }
 
+    /// <summary>
+    /// True when the output fed so far ends between two sequences, so bytes written to the
+    /// emulator now would not end a sequence the next read is going to finish. Read it under the
+    /// emulator lock.
+    /// </summary>
+    internal bool IsAtSequenceBoundary => _boundary.IsAtBoundary;
+
     public void OnOutput(ReadOnlyMemory<byte> data)
     {
         var remaining = data.Span;
@@ -38,6 +46,7 @@ internal sealed class QueryAnsweringEmulatorConsumer : ITerminalConsumer
             {
                 var read = _scanner.Scan(remaining, out var query, out var parameter);
                 _emulator.Write(remaining[..read]);
+                _boundary.Advance(remaining[..read]);
                 if (query != TerminalQuery.None)
                 {
                     var modeStatus = query switch

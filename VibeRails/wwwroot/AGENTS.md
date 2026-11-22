@@ -1407,8 +1407,11 @@ the [Terminal guide](../Services/Terminal/AGENTS.md#windows-console-host-vibe-35
   both. Every other session keeps xterm.js's defaults.
 - The host belongs to the session, not the tab. `TerminalTab` keeps `state.consoleHost`
   (`'bundled'`, `null` for known and not bundled, `undefined` for not known yet) with the session
-  it describes in `state.consoleHostSessionId`. It reads the tab status once when the host is not
-  known and applies it after the terminal exists and before the socket is created. Start, status,
+  it describes in `state.consoleHostSessionId`. It reads the tab status when the host is not
+  known and applies it after the terminal exists and before the socket is created. If that read
+  fails, or the tab's process did not answer, `connect()` does not attach: with xterm.js's
+  replies on, a bundled-host session would get every answer twice. The retry is the one a
+  dropped socket gets. Every disconnect cancels an attach that is still waiting for the read. Start, status,
   tab-list and adoption responses all carry `consoleHost`; new code that builds tab state has to
   copy it.
 - `shouldResetDisplayBeforeResize` is false for these sessions: nothing would repaint the screen.

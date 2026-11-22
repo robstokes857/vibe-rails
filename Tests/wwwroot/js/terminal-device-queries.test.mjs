@@ -221,13 +221,89 @@ test('a host remembered for another session is not trusted', async () => {
     assert.deepEqual(events, [['host', { bundled: false }], 'socket']);
 });
 
-test('a failed status read still attaches, with xterm.js defaults', async () => {
-    const { tab, events } = createTab({}, { apiCall: async () => { throw new Error('host unreachable'); } });
+test('a session whose host cannot be read is not attached, and the attach is retried', async () => {
+    // Attached with xterm.js's replies on, a bundled-host session would get every answer twice:
+    // the server's, and this viewer's typed into the program.
+    const unknown = [
+        async () => { throw new Error('host unreachable'); },
+        async () => null,
+        // The root answered but the tab's own process did not: a session may well be running.
+        async () => ({ hasActiveSession: false, statusAvailable: false })
+    ];
+    for (const apiCall of unknown) {
+        const { tab, events, sockets } = createTab({}, { apiCall });
+        const retries = [];
+        tab.autoReconnect = { cancel() {}, handleClose: (close) => retries.push(close) };
+
+        assert.equal(await tab.connect(), false);
+
+        assert.deepEqual(events, [], 'no renderer was configured and no socket was created');
+        assert.equal(sockets.length, 0);
+        assert.equal(tab.state.status, 'disconnected');
+        assert.equal(tab.usesBundledConsoleHost(), false);
+        assert.equal(tab.state.consoleHost, undefined, 'still unknown: the next attempt reads it again');
+        // The close a dropped socket reports, so the same bounded backoff applies.
+        assert.deepEqual(retries, [{ code: 1006, reason: '', hasActiveSession: true }]);
+    }
+});
+
+test('the next attempt attaches once the host can be read', async () => {
+    let reads = 0;
+    const { tab, events } = createTab({}, {
+        apiCall: async () => {
+            if (++reads === 1) throw new Error('host unreachable');
+            return { hasActiveSession: true, sessionId: 'session-1', consoleHost: 'bundled' };
+        }
+    });
+
+    assert.equal(await tab.connect(), false);
+    void tab.connect();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(reads, 2);
+    assert.deepEqual(events, [['host', { bundled: true }], 'socket']);
+});
+
+test('the host of the session the tab runs now is used, not of the one the viewer remembered', async () => {
+    // Someone else restarted the tab's session. The socket attaches to the new one.
+    const { tab, events } = createTab({}, {
+        apiCall: async () => ({ hasActiveSession: true, sessionId: 'session-9', consoleHost: 'bundled' })
+    });
+
+    void tab.connect();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(events, [['host', { bundled: true }], 'socket']);
+    assert.equal(tab.state.sessionId, 'session-9');
+    assert.equal(tab.state.consoleHostSessionId, 'session-9');
+});
+
+test('a tab that reports no session attaches the usual way, where it is refused', async () => {
+    const { tab, events } = createTab({}, { apiCall: async () => ({ hasActiveSession: false, statusAvailable: true }) });
 
     void tab.connect();
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.deepEqual(events, [['host', { bundled: false }], 'socket']);
+    assert.equal(tab.state.sessionId, 'session-1');
+});
+
+test('a viewer released during the status read does not come back', async () => {
+    // Switching away from an Automation viewer disconnects it. Attaching after that would take
+    // the session over from a viewer nobody is looking at.
+    for (const release of [(tab) => tab.disconnectSocketOnly(), (tab) => tab.disconnect()]) {
+        const pending = [];
+        const { tab, events, sockets } = createTab({}, { apiCall: () => new Promise((resolve) => pending.push(resolve)) });
+
+        const connecting = tab.connect();
+        release(tab);
+        pending[0]({ hasActiveSession: true, sessionId: 'session-1', consoleHost: 'bundled' });
+
+        assert.equal(await connecting, false);
+        assert.equal(sockets.length, 0);
+        assert.deepEqual(events, []);
+        assert.equal(tab.state.consoleHost, undefined, 'a late answer changes nothing');
+    }
 });
 
 test('a second connect during the status read leaves one socket', async () => {
