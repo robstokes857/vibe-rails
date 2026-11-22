@@ -257,7 +257,7 @@ test('a taller terminal gets its new rows at the bottom', async () => {
 test('text beyond the right edge is hidden, not lost, and comes back when the terminal is widened', async () => {
     // The server emulator drops that text instead (BundledHostResizeTests,
     // TheEmulatorDropsWhatANarrowerScreenCutsOffWhereTheViewerOnlyHidesIt), so a snapshot taken
-    // afterwards has less on those lines than this viewer. Known difference, VB-WU97H-428.
+    // afterwards has less on those lines than this viewer. Known difference, VB-G9STX-427 part B.
     const module = await loadModule();
     const term = bundledTerminal(module, 20, 5);
     try {

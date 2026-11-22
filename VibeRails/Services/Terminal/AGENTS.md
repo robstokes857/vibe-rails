@@ -433,10 +433,10 @@ Settings page does not show the switch.
   emulator's input and therefore only between two sequences. The host is told the
   emulator's cursor. Code that relies on a repaint after a resize must check the host first.
 
-Known limits, with the card that owns each:
+Known limits. One card owns them all, VB-G9STX-427; each limit names its part of that card:
 
 - The remote viewer (VibeRails-Front) still answers queries, so a remote viewer on such a session
-  types its answers into the program (VB-G9STX-427).
+  types its answers into the program (part A).
 - Lines are not re-wrapped when the width changes: text beyond the right edge is hidden until the
   terminal is that wide again. The viewer keeps that text; the emulator drops it, so a snapshot
   taken after a terminal was made narrower and wider again has less on those lines than the live
@@ -444,14 +444,15 @@ Known limits, with the card that owns each:
   repaint after a resize, can differ from the viewer in a snapshot too. A resize that arrives
   while a read has ended inside an escape sequence resizes the emulator without the scroll that
   keeps the cursor's line (`EmulatorParseBoundary`). All three end when the emulator's own
-  resize does this work (VB-WU97H-428).
-- No real Codex, Claude or agy session has run on this host. `WaitingForUserInputObserver` and
-  the Codex cursor handling were tuned to re-rendered output and have not been checked against
-  it; replies start with the read loop, so a slow relay connect delays the first one; Windows 10
-  is untested (VB-Y4SFI-429).
-- Native console sessions are excluded by decision, not by measurement (VB-R23BE-430).
+  resize does this work (part B).
+- Real CLI sessions have had a first manual check only: a Codex and a Claude tab from a browser
+  on 2026-11-22, nothing wrong seen. No agy session has run on this host.
+  `WaitingForUserInputObserver` and the Codex cursor handling were tuned to re-rendered output
+  and have not been checked against it; replies start with the read loop, so a slow relay
+  connect delays the first one; Windows 10 is untested (part C).
+- Native console sessions are excluded by decision, not by measurement (part D).
 - The script installer waits for `vb.exe` to be free before an update, not for
-  `OpenConsole.exe` (VB-IHMN0-431).
+  `OpenConsole.exe` (part E).
 
 Tests: `BundledConsoleHostTests` (the real host and a throwaway child), `BundledHostResizeTests`,
 `EmulatorParseBoundaryTests`, `TerminalQueryScannerTests`, `TerminalQueryResponderTests`, `AppSettingsModernConsoleHostTests`,

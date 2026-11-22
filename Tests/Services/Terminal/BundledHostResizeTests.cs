@@ -31,7 +31,7 @@ public sealed class BundledHostResizeTests
     public void TheEmulatorsOwnResizeStillDropsTheBottomRows()
     {
         // The reason KeepCursorLineOnScreen exists. If this fails, TerminalBuffer.Resize has
-        // learned to keep the cursor's line and the helper can go (VB-WU97H-428).
+        // learned to keep the cursor's line and the helper can go (VB-G9STX-427, part B).
         var emulator = NineLinesAndAPrompt();
 
         emulator.Resize(40, 6);
@@ -44,8 +44,8 @@ public sealed class BundledHostResizeTests
     [Fact]
     public void TheEmulatorDropsWhatANarrowerScreenCutsOffWhereTheViewerOnlyHidesIt()
     {
-        // A known difference, found in review (VB-WU97H-428). xterm.js keeps the cells beyond a
-        // narrower width and shows them again when the terminal is widened
+        // A known difference, found in review (VB-G9STX-427, part B). xterm.js keeps the cells
+        // beyond a narrower width and shows them again when the terminal is widened
         // (xterm-device-queries.spec.js, "text beyond the right edge is hidden, not lost").
         // TerminalBuffer.Resize drops them, so a snapshot taken after a shrink and a grow has
         // less text than the live viewer. If this fails the emulator has learned to keep them:
