@@ -56,18 +56,30 @@ public sealed partial class BoardSyncServiceTests
     [Fact]
     public async Task ThePlanIsNotAskedWhenNoBoardSyncs_AndAPlanThatAllowsItSyncsAsBefore()
     {
-        var card = await Card();
         var entitlements = new FakeAccountEntitlements();
         var gated = Gated(entitlements);
 
-        await gated.SyncDueAsync(Ct); // no board has opted in
+        await gated.SyncDueAsync(Ct); // no local boards exist yet
         Assert.Equal(0, entitlements.Reads);
 
-        await store.SetBoardSyncEnabledAsync(root, card.BoardId, true, Ct);
+        var card = await Card();
         await gated.SyncDueAsync(Ct);
         Assert.True(entitlements.Reads > 0);
         Assert.Null((await gated.GetStatusAsync(root, card.BoardId, Ct))!.LastError);
         Assert.Single(client.Entries);
+    }
+
+    [Fact]
+    public async Task NewBoardDoesNotPublishWhenTheAccountHasNoRemoteBoardsEntitlement()
+    {
+        var card = await Card();
+        var entitlements = new FakeAccountEntitlements();
+        entitlements.Off.Add(ProFeatures.RemoteBoards);
+        await Gated(entitlements).SyncDueAsync(Ct);
+
+        Assert.Equal(0, client.Calls);
+        Assert.Null(await store.GetSyncLinkAsync(root, card.BoardId, Ct));
+        Assert.False((await store.GetBoardAsync(root, card.BoardId, Ct))!.SyncEnabled);
     }
 
     [Fact]

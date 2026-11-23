@@ -6,14 +6,14 @@ public sealed partial class BoardSyncService
     internal const string OwnershipLostMessage =
         "viberails.ai says this account no longer owns this board's hosted copy, so sync is paused and nothing is sent or repaired there; "
         + "local work is retained. To see the hosted board, ask its owner to share it with you and view it on viberails.ai. "
-        + "To publish this board under this account again, turn sync back on.";
+        + "To publish this board under this account again, use Sync now in Board settings.";
 
     /// <summary>
     /// Repair and rebuild act only on the local owner's exact hosted board. When the host reports another
     /// owner or another identity for an owner's link, the refusal is terminal (Rob, 2026-10-25, VIBE-213
     /// item 6): sync is paused, as for a hosted board that no longer exists, so the 60-second tick stops
     /// retrying it and the in-place repair never runs for a board this account does not own. A replacement
-    /// still waiting to delete is abandoned with it, so turning sync back on publishes this account's own
+    /// still waiting to delete is abandoned with it, so Sync now publishes this account's own
     /// copy instead of resuming that deletion. The failure path records the reason on the link's status and
     /// in the feature log once.
     /// </summary>

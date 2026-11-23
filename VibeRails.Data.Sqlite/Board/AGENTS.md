@@ -479,8 +479,11 @@ transaction that applies it. No backfill; older binaries never name the column.
 at 0. It is separate from the retained `BoardSyncLinks.Enabled` legacy column, and its scoped
 write does not delete a hosted copy or sync ledger. `board/23` adds `BoardSyncLinks.ActivitySchema`
 (default 0) and `ActivityAfter`. Old publications keep these columns for compatibility;
-opted-in boards upgrade publications automatically when an API key is configured.
-`GetBoardsForSyncAsync` enumerates enabled board metadata for the root scheduler;
+unpaused boards upgrade publications automatically when an API key is configured.
+The per-board opt-in UI is retired. `GetBoardsForSyncAsync` enumerates boards with no sync link
+as well as enabled publications, so first publication is automatic. Disabled boards with a
+retained link stay paused until **Sync now**; no old values are backfilled or removed.
+The sync service excludes dedicated tracker boards and retained shared copies before publishing;
 activity and card reads still use each board's project scope.
 The cursor makes bounded card refresh fair across root processes/restarts under the sync lock.
 Activity reads remain behind `IBoardStore`, with SQL row/actual-content bounds before loading

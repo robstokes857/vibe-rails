@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { BoardApi } from '../../../VibeRails/wwwroot/js/modules/board-api.js';
 import { boardSettingsNavigation, contextEditorSection, mountAppContext, mountBoardLevelContext, mountCardContext, mountContextEditor, mountBoardSettingsNavigation, mountBoardSync, mountLaneAutomation, newBoardNavigation } from '../../../VibeRails/wwwroot/js/modules/board-settings.js';
 
-test('failed publication reloads the saved sync choice', async () => {
+test('failed manual resume reloads sync status without an opt-in switch', async () => {
     const listeners = new Map();
     const content = { innerHTML: '' };
     const element = {
@@ -17,18 +17,22 @@ test('failed publication reloads the saved sync choice', async () => {
     BoardApi.attach({
         apiCall: (_path, method) => {
             if (method === 'GET') return Promise.resolve({ enabled: ++reads > 1, configured: true, lastError: reads > 1 ? 'Publication failed' : null });
-            assert.equal(method, 'PUT');
+            assert.equal(method, 'POST');
             return Promise.reject(new Error('Publication failed'));
         }
     });
     const dispose = mountBoardSync({ showToast: (...args) => toasts.push(args) }, element, 'board-id');
     await new Promise(resolve => setImmediate(resolve));
-    const target = { checked: true, disabled: false, matches: selector => selector === '[data-board-sync-enabled]' };
+    assert.match(content.innerHTML, /Sync is paused/);
+    assert.match(content.innerHTML, /data-board-sync-now/);
+    assert.equal(listeners.has('change'), false);
+    const target = { disabled: false, closest: selector => selector === '[data-board-sync-now]' ? {} : null };
 
-    await listeners.get('change')({ target });
+    await listeners.get('click')({ target });
 
     assert.equal(reads, 2);
-    assert.match(content.innerHTML, /data-board-sync-enabled checked/);
+    assert.doesNotMatch(content.innerHTML, /data-board-sync-enabled|type="checkbox"/);
+    assert.match(content.innerHTML, /syncs automatically/);
     assert.match(content.innerHTML, /Publication failed/);
     assert.doesNotMatch(content.innerHTML, /This board stays local/);
     assert.equal(toasts[0][2], 'error');
@@ -366,7 +370,7 @@ test('Board context loads escaped text and saves its board message with its revi
     dispose();
 });
 
-// The viberails.ai section with a plan: its content host, both listeners and every prompt it opens.
+// The viberails.ai section with a plan: its content host and every prompt it opens.
 async function syncFixture({ status, locked = false, write = async () => status }) {
     const listeners = new Map();
     const content = { innerHTML: '' };
@@ -384,12 +388,8 @@ async function syncFixture({ status, locked = false, write = async () => status 
     BoardApi.attach(app);
     const dispose = mountBoardSync(app, element, 'board-id');
     await new Promise(resolve => setImmediate(resolve));
-    const toggle = checked => {
-        const target = { checked, disabled: false, matches: selector => selector === '[data-board-sync-enabled]' };
-        return listeners.get('change')({ target }).then(() => target);
-    };
     const press = selector => listeners.get('click')({ target: { disabled: false, closest: candidate => candidate === selector ? {} : null } });
-    return { content, calls, modals, toasts, toggle, press, dispose };
+    return { content, calls, modals, toasts, press, dispose };
 }
 
 test('a paused sync says why and offers Upgrade only to the account that pays', async () => {
@@ -420,34 +420,26 @@ test('a paused sync says why and offers Upgrade only to the account that pays', 
     older.dispose();
 });
 
-test('a locked plan cannot turn sync on or sync now, and can always turn it off', async () => {
+test('a locked plan cannot sync now and status never changes the stored choice', async () => {
     const status = { enabled: true, configured: true, lastError: null };
     const f = await syncFixture({ status, locked: true, write: async () => ({ ...status, enabled: false }) });
-    const on = await f.toggle(true);
-    assert.equal(on.checked, false, 'the switch stays off');
-    assert.equal(f.modals.length, 1);
+    assert.doesNotMatch(f.content.innerHTML, /data-board-sync-enabled/);
     await f.press('[data-board-sync-now]');
-    assert.equal(f.modals.length, 2);
+    assert.equal(f.modals.length, 1);
     assert.deepEqual(f.calls, ['GET'], 'nothing was sent to the board');
     assert.deepEqual(f.toasts, []);
 
-    await f.toggle(false);
-    assert.deepEqual(f.calls, ['GET', 'PUT']);
-    assert.equal(f.modals.length, 2);
-    assert.deepEqual(f.toasts[0], ['Board', 'Board sync disabled.', 'success']);
     f.dispose();
 });
 
 test('the server\'s Pro denial opens the prompt in place of an error toast', async () => {
     const denial = payer => Object.assign(new Error('Vibe Rails Pro is required.'), { code: 'pro_required', feature: 'remote_boards', payer });
     const status = { enabled: false, configured: true, lastError: null };
-    const f = await syncFixture({ status, write: (_path, method) => Promise.reject(denial(method === 'PUT' ? 'account' : 'board_owner')) });
-    await f.toggle(true);
-    assert.equal(f.modals[0].title, 'Remote Boards need Vibe Rails Pro');
+    const f = await syncFixture({ status, write: () => Promise.reject(denial('board_owner')) });
     await f.press('[data-board-sync-now]');
-    assert.equal(f.modals[1].title, "This Board's owner needs Vibe Rails Pro");
-    assert.doesNotMatch(f.modals[1].html, /Upgrade to Pro|Manage billing|href=/);
+    assert.equal(f.modals[0].title, "This Board's owner needs Vibe Rails Pro");
+    assert.doesNotMatch(f.modals[0].html, /Upgrade to Pro|Manage billing|href=/);
     assert.deepEqual(f.toasts, []);
-    assert.deepEqual(f.calls, ['GET', 'PUT', 'GET', 'POST']);
+    assert.deepEqual(f.calls, ['GET', 'POST', 'GET']);
     f.dispose();
 });

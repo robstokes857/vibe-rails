@@ -169,10 +169,9 @@ public sealed class BoardSyncCoverageTests : IDisposable
 
         var calls = client.Calls;
         await service.SyncDueAsync(Ct);
-        Assert.Equal(calls, client.Calls); // A new surviving board stays local until opted in.
         var survivor = Assert.Single(await store.GetBoardsAsync(root, Ct));
-        await service.SetPublishedAsync(root, survivor.Id, true, Ct);
         Assert.True(client.Calls > calls);
+        Assert.Equal(survivor.Id, Assert.Single(await store.GetSyncLinksAsync(Ct)).BoardId);
         Assert.DoesNotContain(await store.GetSyncLinksAsync(Ct), link => link.BoardId == card.BoardId);
         Assert.Equal(remoteEntries, client.Entries.Count);
     }

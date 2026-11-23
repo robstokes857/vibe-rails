@@ -218,17 +218,15 @@ export function mountBoardSync(app, element, boardId, onStatus = () => {}) {
                 : 'Sync is paused because remote Boards need Vibe Rails Pro. This board stays on this computer, and nothing was deleted.'}
             ${status.pausedPayer === 'account' ? '<button type="button" class="btn btn-sm btn-outline-primary ms-2" data-board-sync-upgrade>Upgrade</button>' : ''}</p>`;
         content.innerHTML = `
-            <label class="form-check mb-2">
-                <input class="form-check-input" type="checkbox" data-board-sync-enabled ${status.enabled ? 'checked' : ''}>
-                <span class="form-check-label">Sync this board with viberails.ai ${proBadge(app, 'remote_boards')}</span>
-            </label>
-            <p class="board-editor-muted mb-2">${status.enabled
-                ? status.configured ? 'This board syncs while a VibeRails backend is open.' : 'Sign in to your account in Settings to start syncing.'
-                : 'This board stays local. A previously hosted copy remains on viberails.ai until you delete it there.'}</p>
+            <p class="board-editor-muted mb-2">${!status.configured
+                ? 'Sign in to your account in Settings to start syncing automatically.'
+                : status.enabled
+                    ? 'This board syncs automatically while VibeRails is open.'
+                    : 'Sync is paused for this board. Use Sync now to resume.'} ${proBadge(app, 'remote_boards')}</p>
             ${status.lastError && !paused ? `<p class="text-warning" role="alert">${escapeHtml(status.lastError)}</p>` : ''}
             ${paused}
             ${status.remoteUrl ? `<a href="${escapeHtml(status.remoteUrl)}" target="_blank" rel="noopener noreferrer">Open hosted board</a>` : ''}
-            ${status.enabled && status.configured ? '<button type="button" class="btn btn-sm btn-outline-secondary ms-2" data-board-sync-now>Sync now</button>' : ''}`;
+            ${status.configured ? '<button type="button" class="btn btn-sm btn-outline-secondary ms-2" data-board-sync-now>Sync now</button>' : ''}`;
     };
     const reload = async () => {
         try {
@@ -239,26 +237,6 @@ export function mountBoardSync(app, element, boardId, onStatus = () => {}) {
                 element.hidden = false;
                 content.textContent = error?.message || 'Sync status could not be loaded.';
             }
-        }
-    };
-    const change = async event => {
-        if (!event.target.matches('[data-board-sync-enabled]') || busy) return;
-        const enabled = event.target.checked;
-        // Turning sync on needs remote Boards; turning it off always works.
-        if (enabled && !requirePro(app, 'remote_boards')) { event.target.checked = false; return; }
-        busy = true;
-        event.target.disabled = true;
-        try {
-            const status = await BoardApi.setBoardSyncAsync(boardId, enabled);
-            if (alive()) { render(status); app.showToast('Board', enabled ? 'Board sync enabled.' : 'Board sync disabled.', 'success'); }
-        } catch (error) {
-            if (alive() && !showProRequired(app, 'remote_boards', error)) app.showToast('Board', error?.message || 'Sync setting could not be saved.', 'error');
-            // Publication can fail after the choice was saved. Read the stored setting again
-            // instead of assuming the request rolled it back.
-            await reload();
-        } finally {
-            busy = false;
-            if (alive()) event.target.disabled = false;
         }
     };
     const click = async event => {
@@ -272,12 +250,13 @@ export function mountBoardSync(app, element, boardId, onStatus = () => {}) {
             if (alive()) { render(status); app.showToast('Board', status.lastError || 'Board synced.', status.lastError ? 'warning' : 'success'); }
         } catch (error) {
             if (alive() && !showProRequired(app, 'remote_boards', error)) app.showToast('Board', error?.message || 'Sync failed.', 'error');
+            // Resuming may save the state before publication fails.
+            await reload();
         } finally { busy = false; if (alive()) event.target.disabled = false; }
     };
-    element.addEventListener('change', change);
     element.addEventListener('click', click);
     void reload();
-    return () => { disposed = true; abort.abort(); element.removeEventListener('change', change); element.removeEventListener('click', click); };
+    return () => { disposed = true; abort.abort(); element.removeEventListener('click', click); };
 }
 
 // Each mount owns its request and DOM. Replacing/closing a modal cannot populate a newer one.

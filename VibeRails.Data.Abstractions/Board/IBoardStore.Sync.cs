@@ -8,7 +8,7 @@ namespace VibeRails.Services.Board;
 /// </summary>
 public partial interface IBoardStore
 {
-    /// <summary>Local board identities for automatic account sync. Scheduler only; no card content.</summary>
+    /// <summary>New local boards and unpaused publications for automatic sync. No card content.</summary>
     Task<IReadOnlyList<BoardRecord>> GetBoardsForSyncAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Changes this project's board publication choice without deleting its hosted copy or sync history.</summary>

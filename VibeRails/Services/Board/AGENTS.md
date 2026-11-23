@@ -787,8 +787,10 @@ nullable `BoardCards.GhostReason` and a partial pending index. No backfill.
 `board/24` (VIBE-11, additive) adds `BoardCards.AgentMade`
 (default 0, no backfill): set only when `create_board_card` runs as an agent, left alone by every
 later edit, and ignored by an older binary. `board/23` adds the activity schema version and durable rotation
-cursor on `BoardSyncLinks`. The scheduler publishes opted-in boards and activity whenever
-an API key is configured; the old switch columns remain for compatibility. The scheduler-only
+cursor on `BoardSyncLinks`. The scheduler automatically publishes new local boards and syncs
+unpaused publications when an eligible account is configured. There is no per-board opt-in UI;
+`Boards.SyncEnabled` remains the pause state for retained publications. **Sync now** resumes them.
+The old switch columns remain in place, with no historical backfill. The scheduler-only
 `GetBoardsForSyncAsync` reads board identity metadata across projects through `IBoardStore`.
 See [SYNC.md](SYNC.md) for the bounded activity transfer and automatic recovery.
 `board/22` (additive) adds `BoardSyncSkippedEntries.Version`, so

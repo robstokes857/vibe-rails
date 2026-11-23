@@ -1,5 +1,13 @@
 # Board sync (VB-51)
 
+Local boards publish automatically when an eligible viberails.ai account is connected and a
+root backend is open. Board settings shows status and **Sync now**, with no per-board opt-in
+switch. A board without a sync link is eligible for its first publication; after publication,
+the retained `Boards.SyncEnabled` field still distinguishes active and paused copies. **Sync
+now** resumes a paused copy explicitly. Deleting a hosted copy therefore does not cause the next
+scheduled tick to recreate it. Signing out prevents network sync. No schema change, historical
+backfill or stored-data deletion accompanies removal of the switch.
+
 Only boards whose current Jira connection has `DedicatedBoard=true` use Jira for remote access.
 Board settings hide the viberails.ai sync section, and manual publication/sync and automatic sync
 exclude those boards, including paused or expired connections. A legacy connection on an ordinary
@@ -37,7 +45,7 @@ pages, a **No local copy** filter, open, rename and confirmed owner-only deletio
 boards remain read-only in this manager. Local deletion does not implicitly delete a hosted board.
 
 There is no create (VIBE-235). A hosted board is always the publication of a local owner's board,
-started from that board's settings; a board made on the website with no local board had nowhere
+started automatically by the desktop; a board made on the website with no local board had nowhere
 for its cards to land. Remote-only boards made before this change can still be listed, renamed and
 deleted here.
 
@@ -53,7 +61,7 @@ account changes. Rename updates linked local
 names under the cross-process sync lock. Delete takes that lock, checks ownership, pauses linked
 local boards across projects for the same destination, and then calls the hosted DELETE endpoint.
 Local cards, history and links stay stored, including after an uncertain deletion response.
-An owned board missing during sync also pauses; explicitly enabling sync publishes it again.
+An owned board missing during sync also pauses; **Sync now** publishes it again.
 Older running clients may still recreate removed remote copies; update those clients as well.
 
 ## VIBE-26: remote Start work

@@ -42,6 +42,15 @@ Keep the selected colors exact. Orange on `#33251F` has approximately 4.68:1 con
 - Keep the app customer-facing. Do not add administration features or expose new GUIDs in routes, labels or links.
 - Preview through the feature harness named in `VibeRails-Front/AGENTS.md`; do not start the configured application solely to check styling.
 
+## Board sync settings
+
+Local Boards sync automatically with the connected viberails.ai account while a desktop backend
+is open and the account has access to remote Boards. Do not show a per-board sync switch.
+Show connection or pause status, the hosted-board link when available, and **Sync now** as a
+secondary action. A previously paused board resumes only from **Sync now**; removing a hosted
+copy must not silently recreate it. Dedicated tracker boards and retained shared copies keep
+their existing exclusions.
+
 ## Design principles
 
 - Make the next action clear. Give each task one primary action and keep supporting actions quieter.

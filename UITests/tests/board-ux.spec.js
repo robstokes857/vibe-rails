@@ -523,11 +523,13 @@ for (const width of [1440, 390]) {
         await page.screenshot({ path: testInfo.outputPath(`board-jira-combined-${width}.png`) });
         await page.evaluate(() => window.app.closeModal());
 
-        // An ordinary board still offers both the sync choice and its manual action.
+        // An ordinary board shows automatic sync status and its manual action, without an opt-in.
         isJiraBoard = false;
         await page.getByRole('button', { name: 'Board settings', exact: true }).click();
-        await expect(page.getByLabel('Sync this board with viberails.ai')).toBeChecked();
+        await expect(page.getByLabel('Sync this board with viberails.ai')).toHaveCount(0);
+        await expect(page.getByText('This board syncs automatically while VibeRails is open.', { exact: false })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Sync now', exact: true })).toBeVisible();
+        await page.screenshot({ path: testInfo.outputPath(`board-automatic-sync-${width}.png`) });
         await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Context', 'History']);
         // A saved legacy connection and retained imported cards do not override the board type.
         await page.getByRole('tab', { name: 'Jira Cloud', exact: true }).click();
@@ -535,7 +537,7 @@ for (const width of [1440, 390]) {
         await expect(page.locator('.modal-title img')).toHaveCount(0);
         await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Context', 'History']);
         await page.getByRole('tab', { name: 'General', exact: true }).click();
-        await expect(page.getByLabel('Sync this board with viberails.ai')).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Sync now', exact: true })).toBeVisible();
     });
 }
 
@@ -595,7 +597,8 @@ for (const width of [1440, 390]) {
         await page.screenshot({ path: testInfo.outputPath(`board-jira-unlinked-${width}.png`) });
         await page.getByRole('tab', { name: 'General', exact: true }).click();
         await expect(page.getByLabel('Board name', { exact: true })).toHaveValue('Keep my name draft');
-        await expect(page.getByLabel('Sync this board with viberails.ai')).toBeVisible();
+        await expect(page.locator('[data-board-sync]')).toBeVisible();
+        await expect(page.getByLabel('Sync this board with viberails.ai')).toHaveCount(0);
         expect(attempts).toBe(2);
     });
 }
@@ -691,7 +694,8 @@ test('Connect selects its dedicated Jira board and preserves other settings draf
     expect(calls).toContain('POST /api/v1/board/boards/brd_jira/jira/pull');
     await page.getByRole('tab', { name: 'General', exact: true }).click();
     await expect(page.locator('#board-board-name')).toHaveValue('Keep this name draft');
-    await expect(page.getByLabel('Sync this board with viberails.ai')).toBeVisible();
+    await expect(page.locator('[data-board-sync]')).toBeVisible();
+    await expect(page.getByLabel('Sync this board with viberails.ai')).toHaveCount(0);
 });
 
 for (const width of [1440, 390]) {
@@ -863,7 +867,8 @@ for (const width of [1440, 390]) {
         // A local board offers both trackers as tabs, and the viberails.ai choice again.
         provider = null;
         await page.getByRole('button', { name: 'Board settings', exact: true }).click();
-        await expect(page.getByLabel('Sync this board with viberails.ai')).toBeChecked();
+        await expect(page.getByText('This board syncs automatically while VibeRails is open.', { exact: false })).toBeVisible();
+        await expect(page.getByLabel('Sync this board with viberails.ai')).toHaveCount(0);
         await expect(page.getByRole('tab')).toHaveText(['General', 'Jira Cloud', 'Azure DevOps', 'Context', 'History']);
         await page.getByRole('tab', { name: 'Azure DevOps', exact: true }).click();
         await expect(page.getByLabel('Azure DevOps board or query link')).toHaveValue(ADO_LINK);
@@ -931,7 +936,8 @@ test('Connect selects its dedicated Azure DevOps board and preserves other setti
     expect(calls).toContain('POST /api/v1/board/boards/brd_ado/ado/pull');
     await page.getByRole('tab', { name: 'General', exact: true }).click();
     await expect(page.locator('#board-board-name')).toHaveValue('Keep this name draft');
-    await expect(page.getByLabel('Sync this board with viberails.ai')).toBeVisible();
+    await expect(page.locator('[data-board-sync]')).toBeVisible();
+    await expect(page.getByLabel('Sync this board with viberails.ai')).toHaveCount(0);
 });
 
 test('Connect on a board nothing else uses makes it the Azure DevOps board, keeping drafts', async ({ page }) => {
@@ -1115,7 +1121,8 @@ test('Azure DevOps unlink confirms, handles failure and keeps settings drafts', 
     await page.screenshot({ path: testInfo.outputPath('board-ado-unlinked.png') });
     await page.getByRole('tab', { name: 'General', exact: true }).click();
     await expect(page.getByLabel('Board name', { exact: true })).toHaveValue('Keep my name draft');
-    await expect(page.getByLabel('Sync this board with viberails.ai')).toBeVisible();
+    await expect(page.locator('[data-board-sync]')).toBeVisible();
+    await expect(page.getByLabel('Sync this board with viberails.ai')).toHaveCount(0);
     expect(attempts).toBe(2);
 });
 

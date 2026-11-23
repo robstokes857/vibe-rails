@@ -47,10 +47,10 @@ public interface IBoardSyncService
     /// </summary>
     Task<BoardSyncStatus?> SetPublishedAsync(string projectPath, string boardId, bool enabled, CancellationToken cancellationToken, bool includeActivity = false);
 
-    /// <summary>One push-then-pull for this board now; errors land in the status, not the caller.</summary>
+    /// <summary>Resumes publication and syncs this board now; sync errors land in the status.</summary>
     Task<BoardSyncStatus?> SyncNowAsync(string projectPath, string boardId, CancellationToken cancellationToken);
 
-    /// <summary>Every opted-in board when an account is configured. One failure never stops the next.</summary>
+    /// <summary>Every new or unpaused local board when configured. One failure never stops the next.</summary>
     Task SyncDueAsync(CancellationToken cancellationToken);
 }
 
@@ -141,6 +141,9 @@ public sealed partial class BoardSyncService(
         }
         if (!client.IsConfigured)
             return existing;
+        if (!board.SyncEnabled)
+            board = await store.SetBoardSyncEnabledAsync(projectPath, boardId, true, cancellationToken)
+                ?? throw new BoardValidationException("The board no longer exists.");
         if (!force && existing is { Enabled: true, ActivitySchema: >= 1 } && existing.DestinationKey == client.DestinationKey)
             return existing;
 
@@ -188,24 +191,8 @@ public sealed partial class BoardSyncService(
         return link;
     }
 
-    public async Task<BoardSyncStatus?> SyncNowAsync(string projectPath, string boardId, CancellationToken cancellationToken)
-    {
-        using var held = syncLock.TryAcquire()
-            ?? throw new BoardValidationException("A Board sync is already running. Try again when it finishes.");
-        var board = await store.GetBoardAsync(projectPath, boardId, cancellationToken);
-        if (board is null)
-            return null;
-        if (await store.DedicatedProviderAsync(projectPath, boardId, cancellationToken) is { } tracker)
-            throw TrackerBoardRefused(tracker);
-        if (await store.GetSyncLinkAsync(projectPath, boardId, cancellationToken) is { Imported: true })
-            throw new BoardValidationException(SharedBoardReadOnlyMessage);
-        if (!board.SyncEnabled)
-            throw new BoardValidationException("Enable viberails.ai sync for this board first.");
-        var link = await EnsurePublishedAsync(board, cancellationToken);
-        if (link is not null && client.IsConfigured)
-            link = await SyncLinkAsync(link, cancellationToken, forceActivity: true);
-        return await StatusAsync(await store.GetBoardAsync(projectPath, boardId, cancellationToken) ?? board, link, cancellationToken);
-    }
+    public Task<BoardSyncStatus?> SyncNowAsync(string projectPath, string boardId, CancellationToken cancellationToken) =>
+        SetPublishedAsync(projectPath, boardId, true, cancellationToken);
 
     public async Task SyncDueAsync(CancellationToken cancellationToken)
     {
@@ -304,9 +291,9 @@ public sealed partial class BoardSyncService(
             catch (BoardSyncClientException ex) when (ex.Code == BoardSyncWire.CodeBoardNotFound && !link.Imported)
             {
                 // A missing remote board may be an intentional deletion. Keep local work,
-                // stop automatic publication, and require an explicit opt-in to publish again.
+                // stop automatic publication, and require Sync now to publish again.
                 await store.SetBoardSyncEnabledAsync(link.ProjectPath, link.BoardId, false, cancellationToken);
-                throw new BoardValidationException("The remote board no longer exists. Sync is paused and local work is retained. Turn on sync in Board settings to publish it again.");
+                throw new BoardValidationException("The remote board no longer exists. Sync is paused and local work is retained. Use Sync now in Board settings to publish it again.");
             }
             proPause?.Resume(link.BoardId);
             return await store.SaveSyncLinkAsync(link with { LastSyncUtc = DateTime.UtcNow, LastError = null }, cancellationToken) ?? link;
@@ -1031,6 +1018,7 @@ public sealed partial class BoardSyncService(
         var tracker = await store.DedicatedProviderAsync(board.ProjectPath, boardId, cancellationToken);
         var isTrackerBoard = tracker is not null;
         var shared = link?.Imported == true;
+        var enabled = !isTrackerBoard && !shared && (board.SyncEnabled || link is null);
         var unsent = link is null ? 0 : await store.CountUnsentLogEntriesAsync(boardId, cancellationToken);
         var rejected = link is null ? 0 : await store.CountRejectedLogEntriesAsync(boardId, cancellationToken);
         var rejectedEntries = rejected == 0 ? [] : await store.GetRejectedLogEntriesAsync(boardId, 50, cancellationToken);
@@ -1039,7 +1027,7 @@ public sealed partial class BoardSyncService(
         return new BoardSyncStatus(
             boardId,
             Published: link is not null,
-            Enabled: board.SyncEnabled && !isTrackerBoard,
+            Enabled: enabled,
             link?.RemoteBoardId,
             BoardSyncEndpoint.BoardPage(ParserConfigs.GetFrontendUrl(), link?.RemoteBoardId),
             link?.Cursor ?? 0,
@@ -1051,7 +1039,7 @@ public sealed partial class BoardSyncService(
             rejectedEntries,
             skipped,
             skippedEntries,
-            ActivityEnabled: board.SyncEnabled && !isTrackerBoard && !shared && client.IsConfigured,
+            ActivityEnabled: enabled && client.IsConfigured,
             IsJiraBoard: tracker == TrackerProviders.Jira,
             RemoteProvider: tracker,
             Shared: shared,

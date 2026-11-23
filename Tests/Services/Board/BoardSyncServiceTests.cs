@@ -33,19 +33,17 @@ public sealed partial class BoardSyncServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task BoardOptInControlsAutomaticPublicationAndActivity()
+    public async Task LocalBoardsPublishAutomaticallyWhenConfigured_AndPausedCopiesWaitForSyncNow()
     {
         var card = await Card();
         client.IsConfigured = false;
         await service.SyncDueAsync(Ct);
         Assert.Equal(0, client.Calls);
-        client.IsConfigured = true;
-        await service.SyncDueAsync(Ct);
-        Assert.Equal(0, client.Calls);
         var local = (await service.GetStatusAsync(root, card.BoardId, Ct))!;
-        Assert.False(local.Enabled);
+        Assert.True(local.Enabled);
         Assert.False(local.Published);
-        await store.SetBoardSyncEnabledAsync(root, card.BoardId, true, Ct);
+        Assert.False((await store.GetBoardAsync(root, card.BoardId, Ct))!.SyncEnabled);
+        client.IsConfigured = true;
         await service.SyncDueAsync(Ct);
         var status = (await service.GetStatusAsync(root, card.BoardId, Ct))!;
         Assert.True(status.Enabled);
@@ -60,7 +58,7 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         await store.UpdateCardAsync(root, card.Id, new(Title: "Still syncing"), Ct);
         await service.SyncDueAsync(Ct);
         Assert.Single(client.Entries);
-        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        await service.SyncNowAsync(root, card.BoardId, Ct);
         Assert.Equal(2, client.Entries.Count);
     }
 
@@ -801,8 +799,7 @@ public sealed partial class BoardSyncServiceTests : IDisposable
         Assert.Equal(1, client.Publications);
         Assert.NotNull(await store.FindCardAsync(root, card.Id, Ct));
 
-        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
-        var republished = await service.GetStatusAsync(root, card.BoardId, Ct);
+        var republished = await service.SyncNowAsync(root, card.BoardId, Ct);
         Assert.Null(republished!.LastError);
         Assert.NotEqual(oldRemoteId, republished.RemoteBoardId);
         Assert.Equal(2, client.Publications);

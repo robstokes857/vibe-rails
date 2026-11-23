@@ -924,8 +924,11 @@ VIBE-1 adds the card editor's **Move or merge** actions, one Comments stream and
 comment deletion. `BoardStore.CardActions.cs` keeps merge/transfer/tombstone writes atomic;
 `board-card-organize.js` owns destination selection and draft protection. A merge preserves
 source rows under soft deletion. Transfers keep immutable card identity and scope sync delivery
-marks per board (`board/25`). The former Board sync settings section is removed; publication
-still runs automatically. Navbar Sign in and the Settings Account card use the existing device approval flow.
+marks per board (`board/25`). Board settings shows sync status and **Sync now**, without an
+opt-in switch. Unpublished local boards sync automatically when an eligible account is connected;
+retained paused publications resume only from **Sync now**. Dedicated tracker boards and shared
+copies remain excluded. The retained sync fields and data are not migrated or deleted.
+Navbar Sign in and the Settings Account card use the existing device approval flow.
 
 VIBE-26 adds hosted **Start work** for the Board owner. The active root polls outbound every ten
 seconds, syncs the card and reuses the normal local launch service. No local listener or daemon

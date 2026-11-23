@@ -121,7 +121,7 @@ public sealed class BoardSyncStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task SyncChoiceUpgradesExistingBoardsAsEnabledButNewBoardsStartLocal()
+    public async Task AutomaticSyncIncludesNewAndUpgradedBoardsButPreservesPausedPublications()
     {
         await store.EnsureDefaultColumnsAsync(root, Ct);
         var existing = Assert.Single(await store.GetBoardsAsync(root, Ct));
@@ -132,11 +132,13 @@ public sealed class BoardSyncStoreTests : IDisposable
         Assert.True((await upgraded.GetBoardAsync(root, existing.Id, Ct))!.SyncEnabled);
         var fresh = await upgraded.CreateBoardAsync(root, "Fresh", Ct);
         Assert.False(fresh.SyncEnabled);
-        Assert.Equal(existing.Id, Assert.Single(await upgraded.GetBoardsForSyncAsync(Ct)).Id);
+        Assert.Equal(2, (await upgraded.GetBoardsForSyncAsync(Ct)).Count);
         Assert.Null(await upgraded.SetBoardSyncEnabledAsync(Path.Combine(root, "another-project"), existing.Id, false, Ct));
         Assert.True((await upgraded.GetBoardAsync(root, existing.Id, Ct))!.SyncEnabled);
+        await upgraded.SaveSyncLinkAsync(new(existing.Id, Guid.NewGuid().ToString(), 0, true, null,
+            null, null, DateTime.UtcNow, DateTime.UtcNow, root, existing.Name), Ct);
         await upgraded.SetBoardSyncEnabledAsync(root, existing.Id, false, Ct);
-        Assert.Empty(await upgraded.GetBoardsForSyncAsync(Ct));
+        Assert.Equal(fresh.Id, Assert.Single(await upgraded.GetBoardsForSyncAsync(Ct)).Id);
     }
 
     [Fact]
