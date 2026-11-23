@@ -26,6 +26,9 @@ public interface IBoardSyncClient
     Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest request, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardSyncPushResponse> PushAsync(string remoteBoardId, BoardSyncPushRequest request, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardSyncPullResponse> PullAsync(string remoteBoardId, long after, int limit, CancellationToken cancellationToken, string? expectedDestination = null);
+    /// <summary>Which of at most <see cref="BoardSyncHttpClient.MaxReceiptIds"/> entry ids the hosted board stores (VIBE-175).</summary>
+    Task<BoardSyncReceiptsResponse> GetReceiptsAsync(string remoteBoardId, IReadOnlyList<string> entryIds, CancellationToken ct, string? destination = null) =>
+        Task.FromResult(new BoardSyncReceiptsResponse([]));
     Task PutContentPartAsync(BoardSyncContentPartWire part, ReadOnlyMemory<byte> bytes, CancellationToken ct, string? destination = null) => throw new NotSupportedException();
     Task<BoardSyncActivityAck> PutActivityAsync(string remoteBoardId, string cardId, BoardSyncActivityWire activity, CancellationToken cancellationToken, string? expectedDestination = null);
     Task<BoardRemoteDescriptor?> DescribeAsync(string remoteBoardId, CancellationToken ct, string? destination = null) => Task.FromResult<BoardRemoteDescriptor?>(null);
@@ -49,6 +52,8 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
     IAccountEntitlements? entitlements = null) : IBoardSyncClient
 {
     public const string HttpClientName = "board-sync";
+    /// <summary>The hosted limit of entry ids per receipts lookup.</summary>
+    public const int MaxReceiptIds = 50;
 
     /// <summary>A fixed endpoint, for tests and callers that never change it.</summary>
     public BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Uri? endpoint, Func<string?> apiKey)
@@ -171,6 +176,11 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
             $"{Uri.EscapeDataString(remoteBoardId)}/entries?after={after.ToString(CultureInfo.InvariantCulture)}&limit={limit.ToString(CultureInfo.InvariantCulture)}",
             null, null, BoardSyncJsonContext.Default.BoardSyncPullResponse, cancellationToken, expectedDestination);
 
+    public Task<BoardSyncReceiptsResponse> GetReceiptsAsync(string remoteBoardId, IReadOnlyList<string> entryIds, CancellationToken ct, string? destination = null) =>
+        SendAsync<object, BoardSyncReceiptsResponse>(HttpMethod.Get,
+            Uri.EscapeDataString(remoteBoardId) + "/entries/receipts?" + string.Join("&", entryIds.Select(id => "id=" + Uri.EscapeDataString(id))),
+            null, null, BoardSyncJsonContext.Default.BoardSyncReceiptsResponse, ct, destination);
+
     private async Task<TResponse> SendAsync<TRequest, TResponse>(
         HttpMethod method, string relativePath, TRequest? body,
         System.Text.Json.Serialization.Metadata.JsonTypeInfo<TRequest>? requestInfo,
@@ -194,7 +204,8 @@ public sealed class BoardSyncHttpClient(IHttpClientFactory httpClientFactory, Fu
         using var request = new HttpRequestMessage(method, new Uri(target.AbsoluteUri.TrimEnd('/') + "/" + relativePath));
         request.Headers.Add("X-Api-Key", key);
         var remoteWork = relativePath == "publish" || relativePath.EndsWith("/push", StringComparison.Ordinal)
-            || relativePath.Contains("/entries?", StringComparison.Ordinal) || relativePath.EndsWith("/activity", StringComparison.Ordinal)
+            || relativePath.Contains("/entries?", StringComparison.Ordinal) || relativePath.Contains("/entries/receipts?", StringComparison.Ordinal)
+            || relativePath.EndsWith("/activity", StringComparison.Ordinal)
             || relativePath.StartsWith("launches/", StringComparison.Ordinal);
         if (safety is not null && remoteWork)
         {

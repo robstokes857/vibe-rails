@@ -519,6 +519,71 @@ public sealed partial class BoardSyncServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RejectionsTheHostedBoardStoresAreConfirmed_ReleasingHeldEditsAndRemoteStartWork()
+    {
+        // VIBE-175: a host before 2026-10-25 stored an entry, lost the acknowledgement, then answered the
+        // retry as "different content". The desktop kept the stored creation as rejected, so every later
+        // edit of the card stayed local and remote Start work always found the card unsynced.
+        var stored = await Card();
+        var never = await Card();
+        var storedCreation = (await store.GetUnsentLogEntriesAsync(stored.BoardId, 20, Ct)).Single(e => e.Entry.CardId == stored.Id).Entry.Id;
+        var neverCreation = (await store.GetUnsentLogEntriesAsync(stored.BoardId, 20, Ct)).Single(e => e.Entry.CardId == never.Id).Entry.Id;
+        client.RejectEntryId = neverCreation; // a genuine rejection: the host never stored it
+        client.LoseNextAck = true;
+        Assert.NotNull((await service.SetPublishedAsync(root, stored.BoardId, true, Ct))!.LastError);
+        Assert.Contains(client.Entries, e => e.Id == storedCreation);
+        client.RejectEntryId = storedCreation; // the old host's false rejection of the retry
+        Assert.Null((await service.SyncNowAsync(root, stored.BoardId, Ct))!.LastError);
+        await store.UpdateCardAsync(root, stored.Id, new(Title: "Edited after the rejection"), Ct);
+        await store.AddCommentAsync(root, stored.Id, BoardAuthor.User(), "Held back", Ct);
+        client.RejectEntryId = null;
+
+        // A host without the lookup changes nothing and fails nothing.
+        var held = (await service.SyncNowAsync(root, stored.BoardId, Ct))!;
+        Assert.Null(held.LastError);
+        Assert.Equal(2, held.Rejected);
+        Assert.DoesNotContain(client.Entries, e => e.Body == "Held back");
+        Assert.False(await store.IsCardSyncAppliedAsync(root, stored.BoardId, stored.Id, held.Cursor, Ct));
+
+        client.SupportsReceipts = true;
+        var repaired = (await service.SyncNowAsync(root, stored.BoardId, Ct))!;
+        Assert.Null(repaired.LastError);
+        Assert.Equal(neverCreation, Assert.Single(repaired.RejectedEntries!).EntryId);
+        Assert.Equal(0, repaired.Unsent);
+        Assert.Single(client.Entries, e => e.Id == storedCreation); // confirmed, never sent again
+        Assert.Contains(client.Entries, e => e.Body == "Held back");
+        Assert.Contains(client.Entries, e => e.CardId == stored.Id && e.Changes?.TryGetProperty("title", out _) == true);
+        Assert.DoesNotContain(client.Entries, e => e.CardId == never.Id);
+        Assert.True(await store.IsCardSyncAppliedAsync(root, stored.BoardId, stored.Id, repaired.Cursor, Ct));
+        Assert.False(await store.IsCardSyncAppliedAsync(root, stored.BoardId, never.Id, repaired.Cursor, Ct));
+
+        // The remaining genuine rejection is not looked up again until the retained set changes.
+        var lookups = client.ReceiptLookups;
+        await service.SyncNowAsync(root, stored.BoardId, Ct);
+        Assert.Equal(lookups, client.ReceiptLookups);
+    }
+
+    [Fact]
+    public async Task ReceiptsCannotReleaseAnotherCardsEntryOrReuseAHeldSequence()
+    {
+        var card = await Card();
+        var creation = Assert.Single(await store.GetUnsentLogEntriesAsync(card.BoardId, 20, Ct)).Entry.Id;
+        var other = await Card();
+        client.RejectEntryId = creation;
+        await service.SetPublishedAsync(root, card.BoardId, true, Ct);
+        var otherSeq = Assert.Single(client.Entries, e => e.CardId == other.Id).Seq;
+        Assert.Equal(0, await store.ConfirmRejectedLogEntriesAsync(card.BoardId, [new(creation, other.Id, "created", 99)], Ct));
+        Assert.Equal(0, await store.ConfirmRejectedLogEntriesAsync(card.BoardId, [new(creation, card.Id, "change", 99)], Ct));
+        Assert.Equal(0, await store.ConfirmRejectedLogEntriesAsync(card.BoardId, [new(creation, card.Id, "created", otherSeq)], Ct));
+        Assert.Equal(0, await store.ConfirmRejectedLogEntriesAsync(card.BoardId, [new(creation, card.Id, "created", 0)], Ct));
+        Assert.Equal(0, await store.ConfirmRejectedLogEntriesAsync("brd_elsewhere", [new(creation, card.Id, "created", 99)], Ct));
+        Assert.Equal([creation], await store.GetRejectedLogEntryIdsAsync(card.BoardId, Ct));
+        Assert.Equal(1, await store.ConfirmRejectedLogEntriesAsync(card.BoardId, [new(creation, card.Id, "created", 99)], Ct));
+        Assert.Empty(await store.GetRejectedLogEntryIdsAsync(card.BoardId, Ct));
+        Assert.Equal(0, await store.ConfirmRejectedLogEntriesAsync(card.BoardId, [new(creation, card.Id, "created", 99)], Ct));
+    }
+
+    [Fact]
     public async Task RejectionCannotNameAnEntryOutsideTheAttemptedBatch()
     {
         var card = await Card();
@@ -1389,6 +1454,18 @@ public sealed partial class BoardSyncServiceTests : IDisposable
             if (BeforePull is { } action) { BeforePull = null; await action(); }
             var response = new BoardSyncPullResponse(Entries.Where(e => e.Seq > after).Take(limit).ToList(), AdvertisedLastSeq ?? Entries.Count, Entries.Count - after > limit);
             return TransformPull?.Invoke(response) ?? response;
+        }
+        public bool SupportsReceipts;
+        public int ReceiptLookups;
+        public Task<BoardSyncReceiptsResponse> GetReceiptsAsync(string boardId, IReadOnlyList<string> entryIds, CancellationToken ct, string? destination = null)
+        {
+            Calls++;
+            Assert.Equal(DestinationKey, destination);
+            Assert.InRange(entryIds.Count, 1, BoardSyncHttpClient.MaxReceiptIds);
+            if (!SupportsReceipts) throw new BoardSyncClientException("Board sync returned HTTP 404; entries remain queued.", "http_404", 404);
+            ReceiptLookups++;
+            return Task.FromResult(new BoardSyncReceiptsResponse(
+                [.. Entries.Where(e => entryIds.Contains(e.Id)).Select(e => new BoardSyncReceiptWire(e.Id, e.CardId, e.Kind, e.Seq))]));
         }
         public void Web(BoardCardRecord card, string kind, string body, string? changes) => Entries.Add(new(
             "log_" + Guid.NewGuid().ToString("N"), card.Id, card.Key, kind, new("user", "Web", null), body,

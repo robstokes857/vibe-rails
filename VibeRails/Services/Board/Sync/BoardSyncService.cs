@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -87,6 +88,8 @@ public sealed partial class BoardSyncService(
     private const int PullPageSize = 20;
     private const int MaxPullPagesPerSync = 25;
     private const int MaxErrorLength = 500;
+    // Per board link, how many retained rejections remained after this process last checked them with the hosted board.
+    private static readonly ConcurrentDictionary<string, int> RejectionsChecked = new(StringComparer.Ordinal);
 
     public async Task<BoardSyncStatus?> GetStatusAsync(string projectPath, string boardId, CancellationToken cancellationToken)
     {
@@ -323,6 +326,8 @@ public sealed partial class BoardSyncService(
     {
         if (await store.GetPendingSyncRebuildAsync(link.BoardId, cancellationToken) is { } pending)
             link = await ContinueOwnedRebuildAsync(link, pending, cancellationToken);
+        else if (!link.Imported)
+            await ConfirmRejectedEntriesAsync(link, cancellationToken);
         try
         {
             link = await PushAsync(link, cancellationToken);
@@ -443,6 +448,39 @@ public sealed partial class BoardSyncService(
         if (pushed > 0)
             featureLog.Write(FeatureName, "push", $"Pushed {pushed} Card Log entr{(pushed == 1 ? "y" : "ies")}.", link.BoardId, link.RemoteBoardId, "ok");
         return link;
+    }
+
+    /// <summary>
+    /// VIBE-175. Hosted releases before 2026-10-25 compared a retried entry's timestamp at full precision with
+    /// the stored, microsecond copy and answered "different content", so this desktop retained entries the
+    /// board had in fact stored as rejected. A rejected creation also held back every later change to its card,
+    /// and its protected fields made remote Start work report the card as unsynced. Ask the board which retained
+    /// rejections it stores and record those as sent. Nothing is resent: an entry the board does not store stays
+    /// rejected, and this process asks again only when the number of retained rejections changes.
+    /// </summary>
+    private async Task ConfirmRejectedEntriesAsync(BoardSyncLinkRecord link, CancellationToken ct)
+    {
+        var key = link.BoardId + "\n" + link.RemoteBoardId + "\n" + link.DestinationKey;
+        var ids = await store.GetRejectedLogEntryIdsAsync(link.BoardId, ct);
+        if (ids.Count == 0 || RejectionsChecked.TryGetValue(key, out var checkedCount) && checkedCount == ids.Count) return;
+        var confirmed = 0;
+        try
+        {
+            foreach (var chunk in ids.Chunk(BoardSyncHttpClient.MaxReceiptIds))
+            {
+                var response = await client.GetReceiptsAsync(link.RemoteBoardId, chunk, ct, link.DestinationKey);
+                confirmed += await store.ConfirmRejectedLogEntriesAsync(link.BoardId,
+                    [.. (response?.Receipts ?? []).OfType<BoardSyncReceiptWire>().Select(r => new BoardSyncHistoryEntry(r.Id, r.CardId, r.Kind, r.Seq))], ct);
+            }
+        }
+        // A hosted release without the lookup, or one that refuses it, is asked again next tick. Any other
+        // failure (plan, safety pause, network) is the push's own and fails this tick as the push would.
+        catch (BoardSyncClientException ex) when (ex.Code is "http_404" or BoardSyncWire.CodeInvalidRequest) { return; }
+        RejectionsChecked[key] = ids.Count - confirmed;
+        if (confirmed > 0)
+            featureLog.Write(FeatureName, "confirm-rejected",
+                $"{confirmed} entr{(confirmed == 1 ? "y" : "ies")} kept as rejected were stored by the hosted board; recorded as sent.",
+                link.BoardId, link.RemoteBoardId, "ok", LogLevel.Warning);
     }
 
     private static void ValidateAcknowledgement(BoardSyncPushResponse response, IReadOnlyList<BoardSyncOutboundEntry> sent, long cursor)

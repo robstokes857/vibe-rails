@@ -109,6 +109,12 @@ public sealed record BoardSyncPulledEntryWire(
 
 public sealed record BoardSyncPullResponse(List<BoardSyncPulledEntryWire> Entries, long LastSeq, bool HasMore);
 
+/// <summary>A stored entry's identity and sequence, without content (<c>GET {board}/entries/receipts</c>).</summary>
+public sealed record BoardSyncReceiptWire(string Id, string CardId, string Kind, long Seq);
+
+/// <summary>The named entries the hosted board stores; unknown ids are absent.</summary>
+public sealed record BoardSyncReceiptsResponse(List<BoardSyncReceiptWire> Receipts);
+
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     PropertyNameCaseInsensitive = true,
@@ -119,6 +125,7 @@ public sealed record BoardSyncPullResponse(List<BoardSyncPulledEntryWire> Entrie
 [JsonSerializable(typeof(BoardSyncPushRequest))]
 [JsonSerializable(typeof(BoardSyncPushResponse))]
 [JsonSerializable(typeof(BoardSyncPullResponse))]
+[JsonSerializable(typeof(BoardSyncReceiptsResponse))]
 [JsonSerializable(typeof(BoardSyncActivityWire))]
 [JsonSerializable(typeof(BoardSyncActivityAck))]
 [JsonSerializable(typeof(BoardSyncContentPartWire))]

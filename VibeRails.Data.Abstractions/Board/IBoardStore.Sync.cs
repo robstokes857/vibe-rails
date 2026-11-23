@@ -71,6 +71,16 @@ public partial interface IBoardStore
     /// <summary>The latest rejected identities for this board's status view, capped at 50.</summary>
     Task<IReadOnlyList<BoardSyncRejectedEntry>> GetRejectedLogEntriesAsync(string boardId, int limit, CancellationToken cancellationToken = default);
 
+    /// <summary>Every retained rejected entry id of this board, oldest first, capped at 1,000.</summary>
+    Task<IReadOnlyList<string>> GetRejectedLogEntryIdsAsync(string boardId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records as sent each retained rejection the hosted board says it stores under the same card and kind,
+    /// at a sequence no other entry of the board holds, and releases the fields it protected. Returns how
+    /// many were confirmed. A rejected creation confirmed here lets the card's later entries leave the queue.
+    /// </summary>
+    Task<int> ConfirmRejectedLogEntriesAsync(string boardId, IReadOnlyList<BoardSyncHistoryEntry> stored, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Records a pulled entry the pull moved past because <paramref name="version"/>, the desktop
     /// version that tried it, cannot apply it. A later attempt at the same entry records its own

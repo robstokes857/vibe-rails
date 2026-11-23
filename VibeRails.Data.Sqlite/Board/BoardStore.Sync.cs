@@ -332,6 +332,71 @@ public sealed partial class BoardStore
         return entries;
     }
 
+    public async Task<IReadOnlyList<string>> GetRejectedLogEntryIdsAsync(string boardId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id FROM (
+                SELECT m.Id, 0 AS Source, m.rowid AS SortId FROM BoardSyncLog m JOIN BoardCards c ON c.Id = m.CardId
+                JOIN BoardColumns k ON k.Id = c.ColumnId WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND m.RemoteSeq = -1
+                UNION ALL SELECT EntryId, 1, rowid FROM BoardDeletedCards WHERE BoardId = $board AND RemoteSeq = -1)
+            ORDER BY Source, SortId LIMIT 1000;
+            """;
+        command.Parameters.AddWithValue("$board", boardId);
+        var ids = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) ids.Add(reader.GetString(0));
+        return ids;
+    }
+
+    public async Task<int> ConfirmRejectedLogEntriesAsync(string boardId, IReadOnlyList<BoardSyncHistoryEntry> stored, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        // Same effective ledger as MarkLogEntriesSentAsync: a transferred entry keeps its legacy RemoteSeq
+        // local-only. Only a retained rejection of this board with the same card and kind is confirmed, and
+        // never at a sequence another entry of the board already holds.
+        command.CommandText = """
+            UPDATE BoardComments SET
+                RemoteSeq = CASE WHEN SyncBoardId IS NULL THEN $seq ELSE 0 END,
+                TransferRemoteSeq = CASE WHEN SyncBoardId IS NOT NULL THEN $seq ELSE TransferRemoteSeq END
+            WHERE Id = $id AND CardId = $card AND Kind = $kind AND $seq > 0
+              AND (CASE WHEN SyncBoardId IS NULL THEN RemoteSeq ELSE TransferRemoteSeq END) = -1
+              AND COALESCE(SyncBoardId, (SELECT k.BoardId FROM BoardCards c JOIN BoardColumns k ON k.Id = c.ColumnId WHERE c.Id = BoardComments.CardId)) = $board
+              AND NOT EXISTS (SELECT 1 FROM BoardSyncLog m JOIN BoardCards c ON c.Id = m.CardId JOIN BoardColumns k ON k.Id = c.ColumnId
+                  WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND m.RemoteSeq = $seq)
+              AND NOT EXISTS (SELECT 1 FROM BoardDeletedCards WHERE BoardId = $board AND RemoteSeq = $seq);
+            UPDATE BoardDeletedCards SET RemoteSeq = $seq
+            WHERE EntryId = $id AND CardId = $card AND $kind = 'deleted' AND $seq > 0 AND BoardId = $board AND RemoteSeq = -1
+              AND NOT EXISTS (SELECT 1 FROM BoardSyncLog m JOIN BoardCards c ON c.Id = m.CardId JOIN BoardColumns k ON k.Id = c.ColumnId
+                  WHERE COALESCE(m.SyncBoardId, k.BoardId) = $board AND m.RemoteSeq = $seq)
+              AND NOT EXISTS (SELECT 1 FROM BoardDeletedCards WHERE BoardId = $board AND RemoteSeq = $seq);
+            """;
+        command.Parameters.AddWithValue("$board", boardId);
+        var id = command.Parameters.Add("$id", SqliteType.Text);
+        var card = command.Parameters.Add("$card", SqliteType.Text);
+        var kind = command.Parameters.Add("$kind", SqliteType.Text);
+        var seq = command.Parameters.Add("$seq", SqliteType.Integer);
+        await using var release = connection.CreateCommand();
+        release.Transaction = transaction;
+        release.CommandText = "DELETE FROM BoardSyncRejectedFields WHERE EntryId = $id;";
+        var released = release.Parameters.Add("$id", SqliteType.Text);
+        var confirmed = 0;
+        foreach (var entry in stored)
+        {
+            (id.Value, card.Value, kind.Value, seq.Value) = (entry.EntryId, entry.CardId, entry.Kind, entry.Seq);
+            if (await command.ExecuteNonQueryAsync(cancellationToken) == 0) continue;
+            released.Value = entry.EntryId;
+            await release.ExecuteNonQueryAsync(cancellationToken);
+            confirmed++;
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return confirmed;
+    }
+
     public async Task<bool> RecordSkippedSyncEntryAsync(string boardId, BoardSyncSkippedEntry entry, string version, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);

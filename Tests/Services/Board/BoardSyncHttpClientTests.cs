@@ -103,6 +103,26 @@ public sealed class BoardSyncHttpClientTests
     }
 
     [Fact]
+    public async Task ReceiptsNameEachEntryIdAndAnOlderHostIsAPlain404()
+    {
+        var known = true;
+        var client = Client(new Handler(request =>
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("X-Api-Key")));
+            Assert.Equal("https://example.com/api/v1/boards/remote/entries/receipts?id=log_a&id=cm_b", request.RequestUri!.AbsoluteUri);
+            return known
+                ? new(HttpStatusCode.OK) { Content = new StringContent("""{"receipts":[{"id":"log_a","cardId":"card_1","kind":"created","seq":3305}]}""") }
+                : new(HttpStatusCode.NotFound);
+        }));
+        var receipt = Assert.Single((await client.GetReceiptsAsync("remote", ["log_a", "cm_b"], Ct, client.DestinationKey)).Receipts);
+        Assert.Equal(new BoardSyncReceiptWire("log_a", "card_1", "created", 3305), receipt);
+        known = false;
+        var error = await Assert.ThrowsAsync<BoardSyncClientException>(() => client.GetReceiptsAsync("remote", ["log_a", "cm_b"], Ct, client.DestinationKey));
+        Assert.Equal("http_404", error.Code);
+    }
+
+    [Fact]
     public async Task SharingUsesPinnedHeaderCredentialsAndAotWireTypes()
     {
         var sent = new List<string>();

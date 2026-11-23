@@ -416,6 +416,15 @@ save, then restore and save it; only actual field changes create entries. Reject
 notes can be copied into a new comment or note. Removing/re-adding a key retains rejections; publishing
 to a different remote board resets their delivery marks and protection for the new destination.
 
+A rejection can be wrong. Hosted releases before 2026-10-25 compared a retried entry's timestamp at
+full precision with their stored microsecond copy and answered `invalid_entry` for entries they had
+already stored (VIBE-175). Before each owner push, a board with retained rejections asks
+`GET {board}/entries/receipts?id=…` (at most 50 ids, identities and sequences only) which of them the
+host stores. Each one stored under the same card and kind, at a sequence no other entry of the board
+holds, is recorded as sent and its protection released, so a falsely rejected creation's held-back
+edits leave the queue. Nothing is resent; an entry the host does not store stays rejected. A host
+without the lookup (404) changes nothing. The process asks again only when the retained count changes.
+
 Pull validates each whole page's shape before applying entries: sequences must rise from the
 cursor (a gap, a sequence the server no longer serves, is passed over rather than waited on), no
 entry may exceed the page's `LastSeq`, `HasMore` needs a page that stopped short of `LastSeq`, and
