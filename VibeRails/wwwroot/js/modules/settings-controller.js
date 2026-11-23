@@ -133,6 +133,8 @@ export class SettingsController {
             const grokEnterpriseNetworkProxyInput = root.querySelector('#setting-grok-enterprise-network-proxy');
             const grokLlmProxyModeSubscription = root.querySelector('#setting-grok-llm-proxy-mode-subscription');
             const grokLlmProxyModeApi = root.querySelector('#setting-grok-llm-proxy-mode-api');
+            const antigravityApiKeyInput = root.querySelector('#setting-antigravity-api-key');
+            const antigravityApiKeyClear = root.querySelector('#setting-antigravity-api-key-clear');
             const claudeTokenSaverToggle = root.querySelector('#setting-token-saver-claude');
             const codexTokenSaverToggle = root.querySelector('#setting-token-saver-codex');
             const opencodeTokenSaverToggle = root.querySelector('#setting-token-saver-opencode');
@@ -260,7 +262,9 @@ export class SettingsController {
                             // Sent only where the row is shown; elsewhere the saved choice is kept.
                             modernConsoleHostToggle
                                 && root.querySelector('#setting-modern-console-host-row')?.hidden !== true
-                                ? modernConsoleHostToggle.checked : null
+                                ? modernConsoleHostToggle.checked : null,
+                            antigravityApiKeyInput ? antigravityApiKeyInput.value : null,
+                            antigravityApiKeyClear ? antigravityApiKeyClear.checked === true : null
                         );
                         if (savedSettings) {
                             await this._reconcileSavedApiKey(savedSettings, linkedKeyVersion);
@@ -282,6 +286,7 @@ export class SettingsController {
             }
 
             initGatewaySettings(root, settings);
+            this._initAntigravitySettings(root, settings);
             this._initSettingsDirtyTracking(root);
             this._initEnterpriseProxyTests(root);
 
@@ -312,7 +317,7 @@ export class SettingsController {
         this._updateDirtyState(root);
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexEnterpriseNetworkProxy, codexLlmProxyMode, claudeEnterpriseNetworkProxy, openCodeEnterpriseNetworkProxy, grokEnterpriseNetworkProxy, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, gatewayCredentials = {}, vsCodeSpellCheck = false, modernConsoleHost = null) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexEnterpriseNetworkProxy, codexLlmProxyMode, claudeEnterpriseNetworkProxy, openCodeEnterpriseNetworkProxy, grokEnterpriseNetworkProxy, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, gatewayCredentials = {}, vsCodeSpellCheck = false, modernConsoleHost = null, antigravityApiKey = null, clearAntigravityApiKey = null) {
         try {
             const previous = this.app.appSettings || {};
             // A new gateway receives that CLI's traffic and credentials; clearing one does not
@@ -335,6 +340,8 @@ export class SettingsController {
                 vsCodeSpellCheck,
                 // Omitted unless the page shows the switch: the server keeps an omitted value.
                 ...(typeof modernConsoleHost === 'boolean' ? { modernConsoleHost } : {}),
+                ...(typeof antigravityApiKey === 'string' ? { antigravityApiKey } : {}),
+                ...(typeof clearAntigravityApiKey === 'boolean' ? { clearAntigravityApiKey } : {}),
                 mcpEnabled: mcpEnabled,
                 computerName: computerName,
                 codexEnterpriseNetworkProxy: codexEnterpriseNetworkProxy,
@@ -593,6 +600,8 @@ export class SettingsController {
             '#setting-opencode-enterprise-network-proxy',
             '#setting-grok-enterprise-network-proxy',
             'input[name="setting-grok-llm-proxy-mode"]',
+            '#setting-antigravity-api-key',
+            '#setting-antigravity-api-key-clear',
             '#setting-token-saver-claude',
             '#setting-token-saver-codex',
             '#setting-token-saver-opencode',
@@ -618,6 +627,8 @@ export class SettingsController {
             openCodeEnterpriseNetworkProxy: (root.querySelector('#setting-opencode-enterprise-network-proxy')?.value || '').trim(),
             grokEnterpriseNetworkProxy: (root.querySelector('#setting-grok-enterprise-network-proxy')?.value || '').trim(),
             grokLlmProxyMode: this._getGrokLlmProxyMode(root),
+            antigravityApiKey: valueOf('#setting-antigravity-api-key'),
+            clearAntigravityApiKey: isChecked('#setting-antigravity-api-key-clear'),
             claudeTokenSaverEnabled: isChecked('#setting-token-saver-claude'),
             codexTokenSaverEnabled: isChecked('#setting-token-saver-codex'),
             openCodeTokenSaverEnabled: isChecked('#setting-token-saver-opencode'),
@@ -785,6 +796,43 @@ export class SettingsController {
         if (opencodeTokenSaverToggle) opencodeTokenSaverToggle.checked = settings.openCodeTokenSaverEnabled !== false;
         if (grokTokenSaverToggle) grokTokenSaverToggle.checked = settings.grokTokenSaverEnabled !== false;
         applyGatewaySettings(root, settings);
+        this._applyAntigravitySettings(root, settings);
+    }
+
+    _initAntigravitySettings(root, settings) {
+        this._applyAntigravitySettings(root, settings);
+        const input = root.querySelector('#setting-antigravity-api-key');
+        const clear = root.querySelector('#setting-antigravity-api-key-clear');
+        if (input && clear) {
+            input.addEventListener('input', () => {
+                if (input.value.trim().length > 0 && clear.checked) clear.checked = false;
+            });
+            clear.addEventListener('change', () => {
+                if (clear.checked && input.value.length > 0) input.value = '';
+            });
+        }
+    }
+
+    _applyAntigravitySettings(root, settings) {
+        const input = root.querySelector('#setting-antigravity-api-key');
+        const clear = root.querySelector('#setting-antigravity-api-key-clear');
+        const clearRow = root.querySelector('#setting-antigravity-api-key-clear-row');
+        const status = root.querySelector('#setting-antigravity-api-key-status');
+        const hasSaved = settings?.hasAntigravityApiKey === true;
+        if (input) {
+            input.value = '';
+            input.placeholder = hasSaved
+                ? 'Saved — enter a new key to replace'
+                : 'Paste a key from Google AI Studio';
+        }
+        if (clear) clear.checked = false;
+        if (clearRow) clearRow.hidden = !hasSaved;
+        if (status) {
+            status.hidden = !hasSaved;
+            status.textContent = hasSaved
+                ? 'API key saved. Leave the box blank to keep it, or remove it below to switch back to Google account sign-in.'
+                : '';
+        }
     }
 
     _getCodexLlmProxyMode(root) {

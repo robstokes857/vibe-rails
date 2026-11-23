@@ -131,6 +131,8 @@ public static class AppSettingsRoutes
             request.ClaudeEnterpriseNetworkProxy ?? saved.ClaudeEnterpriseNetworkProxy,
             request.ClaudeGatewayAuthMode ?? saved.ClaudeGatewayAuthMode,
             request.ClaudeGatewayApiKeyHeader ?? saved.ClaudeGatewayApiKeyHeader);
+        if (request.ClearAntigravityApiKey != true)
+            NormalizeAntigravityApiKey(request.AntigravityApiKey);
 
         static void Validate(string? token, bool? clear, string? gateway, string mode, string header)
         {
@@ -142,6 +144,14 @@ public static class AppSettingsRoutes
             if (EnterpriseGatewayCredentials.NormalizeSecret(token, mode).Length > 0 && string.IsNullOrWhiteSpace(gateway))
                 throw new ArgumentException("Enter and save a gateway URL with its credential.");
         }
+    }
+
+    internal static string NormalizeAntigravityApiKey(string? value)
+    {
+        var key = (value ?? string.Empty).Trim();
+        if (key.Length > 16384 || key.Any(c => c <= ' ' || c > '~'))
+            throw new ArgumentException("Antigravity API keys must contain only printable ASCII characters without spaces.");
+        return key;
     }
 
     // The internal store parameter is solely for isolated regression fixtures. Production calls
@@ -230,6 +240,8 @@ public static class AppSettingsRoutes
             settings.ClaudeGatewayBearerToken = MergeGatewayToken(settings.ClaudeGatewayBearerToken,
                 settingsDto.ClaudeGatewayBearerToken, settingsDto.ClearClaudeGatewayBearerToken, settings.ClaudeGatewayAuthMode,
                 SameGatewayOrigin(previousClaudeGateway, settings.ClaudeEnterpriseNetworkProxy));
+            settings.AntigravityApiKey = MergeAntigravityApiKey(
+                settings.AntigravityApiKey, settingsDto.AntigravityApiKey, settingsDto.ClearAntigravityApiKey);
             // Per-LLM saver toggles, same stale-client guard. Writing an explicit Codex/OpenCode
             // value deliberately severs the pre-split inheritance from the legacy master switch
             // (see Settings) — from then on each LLM stands on its own value.
@@ -366,7 +378,8 @@ public static class AppSettingsRoutes
             VsCodeSpellCheck: settings.VsCodeSpellCheck,
             ModernConsoleHost: settings.ModernConsoleHost,
             ModernConsoleHostAvailable: consoleHostAvailable,
-            ModernConsoleHostUnavailableReason: consoleHostUnavailable
+            ModernConsoleHostUnavailableReason: consoleHostUnavailable,
+            HasAntigravityApiKey: !string.IsNullOrEmpty(settings.AntigravityApiKey)
         );
     }
 
@@ -376,6 +389,9 @@ public static class AppSettingsRoutes
     private static string MergeGatewayToken(string saved, string? supplied, bool? clear, string mode, bool sameGateway) =>
         clear == true ? "" : !string.IsNullOrWhiteSpace(supplied) ? EnterpriseGatewayCredentials.NormalizeSecret(supplied, mode)
             : sameGateway ? saved : "";
+
+    private static string MergeAntigravityApiKey(string saved, string? supplied, bool? clear) =>
+        clear == true ? "" : !string.IsNullOrWhiteSpace(supplied) ? NormalizeAntigravityApiKey(supplied) : saved;
 
     /// <summary>
     /// True when both values name the same gateway origin (scheme, host and port), or are the same

@@ -37,6 +37,7 @@ public sealed class AppSettingsAccountKeyTests
             Assert.Equal("api", saved.GrokLlmProxyMode);
             Assert.Equal("https://gateway.example.test/v1", saved.CodexEnterpriseNetworkProxy);
             Assert.Equal("gateway-token", saved.CodexGatewayBearerToken);
+            Assert.Equal("AIzaSySavedAntigravityKey", saved.AntigravityApiKey);
             Assert.True(saved.ClaudeGatewaySupportsToolSearch);
             Assert.False(saved.ClaudeTokenSaverEnabled);
             Assert.True(saved.VsCodeSpellCheck);
@@ -71,6 +72,7 @@ public sealed class AppSettingsAccountKeyTests
         GrokLlmProxyMode = "api",
         CodexEnterpriseNetworkProxy = "https://gateway.example.test/v1",
         CodexGatewayBearerToken = "gateway-token",
+        AntigravityApiKey = "AIzaSySavedAntigravityKey",
         ClaudeGatewaySupportsToolSearch = true,
         ClaudeTokenSaverEnabled = false,
         VsCodeSpellCheck = true,

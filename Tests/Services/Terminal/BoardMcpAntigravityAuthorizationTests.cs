@@ -146,6 +146,151 @@ public sealed class BoardMcpAntigravityAuthorizationTests
         Assert.Equal(input, args);
     }
 
+    [Fact]
+    public async Task GeminiApiKeyWithoutBoardTools_InjectsModelProviderBeforeDelimiter()
+    {
+        var files = CreateFileService(settingsContent: null);
+
+        var args = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
+            LLM.Antigravity, ["--model", "gemini-4-neon", "--", "positional"], files.Object,
+            authorizeBoardTools: false, useGeminiApiKey: true, TestContext.Current.CancellationToken);
+
+        Assert.Equal("--settings", args[2]);
+        var root = JsonNode.Parse(args[3])!.AsObject();
+        Assert.Single(root);
+        Assert.Equal("gemini", root["modelProvider"]!.GetValue<string>());
+        Assert.Equal("--", args[4]);
+        Assert.Equal("positional", args[5]);
+    }
+
+    [Fact]
+    public async Task GeminiApiKeyWithMalformedUserSettings_FailsClosedOnBoardGrantsButKeepsModelProvider()
+    {
+        var files = CreateFileService("not-json");
+
+        var args = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
+            LLM.Antigravity, ["--model", "gemini-4-neon"], files.Object,
+            authorizeBoardTools: true, useGeminiApiKey: true, TestContext.Current.CancellationToken);
+
+        Assert.Equal("--settings", args[2]);
+        var root = JsonNode.Parse(args[3])!.AsObject();
+        Assert.Single(root);
+        Assert.Equal("gemini", root["modelProvider"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData("--settings", "{\"agentMode\":\"plan\"}", null)]
+    [InlineData("--settings={\"agentMode\":\"plan\"}", null, "--settings=")]
+    public async Task GeminiApiKeyMergesIntoExplicitInlineSettingsWhenModelProviderAbsent(string first, string? second, string? prefix)
+    {
+        var files = CreateFileService(settingsContent: null);
+        string[] input = second is null ? [first] : [first, second];
+
+        var args = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
+            LLM.Antigravity, input, files.Object,
+            authorizeBoardTools: false, useGeminiApiKey: true, TestContext.Current.CancellationToken);
+
+        Assert.Equal(input.Length, args.Length);
+        var payload = prefix is null ? args[1] : args[0][prefix.Length..];
+        var root = JsonNode.Parse(payload)!.AsObject();
+        Assert.Equal("plan", root["agentMode"]!.GetValue<string>());
+        Assert.Equal("gemini", root["modelProvider"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData("--settings", "{\"modelProvider\":\"\"}")]
+    [InlineData("--settings", "custom.json")]
+    [InlineData("-settings=custom.json", null)]
+    public async Task GeminiApiKeyPreservesExplicitModelProviderOrFileSettings(string first, string? second)
+    {
+        var files = CreateFileService(settingsContent: null);
+        string[] input = second is null ? [first] : [first, second];
+
+        var args = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
+            LLM.Antigravity, input, files.Object,
+            authorizeBoardTools: false, useGeminiApiKey: true, TestContext.Current.CancellationToken);
+
+        Assert.Equal(input, args);
+    }
+
+    [Fact]
+    public async Task GeminiApiKeyMergesIntoLastExplicitSettingsOccurrence()
+    {
+        var files = CreateFileService(settingsContent: null);
+        string[] input = ["--settings", "{\"agentMode\":\"plan\"}", "--settings={\"verbosity\":\"high\"}"];
+
+        var args = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
+            LLM.Antigravity, input, files.Object,
+            authorizeBoardTools: false, useGeminiApiKey: true, TestContext.Current.CancellationToken);
+
+        // First occurrence stays untouched; last occurrence (which agy uses) gets modelProvider.
+        Assert.Equal("{\"agentMode\":\"plan\"}", args[1]);
+        Assert.StartsWith("--settings=", args[2]);
+        var lastObj = JsonNode.Parse(args[2]["--settings=".Length..])!.AsObject();
+        Assert.Equal("high", lastObj["verbosity"]!.GetValue<string>());
+        Assert.Equal("gemini", lastObj["modelProvider"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task GeminiApiKeyWithFileThenInlineSettings_MergesLastInlineOccurrence()
+    {
+        var files = CreateFileService(settingsContent: null);
+        string[] input = ["--settings=custom.json", "--settings", "{\"agentMode\":\"auto\"}"];
+
+        var args = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
+            LLM.Antigravity, input, files.Object,
+            authorizeBoardTools: false, useGeminiApiKey: true, TestContext.Current.CancellationToken);
+
+        Assert.Equal("--settings=custom.json", args[0]);
+        var lastObj = JsonNode.Parse(args[2])!.AsObject();
+        Assert.Equal("auto", lastObj["agentMode"]!.GetValue<string>());
+        Assert.Equal("gemini", lastObj["modelProvider"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData("--settings", "{\"agentMode\":\"plan\"}", "--settings=custom.json")]
+    [InlineData("--settings", "{\"agentMode\":\"plan\"}", "--settings={\"modelProvider\":\"\"}")]
+    [InlineData("--settings", "{\"agentMode\":\"plan\"}", "--settings")]
+    public async Task GeminiApiKeyWithOverridingFinalSettingsFlag_LeavesArgumentsUnchanged(string a, string b, string c)
+    {
+        var files = CreateFileService(settingsContent: null);
+        string[] input = [a, b, c];
+
+        var args = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
+            LLM.Antigravity, input, files.Object,
+            authorizeBoardTools: false, useGeminiApiKey: true, TestContext.Current.CancellationToken);
+
+        Assert.Equal(input, args);
+    }
+
+    [Fact]
+    public async Task GeminiApiKeyWithDuplicateJsonProperties_MergesWithoutThrowing()
+    {
+        var files = CreateFileService(settingsContent: null);
+        string[] input = ["--settings", "{\"agentMode\":\"plan\",\"agentMode\":\"auto\"}"];
+
+        var args = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
+            LLM.Antigravity, input, files.Object,
+            authorizeBoardTools: false, useGeminiApiKey: true, TestContext.Current.CancellationToken);
+
+        using var doc = System.Text.Json.JsonDocument.Parse(args[1]);
+        Assert.Equal("auto", doc.RootElement.GetProperty("agentMode").GetString());
+        Assert.Equal("gemini", doc.RootElement.GetProperty("modelProvider").GetString());
+    }
+
+    [Fact]
+    public async Task GeminiApiKeyWithDuplicateJsonPropertiesAndExplicitModelProvider_PreservesWithoutThrowing()
+    {
+        var files = CreateFileService(settingsContent: null);
+        string[] input = ["--settings", "{\"agentMode\":\"plan\",\"agentMode\":\"auto\",\"modelProvider\":\"\"}"];
+
+        var args = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
+            LLM.Antigravity, input, files.Object,
+            authorizeBoardTools: false, useGeminiApiKey: true, TestContext.Current.CancellationToken);
+
+        Assert.Equal(input, args);
+    }
+
     private static Mock<IFileService> CreateFileService(string? settingsContent)
     {
         var profile = Path.Combine(Path.GetTempPath(), "viberails-agy-auth-test");

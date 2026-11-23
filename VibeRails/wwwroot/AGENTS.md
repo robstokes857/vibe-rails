@@ -1356,6 +1356,12 @@ match, and editing the URL away from it falls back to the plain mode. Claude's *
 tool search** switch (`claudeGatewaySupportsToolSearch`) rides in `gatewayCredentialEdits` with
 the other gateway edits. Tests: `Tests/wwwroot/js/settings-enterprise-gateway.test.mjs`.
 
+Settings → LLMs also includes an **Antigravity Settings** card with a write-only **Gemini API key**
+password field (`#setting-antigravity-api-key`) and explicit removal checkbox
+(`#setting-antigravity-api-key-clear`, shown only when `hasAntigravityApiKey` is true). Responses
+return only `hasAntigravityApiKey`; blank/omitted input preserves the saved key. Tests:
+`Tests/wwwroot/js/settings-antigravity-api-key.test.mjs`.
+
 The token-savings meter sits at the far right of the terminal controls bar and is owned by
 `terminal-token-compression.js`. The per-LLM on/off switches live in Settings (Claude, Codex,
 OpenCode); the per-tab compression toggle that used to sit on each tab was removed 2026-07-19.

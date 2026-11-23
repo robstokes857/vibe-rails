@@ -95,6 +95,8 @@ public class Settings : IJsonOnDeserialized, IJsonOnSerializing
     public string OpenCodeEnterpriseNetworkProxy { get; set; } = string.Empty;
     /// <summary>Optional enterprise API base URL for native Grok.</summary>
     public string GrokEnterpriseNetworkProxy { get; set; } = string.Empty;
+    /// <summary>Optional Gemini API key used when launching Antigravity (agy).</summary>
+    public string AntigravityApiKey { get; set; } = string.Empty;
     // ---- Token saver: on/off per LLM is the whole user-facing surface (2026-07-18). ----
     // When a provider's saver is on (and that provider's proxy is on), the pipeline runs
     // CompressionCatalog.DefaultSelection — the curated safe set. The per-stage picker is gone.

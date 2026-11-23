@@ -160,6 +160,16 @@ field, and the route line labels it. The **Anthropic API key** / **OpenAI API ke
 case the request carries that URL explicitly, so the token stays bound to a saved URL, and pointing
 the gateway at the new host still needs presence. The server has no preset or inherited-URL
 fallback for credentials.
+
+Antigravity (`agy`) has an optional write-only `AntigravityApiKey` Settings field in the private
+local settings file (`HasAntigravityApiKey` presence flag only on responses, never key bytes or
+masks; blank/omitted preserves it; `ClearAntigravityApiKey` removes it; printable ASCII without
+whitespace validated before writing). Because it does not redirect traffic away from Google's
+Gemini API, changing it needs no presence proof. On Antigravity launches only, VibeRails injects
+the key strictly through the child process's `GEMINI_API_KEY` environment variable (never argv,
+command lines, logs, or session-start events) and passes session-only `--settings` containing
+`"modelProvider":"gemini"` (merged with Board MCP allow rules when applicable) without modifying
+`~/.gemini/antigravity-cli/settings.json`.
 Managed proxy launches extend the CLI's existing `NO_PROXY`/`no_proxy` exclusions with loopback
 hosts so an inherited corporate HTTP proxy cannot intercept the authenticated local relay hop.
 This launch-only environment change does not affect the backend's upstream proxy configuration.

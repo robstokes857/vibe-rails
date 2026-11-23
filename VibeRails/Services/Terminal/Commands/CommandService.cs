@@ -208,12 +208,16 @@ public class CommandService : ICommandService
                 ["--config", $"mcp_servers.{VibeRailsMcpServerName}.env_vars=[\"{LocalToolApiContext.CurrentSessionIdVariable}\",\"{LocalToolApiContext.CurrentTabIdVariable}\",\"{LocalToolApiContext.ApiBaseUrlVariable}\",\"{LocalToolApiContext.SessionTokenVariable}\",\"{LocalToolApiContext.TabTokenVariable}\",\"{AgentSessionTool.BaseUrlVariable}\",\"{AgentSessionTool.SessionTokenVariable}\",\"{AgentSessionTool.TabTokenVariable}\"]"]);
             launchArgs = identityArgs.ToArray();
         }
+        var settings = _storyTrackingSettings();
+        var antigravityApiKey = llm == LLM.Antigravity ? ResolveSavedAntigravityApiKey(settings.AntigravityApiKey) : string.Empty;
         // The Board sets this explicitly on Start work. Never infer permission from
         // the prompt, title, environment name, or the mere presence of an MCP server.
         if (authorizeBoardTools)
-        {
             launchArgs = BoardMcpAuthorization.AppendArguments(llm, launchArgs);
-            launchArgs = await BoardMcpAntigravityAuthorization.AppendArgumentsAsync(llm, launchArgs, _fileService);
+        if (llm == LLM.Antigravity && (authorizeBoardTools || !string.IsNullOrEmpty(antigravityApiKey)))
+        {
+            launchArgs = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
+                llm, launchArgs, _fileService, authorizeBoardTools, !string.IsNullOrEmpty(antigravityApiKey));
         }
 
         var cliCommand = launchArgs.Length > 0
@@ -223,7 +227,6 @@ public class CommandService : ICommandService
         var prompt = !string.IsNullOrWhiteSpace(summary)
             ? summary
             : initialPrompt;
-        var settings = _storyTrackingSettings();
         if (!contextIncluded)
         {
             var nudgeEnabled = ContextLevels.NudgeEnabled(settings, !string.IsNullOrEmpty(envName));
@@ -294,6 +297,9 @@ public class CommandService : ICommandService
             foreach (var kvp in envVars)
                 environment[kvp.Key] = kvp.Value;
         }
+
+        if (llm == LLM.Antigravity && !string.IsNullOrEmpty(antigravityApiKey))
+            environment[BoardMcpAntigravityAuthorization.GeminiApiKeyVariable] = antigravityApiKey;
 
         // Every managed agent can finish its own PTY, including providers with no LLM proxy.
         // Pin this process's control contact after custom environment fields, independently of
@@ -753,6 +759,21 @@ public class CommandService : ICommandService
 
     private static bool UsesGatewayCredential(string gateway, string token) =>
         !string.IsNullOrWhiteSpace(gateway) && !string.IsNullOrWhiteSpace(token);
+
+    private static string ResolveSavedAntigravityApiKey(string? saved)
+    {
+        if (string.IsNullOrWhiteSpace(saved))
+            return string.Empty;
+
+        var trimmed = saved.Trim();
+        if (trimmed.Length > 16384 || trimmed.Any(c => c <= ' ' || c > '~'))
+        {
+            Log.Warning("[Antigravity] Ignoring invalid saved AntigravityApiKey in settings.json");
+            return string.Empty;
+        }
+
+        return trimmed;
+    }
 
     private const string OpenAiBaseUrlVariable = "OPENAI_BASE_URL";
 

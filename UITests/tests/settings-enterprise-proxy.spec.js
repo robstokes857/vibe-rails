@@ -79,4 +79,91 @@ for (const width of [1280, 390]) {
         expect(saves[1].claudeEnterpriseNetworkProxy).toBe(values.claude);
         await expect(root.locator('#setting-token-saver-codex')).not.toBeChecked();
     });
+
+    test(`antigravity API key saves write-only, reloads status, and clears without presence at ${width}px`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.addInitScript(() => sessionStorage.setItem('viberails_tab', 'antigravity-key-fixture'));
+        await page.routeWebSocket('**/api/v1/events/ws*', () => {});
+        let savedKey = '';
+        let challenges = 0;
+        const saves = [];
+        await page.route('**/api/v1/**', async route => {
+            const request = route.request();
+            const path = new URL(request.url()).pathname;
+            if (path === '/api/v1/settings') {
+                if (request.method() === 'POST') {
+                    const body = request.postDataJSON();
+                    saves.push(body);
+                    if (body.clearAntigravityApiKey) savedKey = '';
+                    else if (body.antigravityApiKey?.trim()) savedKey = body.antigravityApiKey.trim();
+                }
+                return route.fulfill({
+                    json: {
+                        apiKey: '',
+                        computerName: '',
+                        mcpEnabled: true,
+                        hasAntigravityApiKey: savedKey.length > 0
+                    }
+                });
+            }
+            if (path === '/api/v1/settings/security-challenge') {
+                challenges++;
+                return route.fulfill({ json: { pinRequired: false, code: 'C0FFEE01' } });
+            }
+            const payloads = {
+                '/api/v1/context': { isInGit: false, rootPath: 'C:/fixture', launchDirectory: 'C:/fixture' },
+                '/api/v1/settings/pin/status': { isSet: false },
+                '/api/v1/settings/remote-link': { status: 'idle' },
+                '/api/v1/environments': { environments: [] },
+                '/api/v1/llm-picker/preferences': { items: [] }
+            };
+            return route.fulfill({ json: payloads[path] || {} });
+        });
+
+        await page.goto('/?view=settings', { waitUntil: 'domcontentloaded' });
+        const root = page.locator('#app-content [data-view="settings"]');
+        await root.locator('#settings-tab-llm').click();
+        const keyInput = root.locator('#setting-antigravity-api-key');
+        const clearRow = root.locator('#setting-antigravity-api-key-clear-row');
+        const clearCheckbox = root.locator('#setting-antigravity-api-key-clear');
+        const status = root.locator('#setting-antigravity-api-key-status');
+        const save = root.locator('#settings-save-button');
+
+        await expect(keyInput).toHaveAttribute('type', 'password');
+        await expect(clearRow).toBeHidden();
+        await expect(status).toBeHidden();
+
+        await keyInput.fill('AIzaSyPlaywrightTestKey');
+        await expect(save).toBeEnabled();
+        await save.click();
+        await expect(save).toBeDisabled();
+
+        expect(challenges).toBe(0);
+        expect(saves[0].presenceProof).toBeNull();
+        expect(saves[0].antigravityApiKey).toBe('AIzaSyPlaywrightTestKey');
+        expect(saves[0].clearAntigravityApiKey).toBe(false);
+        await expect(keyInput).toHaveValue('');
+        await expect(clearRow).toBeVisible();
+        await expect(status).toBeVisible();
+        await expect(status).toContainText('API key saved');
+
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await expect(page.locator('#app-content > *').first()).toBeAttached();
+        await page.evaluate(() => window.app.navigate('settings'));
+        await root.locator('#settings-tab-llm').click();
+        await expect(keyInput).toHaveValue('');
+        await expect(clearRow).toBeVisible();
+        await expect(status).toBeVisible();
+        await expect(status).toContainText('API key saved');
+
+        await clearCheckbox.check();
+        await expect(save).toBeEnabled();
+        await save.click();
+        await expect(save).toBeDisabled();
+
+        expect(challenges).toBe(0);
+        expect(saves[1].clearAntigravityApiKey).toBe(true);
+        await expect(clearRow).toBeHidden();
+        await expect(status).toBeHidden();
+    });
 }

@@ -1492,7 +1492,11 @@ namespace VibeRails.DTOs
         // Response-only: whether this build and platform can use it, and why not when it cannot.
         // The saved choice is kept either way; an unavailable host falls back to the built-in one.
         bool? ModernConsoleHostAvailable = null,
-        string? ModernConsoleHostUnavailableReason = null
+        string? ModernConsoleHostUnavailableReason = null,
+        // Write-only Antigravity (agy) Gemini API key. Responses return presence only, never key bytes.
+        string? AntigravityApiKey = null,
+        bool? ClearAntigravityApiKey = null,
+        bool HasAntigravityApiKey = false
     );
     // Append new fields at the END of this record, with a default. Inserting one in the middle
     // shifts every positional argument after it: call sites only fail to compile when the types
