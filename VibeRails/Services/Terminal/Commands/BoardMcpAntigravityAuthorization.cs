@@ -6,17 +6,19 @@ using VibeRails.Interfaces;
 namespace VibeRails.Services.Terminal;
 
 /// <summary>
-/// Session-only <c>--settings</c> overrides for Antigravity (<c>agy</c>): Board MCP tool grants
-/// and Gemini API key provider selection (<c>modelProvider: "gemini"</c>).
+/// Session-only <c>--settings</c> overrides for Antigravity (<c>agy</c>): default VibeRails MCP
+/// server approval (<c>mcp(viberails-mcp/*)</c>), Board MCP tool grants, and Gemini API key
+/// provider selection (<c>modelProvider: "gemini"</c>).
 /// Because <c>agy --settings</c> replaces <c>permissions.allow</c> (while preserving
 /// <c>permissions.deny</c>, <c>permissions.ask</c> and other settings keys from
 /// <c>~/.gemini/antigravity-cli/settings.json</c>), this helper performs a read-only merge of
-/// the user's existing allow entries with the exact reviewed Board tools and never writes to disk.
+/// the user's existing allow entries with the requested session grants and never writes to disk.
 /// </summary>
 public static class BoardMcpAntigravityAuthorization
 {
     internal const string GeminiApiKeyVariable = "GEMINI_API_KEY";
     internal const string GeminiModelProvider = "gemini";
+    internal const string VibeRailsMcpWildcardRule = $"mcp({BoardMcpAuthorization.ServerName}/*)";
     internal const int MaxSettingsChars = 1024 * 1024;
     internal const int MaxSerializedSettingsChars = 8 * 1024;
 
@@ -25,7 +27,20 @@ public static class BoardMcpAntigravityAuthorization
         string[] arguments,
         IFileService fileService,
         CancellationToken cancellationToken = default) =>
-        AppendSessionSettingsAsync(llm, arguments, fileService, authorizeBoardTools: true, useGeminiApiKey: false, cancellationToken);
+        AppendSessionSettingsAsync(
+            llm, arguments, fileService, authorizeBoardTools: true, useGeminiApiKey: false,
+            approveVibeRailsMcp: false, cancellationToken);
+
+    public static Task<string[]> AppendSessionSettingsAsync(
+        LLM llm,
+        string[] arguments,
+        IFileService fileService,
+        bool authorizeBoardTools,
+        bool useGeminiApiKey,
+        CancellationToken cancellationToken = default) =>
+        AppendSessionSettingsAsync(
+            llm, arguments, fileService, authorizeBoardTools, useGeminiApiKey,
+            approveVibeRailsMcp: false, cancellationToken);
 
     public static async Task<string[]> AppendSessionSettingsAsync(
         LLM llm,
@@ -33,9 +48,11 @@ public static class BoardMcpAntigravityAuthorization
         IFileService fileService,
         bool authorizeBoardTools,
         bool useGeminiApiKey,
+        bool approveVibeRailsMcp,
         CancellationToken cancellationToken = default)
     {
-        if (llm != LLM.Antigravity || (!authorizeBoardTools && !useGeminiApiKey))
+        var grantMcpPermissions = authorizeBoardTools || approveVibeRailsMcp;
+        if (llm != LLM.Antigravity || (!grantMcpPermissions && !useGeminiApiKey))
             return arguments;
 
         if (HasExplicitSettingsFlag(arguments))
@@ -48,7 +65,7 @@ public static class BoardMcpAntigravityAuthorization
         var modelProvider = useGeminiApiKey ? GeminiModelProvider : null;
         string? settingsJson = null;
 
-        if (authorizeBoardTools)
+        if (grantMcpPermissions)
         {
             var userProfile = fileService.GetUserProfilePath();
             if (!string.IsNullOrWhiteSpace(userProfile))
@@ -63,19 +80,20 @@ public static class BoardMcpAntigravityAuthorization
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Log.Warning(ex, "[Antigravity] Could not read user settings.json; skipping session-only Board MCP --settings grants");
+                    Log.Warning(ex, "[Antigravity] Could not read user settings.json; skipping session-only MCP --settings grants");
                     readFailed = true;
                 }
 
-                if (!readFailed && !TryBuildSettingsOverride(existingJson, out settingsJson, modelProvider))
+                if (!readFailed && !TryBuildSettingsOverride(existingJson, out settingsJson, modelProvider,
+                    approveVibeRailsMcp: approveVibeRailsMcp, authorizeBoardTools: authorizeBoardTools))
                 {
-                    Log.Warning("[Antigravity] Skipping session-only Board MCP --settings grants because user settings.json could not be safely merged");
+                    Log.Warning("[Antigravity] Skipping session-only MCP --settings grants because user settings.json could not be safely merged");
                     settingsJson = null;
                 }
             }
         }
 
-        // Even when Board grants are absent or fail closed, keep session-only Gemini API key routing.
+        // Even when MCP grants are absent or fail closed, keep session-only Gemini API key routing.
         if (string.IsNullOrEmpty(settingsJson) && useGeminiApiKey)
             settingsJson = BuildModelProviderOnlySettings(GeminiModelProvider);
 
@@ -187,11 +205,20 @@ public static class BoardMcpAntigravityAuthorization
     }
 
     internal static bool TryBuildSettingsOverride(string? existingSettingsJson, out string settingsJson) =>
-        TryBuildSettingsOverride(existingSettingsJson, out settingsJson, modelProvider: null);
+        TryBuildSettingsOverride(existingSettingsJson, out settingsJson, modelProvider: null,
+            approveVibeRailsMcp: false, authorizeBoardTools: true);
 
-    internal static bool TryBuildSettingsOverride(string? existingSettingsJson, out string settingsJson, string? modelProvider)
+    internal static bool TryBuildSettingsOverride(
+        string? existingSettingsJson,
+        out string settingsJson,
+        string? modelProvider,
+        bool approveVibeRailsMcp = false,
+        bool authorizeBoardTools = true)
     {
         settingsJson = string.Empty;
+        if (!approveVibeRailsMcp && !authorizeBoardTools)
+            return false;
+
         var mergedAllows = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
@@ -239,11 +266,17 @@ public static class BoardMcpAntigravityAuthorization
             }
         }
 
-        foreach (var tool in BoardMcpAuthorization.ToolNames)
+        if (approveVibeRailsMcp && seen.Add(VibeRailsMcpWildcardRule))
+            mergedAllows.Add(VibeRailsMcpWildcardRule);
+
+        if (authorizeBoardTools)
         {
-            var rule = $"mcp({BoardMcpAuthorization.ServerName}/{tool})";
-            if (seen.Add(rule))
-                mergedAllows.Add(rule);
+            foreach (var tool in BoardMcpAuthorization.ToolNames)
+            {
+                var rule = $"mcp({BoardMcpAuthorization.ServerName}/{tool})";
+                if (seen.Add(rule))
+                    mergedAllows.Add(rule);
+            }
         }
 
         using var buffer = new MemoryStream();

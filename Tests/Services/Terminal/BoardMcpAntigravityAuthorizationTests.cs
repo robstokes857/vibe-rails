@@ -291,6 +291,82 @@ public sealed class BoardMcpAntigravityAuthorizationTests
         Assert.Equal(input, args);
     }
 
+    [Fact]
+    public async Task ApproveVibeRailsMcp_MissingSettingsFile_GrantsServerWildcardOnly()
+    {
+        var files = CreateFileService(settingsContent: null);
+
+        var args = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
+            LLM.Antigravity, ["--model", "gemini-4-neon"], files.Object,
+            authorizeBoardTools: false, useGeminiApiKey: false, approveVibeRailsMcp: true,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(["--model", "gemini-4-neon"], args[..2]);
+        Assert.Equal("--settings", args[2]);
+        var root = JsonNode.Parse(args[3])!.AsObject();
+        Assert.Single(root);
+        var permissions = root["permissions"]!.AsObject();
+        Assert.Single(permissions);
+        var allows = permissions["allow"]!.AsArray().Select(item => item!.GetValue<string>()).ToArray();
+        Assert.Equal(["mcp(viberails-mcp/*)"], allows);
+        files.Verify(f => f.WriteAllTextAsync(It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<FileMode>(), It.IsAny<FileShare>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ApproveVibeRailsMcp_ExistingSettingsFile_MergesDeduplicatesAndOmitsDenyAsk()
+    {
+        const string existing = "{\"permissions\":{\"allow\":[\"command(git)\",\"mcp(viberails-mcp/*)\",\"read_url(example.com)\"],\"deny\":[\"mcp(viberails-mcp/create_session_share_link)\"],\"ask\":[\"mcp(viberails-mcp/add_jira_comment)\"]}}";
+        var files = CreateFileService(existing);
+
+        var args = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
+            LLM.Antigravity, [], files.Object,
+            authorizeBoardTools: false, useGeminiApiKey: false, approveVibeRailsMcp: true,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("--settings", args[0]);
+        var root = JsonNode.Parse(args[1])!.AsObject();
+        var permissions = root["permissions"]!.AsObject();
+        Assert.Single(permissions);
+        var allows = permissions["allow"]!.AsArray().Select(item => item!.GetValue<string>()).ToArray();
+        Assert.Equal(["command(git)", "mcp(viberails-mcp/*)", "read_url(example.com)"], allows);
+    }
+
+    [Fact]
+    public async Task ApproveVibeRailsMcp_CombinesWithBoardToolsAndGeminiApiKeyInOneSettingsObject()
+    {
+        var files = CreateFileService("{\"permissions\":{\"allow\":[\"command(git)\"]}}");
+
+        var args = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
+            LLM.Antigravity, ["--mode", "auto"], files.Object,
+            authorizeBoardTools: true, useGeminiApiKey: true, approveVibeRailsMcp: true,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, args.Count(arg => arg == "--settings"));
+        var root = JsonNode.Parse(args[3])!.AsObject();
+        Assert.Equal("gemini", root["modelProvider"]!.GetValue<string>());
+        var allows = root["permissions"]!["allow"]!.AsArray().Select(item => item!.GetValue<string>()).ToArray();
+        Assert.Equal("command(git)", allows[0]);
+        Assert.Equal("mcp(viberails-mcp/*)", allows[1]);
+        Assert.Equal(BoardMcpAuthorization.ToolNames.Select(tool => $"mcp(viberails-mcp/{tool})"), allows[2..]);
+    }
+
+    [Fact]
+    public async Task ApproveVibeRailsMcp_MalformedSettingsWithGeminiApiKey_FailsClosedOnMcpButKeepsModelProvider()
+    {
+        var files = CreateFileService("not-json");
+
+        var args = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
+            LLM.Antigravity, ["--model", "gemini-4-neon"], files.Object,
+            authorizeBoardTools: false, useGeminiApiKey: true, approveVibeRailsMcp: true,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("--settings", args[2]);
+        var root = JsonNode.Parse(args[3])!.AsObject();
+        Assert.Single(root);
+        Assert.Equal("gemini", root["modelProvider"]!.GetValue<string>());
+    }
+
     private static Mock<IFileService> CreateFileService(string? settingsContent)
     {
         var profile = Path.Combine(Path.GetTempPath(), "viberails-agy-auth-test");

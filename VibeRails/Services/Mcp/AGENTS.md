@@ -386,8 +386,11 @@ has `viberails-mcp` registered, with no VibeRails tab involved. Design points:
   [Terminal launch authorization](../Terminal/AGENTS.md#board-launch-options-and-input-sequences-2026-09-14).
   Separately, VIBE-237 gives every app-managed Codex launch (base or saved environment) the
   session-local `mcp_servers.viberails-mcp.default_tools_approval_mode="approve"` default for
-  all VibeRails MCP tools. Per-tool overrides and disabled tools still apply, and explicit
-  custom CLI arguments can override this default. Other servers, global approvals, sandbox
+  all VibeRails MCP tools, and every app-managed Antigravity launch gets session-only
+  `--settings` `permissions.allow` including `mcp(viberails-mcp/*)` (merged read-only with the
+  user's existing `permissions.allow`, omitting `deny`/`ask`, and skipping on explicit `--settings`
+  or unparseable `settings.json`). Per-tool overrides, disabled tools, `deny`/`ask` rules and
+  explicit custom CLI arguments still apply. Other servers, global approvals, sandbox
   settings and on-disk permissions are unchanged. See the
   [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
   The card's separate, default-off YOLO checkbox can

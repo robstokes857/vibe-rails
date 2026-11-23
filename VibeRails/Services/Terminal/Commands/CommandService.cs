@@ -214,10 +214,18 @@ public class CommandService : ICommandService
         // the prompt, title, environment name, or the mere presence of an MCP server.
         if (authorizeBoardTools)
             launchArgs = BoardMcpAuthorization.AppendArguments(llm, launchArgs);
-        if (llm == LLM.Antigravity && (authorizeBoardTools || !string.IsNullOrEmpty(antigravityApiKey)))
+        if (llm == LLM.Antigravity)
         {
+            // Trust our MCP server for app-managed Antigravity sessions, including first-run installs,
+            // matching Codex's session-local default approval (VIBE-237). Merges read-only with user
+            // permissions.allow, omits deny/ask so native rules stay intact, and respects explicit --settings.
             launchArgs = await BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync(
-                llm, launchArgs, _fileService, authorizeBoardTools, !string.IsNullOrEmpty(antigravityApiKey));
+                llm,
+                launchArgs,
+                _fileService,
+                authorizeBoardTools: authorizeBoardTools,
+                useGeminiApiKey: !string.IsNullOrEmpty(antigravityApiKey),
+                approveVibeRailsMcp: true);
         }
 
         var cliCommand = launchArgs.Length > 0

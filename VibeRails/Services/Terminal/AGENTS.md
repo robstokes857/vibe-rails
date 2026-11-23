@@ -257,10 +257,15 @@ conservatively skips grants covered by inherited `OPENCODE_PERMISSION` deny rule
 configuration precedence still applies. Selected modes and managed provider
 policies can still restrict calls. Independently of the Board marker, every app-managed Codex
 launch receives `--config mcp_servers.viberails-mcp.default_tools_approval_mode="approve"`
-(VIBE-237), so fresh installs approve VibeRails MCP calls in ordinary terminals too. The default
-is prepended before custom arguments and applies to all tools on that server; explicit CLI
-defaults, per-tool policies and disabled tools still take precedence. It is session-local and
-does not change other MCP servers, global approvals, sandbox settings or config files. A separate,
+(VIBE-237), and every app-managed Antigravity launch receives session-only
+`--settings '{"permissions":{"allow":[...]}}'` including `mcp(viberails-mcp/*)` (merged read-only
+with `~/.gemini/antigravity-cli/settings.json` `permissions.allow`, omitting `deny`/`ask` so
+Antigravity's `Deny > Ask > Allow` precedence keeps user restrictions intact, and skipped when
+explicit `--settings` is passed or `settings.json` cannot be safely parsed), so fresh installs
+approve VibeRails MCP calls in ordinary terminals too. Codex's default is prepended before custom
+arguments; explicit CLI defaults, per-tool policies, disabled tools and Antigravity's `deny`/`ask`
+or explicit `--settings` overrides still take precedence. Both are session-local and do not change
+other MCP servers, global approvals, sandbox settings or config files. A separate,
 default-off card YOLO checkbox explicitly selects the base provider's global bypass/auto-approve
 launch flag; saved environments keep their own arguments. Neither path is a granular permission
 editor or physical CLI configuration write. Validation used help, documentation and regression

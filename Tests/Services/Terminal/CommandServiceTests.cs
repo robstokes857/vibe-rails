@@ -291,7 +291,9 @@ public partial class CommandServiceTests : IDisposable
         // The in-app PTY must launch `agy`, or the session fails to start.
         var prepared = await service.PrepareSessionAsync(LLM.Antigravity, envName: null, extraArgs: null);
 
-        Assert.Equal("agy", prepared.LaunchCommand);
+        Assert.Equal("agy", prepared.Executable);
+        Assert.StartsWith("agy ", prepared.LaunchCommand);
+        Assert.Equal(new[] { "--settings", AntigravityVibeRailsMcpSettings }, prepared.Argv);
     }
 
     [Fact]
@@ -304,7 +306,9 @@ public partial class CommandServiceTests : IDisposable
         var prepared = await service.PrepareSessionAsync(
             LLM.Antigravity, envName: null, extraArgs: null, initialPrompt: "hello world");
 
-        Assert.StartsWith("agy --prompt-interactive=", prepared.LaunchCommand);
+        Assert.StartsWith("agy ", prepared.LaunchCommand);
+        Assert.Contains("--prompt-interactive=", prepared.LaunchCommand);
+        Assert.Equal("--prompt-interactive=hello world", prepared.Argv![^1]);
     }
 
     [Fact]

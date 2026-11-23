@@ -131,7 +131,7 @@ and no `/api/v1/antigravity/settings` route. All options are launch flags carrie
 - Model → `--model <slug>` (pinned UI dropdown via `renderAntigravityModelOptions` / remote catalog; base slugs such as `gemini-4-neon` compose cleanly with `--effort`, while legacy display strings with spaces/parens remain quoted as one arg).
 - Effort → `--effort <low|medium|high|xhigh>` (Board & AI Agents launch options; verified on `agy` 1.5.14, 2026-11-21).
 - Start mode → `--mode <accept-edits|auto|plan>` (Board & AI Agents launch options; verified on `agy` 1.5.14, 2026-11-21).
-- Optional Gemini API key (App settings → LLMs → **Antigravity Settings**): stored write-only as `Settings.AntigravityApiKey`; at launch `CommandService` injects `GEMINI_API_KEY` via the child process environment (never argv) and passes session-only `--settings '{"modelProvider":"gemini"}'` (merged with Board MCP grants when applicable) via `BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync`, without touching `~/.gemini/antigravity-cli/settings.json`.
+- Optional Gemini API key (App settings → LLMs → **Antigravity Settings**): stored write-only as `Settings.AntigravityApiKey`; at launch `CommandService` injects `GEMINI_API_KEY` via the child process environment (never argv) and passes session-only `--settings '{"modelProvider":"gemini"}'` (merged with VibeRails MCP / Board MCP grants when applicable) via `BoardMcpAntigravityAuthorization.AppendSessionSettingsAsync`, without touching `~/.gemini/antigravity-cli/settings.json`.
 
 `AntigravityLlmCliEnvironment.CreateEnvironment` only ensures the env subdirectory
 exists. The frontend builds/parses args via `buildAntigravityCustomArgs()` /

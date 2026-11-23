@@ -9,15 +9,19 @@ namespace Tests.Services.Terminal;
 public partial class CommandServiceTests
 {
     [Fact]
-    public async Task PrepareSession_Antigravity_WithoutSavedApiKey_InjectsNothing()
+    public async Task PrepareSession_Antigravity_WithoutSavedApiKey_DoesNotInjectApiKeyOrModelProvider()
     {
         var service = CreateService(storyTrackingSettings: () => new Settings { CreateVibeStoryTracking = false });
 
         var prepared = await service.PrepareSessionAsync(LLM.Antigravity, envName: null, extraArgs: null);
 
         Assert.False(prepared.Environment.ContainsKey(BoardMcpAntigravityAuthorization.GeminiApiKeyVariable));
-        Assert.DoesNotContain("--settings", prepared.LaunchCommand);
-        Assert.DoesNotContain("--settings", prepared.Argv!);
+        var settingsIndex = prepared.Argv!.ToList().IndexOf("--settings");
+        Assert.True(settingsIndex >= 0 && settingsIndex + 1 < prepared.Argv!.Count);
+        var settingsObj = JsonNode.Parse(prepared.Argv![settingsIndex + 1])!.AsObject();
+        Assert.False(settingsObj.ContainsKey("modelProvider"));
+        var allows = settingsObj["permissions"]!["allow"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray();
+        Assert.Equal(["mcp(viberails-mcp/*)"], allows);
     }
 
     [Fact]
@@ -42,7 +46,9 @@ public partial class CommandServiceTests
         Assert.True(settingsIndex >= 0 && settingsIndex + 1 < prepared.Argv!.Count);
         var settingsObj = JsonNode.Parse(prepared.Argv![settingsIndex + 1])!.AsObject();
         Assert.Equal("gemini", settingsObj["modelProvider"]!.GetValue<string>());
-        Assert.Single(settingsObj);
+        var allows = settingsObj["permissions"]!["allow"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray();
+        Assert.Equal(["mcp(viberails-mcp/*)"], allows);
+        Assert.Equal(2, settingsObj.Count);
         Assert.Contains("--settings", prepared.LaunchCommand);
     }
 
@@ -68,6 +74,7 @@ public partial class CommandServiceTests
         var settingsObj = JsonNode.Parse(argv[settingsIndex + 1])!.AsObject();
         Assert.Equal("gemini", settingsObj["modelProvider"]!.GetValue<string>());
         var allows = settingsObj["permissions"]!["allow"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray();
+        Assert.Contains("mcp(viberails-mcp/*)", allows);
         Assert.Contains("mcp(viberails-mcp/get_board_card)", allows);
     }
 
@@ -109,6 +116,9 @@ public partial class CommandServiceTests
         var prepared = await service.PrepareSessionAsync(LLM.Antigravity, envName: null, extraArgs: null);
 
         Assert.False(prepared.Environment.ContainsKey(BoardMcpAntigravityAuthorization.GeminiApiKeyVariable));
-        Assert.DoesNotContain("--settings", prepared.LaunchCommand);
+        var settingsIndex = prepared.Argv!.ToList().IndexOf("--settings");
+        Assert.True(settingsIndex >= 0 && settingsIndex + 1 < prepared.Argv!.Count);
+        var settingsObj = JsonNode.Parse(prepared.Argv![settingsIndex + 1])!.AsObject();
+        Assert.False(settingsObj.ContainsKey("modelProvider"));
     }
 }

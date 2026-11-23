@@ -168,7 +168,7 @@ whitespace validated before writing). Because it does not redirect traffic away 
 Gemini API, changing it needs no presence proof. On Antigravity launches only, VibeRails injects
 the key strictly through the child process's `GEMINI_API_KEY` environment variable (never argv,
 command lines, logs, or session-start events) and passes session-only `--settings` containing
-`"modelProvider":"gemini"` (merged with Board MCP allow rules when applicable) without modifying
+`"modelProvider":"gemini"` (merged with VibeRails MCP / Board MCP allow rules when applicable) without modifying
 `~/.gemini/antigravity-cli/settings.json`.
 Managed proxy launches extend the CLI's existing `NO_PROXY`/`no_proxy` exclusions with loopback
 hosts so an inherited corporate HTTP proxy cannot intercept the authenticated local relay hop.
@@ -760,8 +760,10 @@ Board Start work and Board-triggered Workers use the exact per-tool grants in
 These explicit Board grants default off on other launches; card text/environment names cannot
 grant tools. No server wildcard, unrelated tool, shared-config permission change or sandbox bypass
 comes from this grant path.
-Native policy/deny rules still apply; Antigravity has prompt-only authorization because a narrow
-native grant is unverified. The explicit, default-off base-CLI YOLO option is a separate user
+Native policy/deny rules still apply; Antigravity uses session-only `--settings` `permissions.allow`
+merged read-only with the user's `~/.gemini/antigravity-cli/settings.json` (omitting `deny`/`ask`
+and falling back to prompt-only when explicit `--settings` is supplied or `settings.json` cannot be
+safely parsed). The explicit, default-off base-CLI YOLO option is a separate user
 choice; saved environments retain their own arguments. Resolve environments by ID and project
 visibility, with no name fallback. Launch options use argv and `ShellArgSanitizer`.
 `AuthorizeBoardTools` is excluded from JSON in both directions; only the authenticated
@@ -770,14 +772,19 @@ cannot call that child start route. Positional Claude/Codex/Grok prompts follow 
 with named prompt options reject initial messages whose first non-whitespace character is `-`.
 
 VIBE-237 separately sets `mcp_servers.viberails-mcp.default_tools_approval_mode="approve"`
-for every app-managed Codex launch, including base terminals and saved environments. This is a
-session-only default for all tools on VibeRails' own MCP server, including non-Board tools;
-it does not extend the exact Board allowlist or alter other providers' grants. Codex per-tool
-overrides and disabled tools still apply, and explicit custom CLI arguments can override the
-server default. No permission is persisted, no other MCP server is approved, and neither the
+for every app-managed Codex launch, including base terminals and saved environments, and
+Antigravity (`agy`) likewise receives session-only `--settings` `permissions.allow` including
+`mcp(viberails-mcp/*)` (merged read-only with `~/.gemini/antigravity-cli/settings.json`
+`permissions.allow`, omitting `deny`/`ask`, and failing closed on explicit `--settings` or
+unparseable `settings.json`). These are session-only defaults for all tools on VibeRails' own MCP
+server, including non-Board tools; they do not extend the exact Board allowlist or alter other
+providers' grants. Codex per-tool overrides and disabled tools, Antigravity's `Deny > Ask > Allow`
+rules in `settings.json`, and explicit custom CLI arguments (`--config` / `--settings`) still apply.
+No permission is persisted, no other MCP server is approved, and neither the
 global approval policy nor sandbox mode changes. Tool-side authentication, scope checks and
 requirements for explicit user instructions still apply. See the
-[Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+[Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference) and
+[Antigravity permissions documentation](https://antigravity.google/docs/permissions).
 
 Board MCP assignment parity (2026-10-10): create/update accept the UI's typed base launch
 options. `list_board_agent_options` and `start_board_agent` use inherited root tool API
