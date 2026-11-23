@@ -53,7 +53,7 @@ public sealed class BoardSharingSafetyTests : IDisposable
         var link = await ReadLinkRowAsync(imported.Id);
         Assert.Equal((server.Remote.RemoteBoardId, 1, BoardStore.ImportedLinkActivitySchema, "member-account"), link);
         Assert.True(OlderBinaryTreatsAsPublished(link));
-        Assert.Equal(0, server.Publications);
+        Assert.Empty(server.Publications);
 
         // An import written before VIBE-85 stored ActivitySchema 0 and failed that predicate (F1).
         await Sql("UPDATE BoardSyncLinks SET ActivitySchema = 0");
@@ -62,7 +62,7 @@ public sealed class BoardSharingSafetyTests : IDisposable
         link = await ReadLinkRowAsync(imported.Id);
         Assert.True(OlderBinaryTreatsAsPublished(link));
         Assert.Equal(server.Remote.RemoteBoardId, link.RemoteBoardId);
-        Assert.Equal(0, server.Publications);
+        Assert.Empty(server.Publications);
         Assert.Equal(0, server.Calls); // the tick only wrote the link's own state; it never synced the copy
         Assert.Null((await sync.GetStatusAsync(root, imported.Id, Ct))!.LastError);
     }
@@ -94,7 +94,8 @@ public sealed class BoardSharingSafetyTests : IDisposable
         Assert.Empty(server.PushedDisplayIds(SharedCard)); // the proof observed the local label pushed here (F2)
         Assert.Equal(local.DisplayId, (await store.FindCardAsync(root, local.Id, Ct))!.DisplayId);
         Assert.Equal(0, await store.CountUnsentLogEntriesAsync(imported.Id, Ct));
-        Assert.Equal(0, server.Publications);
+        // The owned board starts publishing automatically; the imported copy must not.
+        Assert.Equal(new[] { local.BoardId }, server.Publications);
         Assert.Equal(0, server.Calls);
 
         // The explanation is local History only: RemoteSeq 0, never queued, protecting no field.
@@ -189,7 +190,8 @@ public sealed class BoardSharingSafetyTests : IDisposable
         await Assert.ThrowsAsync<BoardValidationException>(() => store.MoveCardAsync(root, SharedCard, "col_shared_done", null, Ct));
         await sync.SyncDueAsync(Ct);
         Assert.Empty(server.Pushed);
-        Assert.Equal(0, server.Publications);
+        // The owned board starts publishing automatically; the imported copy must not.
+        Assert.Equal(new[] { own.Id }, server.Publications);
         // And a move between this machine's own boards is unaffected.
         var second = await store.CreateBoardAsync(root, "Second", Ct);
         var secondLane = await store.CreateColumnAsync(root, "Todo", "", Ct, second.Id);
@@ -236,7 +238,8 @@ public sealed class BoardSharingSafetyTests : IDisposable
         public BoardRemoteDescriptor Remote = new(Guid.NewGuid().ToString("D"), "Shared", "VB", "VB", [new("col_shared", "Todo", null, 0)], false, 0);
         public List<BoardSyncPulledEntryWire> Events = [];
         public List<BoardSyncEntryWire> Pushed = [];
-        public int Publications, Calls;
+        public List<string> Publications = [];
+        public int Calls;
 
         /// <summary>Every <c>displayId</c> value this desktop pushed for the card.</summary>
         public List<string?> PushedDisplayIds(string cardId) => Pushed
@@ -246,7 +249,7 @@ public sealed class BoardSharingSafetyTests : IDisposable
         public Task<BoardRemoteDescriptor?> DescribeAsync(string id, CancellationToken ct, string? destination = null)
         { Calls++; Assert.Equal(DestinationKey, destination); Assert.Equal(Remote.RemoteBoardId, id); return Task.FromResult<BoardRemoteDescriptor?>(Remote); }
         public Task<BoardSyncPublishResponse> PublishAsync(BoardSyncPublishRequest body, CancellationToken ct, string? expectedDestination = null)
-        { Publications++; throw new InvalidOperationException("Imported boards must never publish"); }
+        { Publications.Add(body.LocalBoardId); throw new InvalidOperationException("Publication is only recorded by this sharing-safety fake"); }
         public Task<BoardSyncActivityAck> PutActivityAsync(string board, string card, BoardSyncActivityWire body, CancellationToken ct, string? expectedDestination = null)
         { Calls++; return Task.FromResult(new BoardSyncActivityAck(body.Schema, card)); }
         public Task<BoardSyncPullResponse> PullAsync(string board, long after, int limit, CancellationToken ct, string? expectedDestination = null)

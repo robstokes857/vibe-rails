@@ -567,7 +567,8 @@ public sealed partial class BoardRoutesTests : IAsyncLifetime
         var body = status.RootElement;
         Assert.Equal(boardId, body.GetProperty("boardId").GetString());
         Assert.False(body.GetProperty("published").GetBoolean());
-        Assert.False(body.GetProperty("enabled").GetBoolean());
+        Assert.True(body.GetProperty("enabled").GetBoolean()); // new local boards are eligible for automatic sync
+        Assert.False(body.GetProperty("activityEnabled").GetBoolean()); // no account key: nothing can be sent
         Assert.False(body.GetProperty("isJiraBoard").GetBoolean());
         Assert.False(body.GetProperty("configured").GetBoolean()); // the fixture's client has no key
         Assert.Equal(JsonValueKind.Null, body.GetProperty("remoteBoardId").ValueKind);
