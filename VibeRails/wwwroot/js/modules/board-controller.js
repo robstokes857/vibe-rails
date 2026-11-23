@@ -5,6 +5,7 @@ import { keepShorterColumnInView } from './card-editor-columns.js';
 import { codeLinksSection, renderCodeLinks } from './board-code-links.js';
 import { AGENT_PURPOSES, agentPurposeLabel, matchesCommentFilter } from './agent-purpose.js';
 import { cardChecksSection, bindCardChecks } from './board-card-checks.js';
+import { openCheckReport, closeCheckReport } from './board-check-report.js';
 import { previousWorkHtml } from './board-previous-work.js';
 // ============================================
 // Board (view 'board')
@@ -2062,10 +2063,12 @@ export class BoardController {
         card = card || { id: null, attachments: [], pendingAttachments: [] };
         editor._boardCard = card;
         editor.addEventListener('click', event => {
-            const target = event.target.closest('[data-board-ref-session], [data-board-ref-commit], [data-board-ref-card], [data-board-image]');
+            const target = event.target.closest('[data-board-ref-session], [data-board-ref-commit], [data-board-ref-card], [data-board-ref-check], [data-board-image]');
             if (!target) return;
             event.preventDefault();
-            if (target.dataset.boardRefSession) {
+            // A saved check's report (VIBE-362): from its comment, Code reviews or Advanced > Checks.
+            if (target.dataset.boardRefCheck) openCheckReport({ app: this.app, cardId: card.id, checkId: target.dataset.boardRefCheck });
+            else if (target.dataset.boardRefSession) {
                 const id = canonicalSessionId(target.dataset.boardRefSession);
                 const session = (card.sessions || []).find(s => canonicalSessionId(s.id) === id) || { id };
                 if (session.active && session.tabId) void this.focusSessionTab(card, session);
@@ -2103,6 +2106,7 @@ export class BoardController {
         editor.addEventListener('change', trackEdits);
         this.composerDisposers.push(bindBoardSpelling(editor.querySelector('#board-card-title')));
         this.composerDisposers.push(keepShorterColumnInView(editor));
+        this.composerDisposers.push(closeCheckReport);
         editor._boardDiscussionImages = createBoardImagePreviews(() => editor._boardCard,
             () => this.applyCommentClamps(editor.querySelector('[data-board-comments]')));
         this.composerDisposers.push(() => editor._boardDiscussionImages.dispose());
@@ -2288,7 +2292,7 @@ export class BoardController {
 
     lockSharedCardEditor(editor) {
         const readActions = '[data-board-open-session], [data-board-open-diff], [data-board-view-attachment], '
-            + '[data-board-comment-jump], [data-board-ref-session], [data-board-ref-commit], [data-board-ref-card], '
+            + '[data-board-comment-jump], [data-board-ref-session], [data-board-ref-commit], [data-board-ref-card], [data-board-ref-check], '
             + '[data-board-image], [data-board-open-linked-card], [data-board-comment-more], '
             + '[data-review-view], [data-review-compare], [data-review-refresh], [data-review-more], [data-board-copy-permanent-id]';
         const lock = () => {

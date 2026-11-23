@@ -72,8 +72,9 @@ public sealed partial class BoardChecksTests
         Assert.Contains("minimum grade C", review.ScopeDescription);
         Assert.Null(review.SessionId);
         Assert.Null(review.RunId);
-        var receipt = Assert.Single(await store.GetNotesAsync(repo, card.Id, Ct), comment => comment.Body.Contains(review.Id, StringComparison.Ordinal));
-        Assert.StartsWith("**Findings** · this step failed", receipt.Body);
+        // The comment's button opens this check's report (VIBE-362); its id is the check's.
+        var receipt = Assert.Single(await store.GetNotesAsync(repo, card.Id, Ct), comment => comment.Body.Contains($"(check:{check.Id})", StringComparison.Ordinal));
+        Assert.StartsWith("**Findings** · this step failed · [Open the full report]", receipt.Body);
         Assert.Equal(BoardAuthor.SystemKind, receipt.Author.Kind);
     }
 

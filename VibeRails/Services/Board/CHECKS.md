@@ -191,15 +191,30 @@ it with `get_board_reviews` and in `get_board_card`'s Code reviews. Its id is
 `review_check_<check id>`, reviewer **Code quality check**, provider VibeRails. Its result is
 Findings, No findings reported, or Incomplete (failed to run, cancelled, no code attached, or a
 minimum grade that could not be checked). Its
-process status is Failed when the action failed. The findings name the outcome, the minimum grade and the
-worst files, the commits that are not linked (**Unlinked commits**) and every scope file the
-engine did not analyse with the reason (**Not reviewed**: deleted, binary or over the text limit,
-unreadable, not a supported language, exempted with the exemption's author and reason, hidden by
-a local ignore, no added lines), and point to `read_board_check`. The record keeps the first 200
+process status is Failed when the action failed. The findings name the outcome and the minimum
+grade, then each file that needs work (rated Needs work or At risk) with its problems worst first,
+the other files checked with their rating and health, the commits that are not linked
+(**Unlinked commits**) and every scope file the engine did not analyse with the reason
+(**Not checked**: deleted, binary or over the text limit, unreadable, not a supported language,
+exempted with the exemption's author and reason, hidden by a local ignore, no added lines), and
+point to `read_board_check`. The record keeps the first 200
 of those files (`NotReviewed`) and counts the rest (`NotReviewedOmitted`); `read_board_check
 file="*"` lists the whole scope. Both live in the check's existing summary JSON, so no schema
-change. The discussion receipt is written for people (VIBE-338): the outcome and whether the
-step failed, what to do, the counts and the scope, with the report id last. VibeRails comments
+change.
+
+**Problems** (VIBE-362) come from `CodeQualityFindings`, which judges each saved measurement
+against its own warning and critical limits and ranks them by the rules of the Quality page's
+`code-report/findings.js` (critical before warning, overshoot capped at twice the
+warning-to-critical span, then category weight; the maintainability index last), with the same
+labels; `CodeQualityFindingsTests` pins the labels to that file. A problem reads "Cognitive
+complexity 115 in `Parse`, line 1 (critical at 30)". Health is 100 minus the concern score.
+
+The discussion receipt is written for people (VIBE-338, VIBE-362). Its first line is the outcome,
+whether the step failed, and `[Open the full report](check:<check id>)`, which the card editor
+renders as a button (`board-text.js`; only a 32-hex id, anywhere else the words alone) and whose
+id is what `read_board_check` takes. Then what to do (the failure reason or the grade met), the
+files that need work (up to three, each with its three worst problems and how many more), one line
+counting what was not checked by reason, and the scope. VibeRails comments
 show the VibeRails logo. It has no reviewer session or review run, so it
 can never satisfy a reviewer's own pass, and its freshness is the check's: verifying it reports
 unknown and points to the card's Checks. It is saved once, with a discussion receipt from VibeRails
@@ -264,14 +279,26 @@ rules; Code quality counts files, with findings counting files at NeedsWork/AtRi
 `GET /api/v1/board/cards/{card}/checks` reads summaries, current waiting/running actions and eligible
 Automations. `GET .../checks/{id}` loads full evidence immediately; **Compare inputs** adds
 `?verify=true` to compare captured inputs in the current project checkout. The report carries the
-record and engine result, not the captured source text. Freshness remains qualified because local ignore preferences may change.
+record and engine result, not the captured source text, plus `failsStep` and `failureReason`
+(computed on the record, which does not serialize them). Freshness remains qualified because local ignore preferences may change.
 A pinned range whose head differs from current HEAD is stale for the current checkout. A missing
 scope/tool/repository is unknown. The snapshot never claims that other scopes were analyzed.
 
-The card report reuses `CodeReportViewer` (Quality Lab and Code Atlas). Saved metrics come from the
-record; the graph describes the **current** working tree. Graph failure preserves saved analysis.
-Report text is inert, source-generated JSON is used throughout, and requests/viewers are disposed
-on close, replacement and navigation. Checks show no aggregate card score.
+**The report dialog** (VIBE-362, `board-check-report.js`) is a native dialog over the card editor,
+so the card and its drafts stay as they are. Three places open it, all through the editor's
+`data-board-ref-check` handler: the receipt's **Open the full report** button, **View report** on a
+check's row under **Code reviews**, and **View report** under Advanced > Checks. It leads with the
+outcome and whether the step failed, then **What needs work**: each file rated Needs work or At
+risk with its rating, health and five worst problems (`findings.js`), and **Open details**, the
+Quality page's file reader (`file-details-modal.js`) with what each problem means, how to fix it
+and the captured excerpt; a saved report has no live source, fix, ignore or map action there. The
+other files checked follow, then folded sections: **Not checked** with each file's reason,
+**Limitations**, **Code map and charts** (`CodeReportViewer`, mounted only when opened: saved
+metrics over the graph of the **current** working tree; a graph failure keeps the saved analysis)
+and **Capture details** (freshness, **Compare inputs**, base/head, fingerprints, engine output).
+Escape closes the reader first, then the report, never the card. Report text is inert,
+source-generated JSON is used throughout, and requests/viewers are disposed on close, replacement
+and navigation. Checks show no aggregate card score.
 
 `get_board_card` includes each engine's latest saved summary; `read_board_check` lists history or
 returns one check's record and engine result in 40,000-character chunks. Its `file="*"` lists the
@@ -290,5 +317,6 @@ recipes and their check actions remain unchanged. VIBE-25 owns
 hosted recipe/evidence distribution. Evidence is not added to the hosted Board UI sync contract;
 the independent owner-bound Board data backup retains it.
 
-Validation lives in `BoardChecksTests`, Board route/tool tests, existing preflight regressions,
-`jobs-controller.test.mjs` and the card Checks cases in `board-ux.spec.js`.
+Validation lives in `BoardChecksTests`, `CodeQualityFindingsTests` (receipt and report text),
+Board route/tool tests, existing preflight regressions, `jobs-controller.test.mjs`, the check link
+case in `board-text.test.mjs`, and the card Checks and check-comment cases in `board-ux.spec.js`.

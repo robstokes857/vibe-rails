@@ -37,8 +37,21 @@ export function cardReviewsSection(card, { readOnly = false } = {}) {
     </section>`;
 }
 
+// A saved Code quality check's report row (BoardCheckService.CheckReviewPrefix + the check id).
+const CHECK_REVIEW = /^review_check_([a-f0-9]{32})$/;
+
 export function reviewRow(row) {
     const session = row.terminalSessionId || row.sessionId;
+    // A check has no reviewer terminal; its report opens the check report dialog (VIBE-362) through
+    // the card editor's data-board-ref-check handler, as the check's comment does.
+    const check = CHECK_REVIEW.exec(String(row.id || ''))?.[1];
+    if (check) return `<article class="board-check-result">
+        <strong>${esc(row.reviewer)}</strong>
+        <p>${esc(row.result || 'Report missing')}${row.error ? '' : row.processStatus === 'Failed' ? ' · step failed' : ''}</p>
+        <small>${esc(new Date(row.reportedUtc || row.createdUtc).toLocaleString())}</small>
+        ${row.error ? `<p class="text-danger">${esc(row.error)}</p>` : ''}
+        <button type="button" class="btn btn-sm btn-link" data-board-ref-check="${check}">View report</button>
+    </article>`;
     return `<article class="board-check-result">
         <strong>${esc(row.reviewer)} · ${esc(row.provider)}</strong>
         ${row.routing ? `<p>${esc(routingSummary(row.routing))}</p>` : ''}

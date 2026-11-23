@@ -35,6 +35,10 @@ around the map, so opening either panel shortens the map down to its minimum hei
   index, a composite that only rises when they are fixed, after them; then critical before
   warning; within a level, distance past the warning limit (capped at twice the
   warning-to-critical span, so NPath cannot drown the rest), then category weight.
+  `CodeQualityFindings.cs` (Board) repeats these rules and labels for a check's comment and report
+  text; its tests read this file's labels, so change both together.
+- The Board's saved check report (`../board-check-report.js`) opens the same reader with no
+  `onLocate`, so it has no **Show in code explorer**: there is no map behind it.
 - `source-editor.js` uses the shared `monaco-loader.js` and the existing authenticated
   `/code-analyzer/source` route. Working-tree scans read current disk content; unpushed scans
   request `scope=unpushed` (current HEAD). Both are explicitly distinct from saved scan excerpts.

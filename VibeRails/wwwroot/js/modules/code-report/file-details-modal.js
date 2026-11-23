@@ -63,7 +63,7 @@ export function openFileDetailsModal({ app, file, capturedUtc, preferredName, so
                         <button type="button" class="btn btn-primary" data-quality-fix>Open fix terminal</button>
                         <p class="quality-action-help">Sends this file’s saved findings to the selected agent.</p>` : ''}
                     ${onIgnore ? '<button type="button" class="btn btn-secondary" data-quality-ignore>Ignore file</button>' : ''}
-                    <button type="button" class="btn btn-link" data-quality-locate>Show in code explorer</button>
+                    ${onLocate ? '<button type="button" class="btn btn-link" data-quality-locate>Show in code explorer</button>' : ''}
                     <p data-quality-action-status role="status" hidden></p>
                 </div>
             </aside>
@@ -102,7 +102,8 @@ export function openFileDetailsModal({ app, file, capturedUtc, preferredName, so
         close();
     });
     layer.querySelector('[data-quality-close]').addEventListener('click', () => close());
-    layer.querySelector('[data-quality-locate]').addEventListener('click', () => { close(); onLocate?.(); });
+    // A saved Board check report has no map to show the file in (board-check-report.js).
+    layer.querySelector('[data-quality-locate]')?.addEventListener('click', () => { close(); onLocate(); });
     layer.querySelector('[data-quality-ignore]')?.addEventListener('click', () => { close(); onIgnore(); });
     layer.querySelector('[data-quality-fix]')?.addEventListener('click', async event => {
         if (busy) return;

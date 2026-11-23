@@ -175,6 +175,15 @@ public sealed class BoardCheckService(
         };
     }
 
+    // The reasons NotReviewed records. NotCheckedGroup sorts saved reasons by them, so keep the two together.
+    private const string DeletedReason = "Deleted; no added code to review.";
+    private const string BinaryReason = "Binary, over the 5 MiB text limit, or past the capture budget.";
+    private const string UnreadableReason = "Could not be read from Git.";
+    private const string UnsupportedReason = "Not a supported source language.";
+    private const string ExemptedPrefix = "Exempted";
+    private const string IgnoredPrefix = "Hidden by local Code quality ignore settings";
+    private const string NoAddedLinesReason = "No added lines (only removals or whitespace).";
+
     /// <summary>Every scope file the Code quality engine did not analyse, and why, in path order.</summary>
     internal static IReadOnlyList<BoardCheckSkippedFile> NotReviewed(GitStagedSnapshot snapshot, IReadOnlyList<CodeAnalyzerIgnoredFile> ignoreRules)
     {
@@ -183,22 +192,36 @@ public sealed class BoardCheckService(
         foreach (var file in snapshot.Files.OrderBy(file => file.RelativePath, StringComparer.Ordinal))
         {
             string? reason;
-            if (file.ChangeKind == GitStagedChangeKind.Deleted || !file.ExistsInIndex) reason = "Deleted; no added code to review.";
-            else if (file.IsBinary) reason = "Binary, over the 5 MiB text limit, or past the capture budget.";
-            else if (file.Content is null) reason = "Could not be read from Git.";
-            else if (!MintLintAnalyzer.SupportsFile(file.RelativePath)) reason = "Not a supported source language.";
+            if (file.ChangeKind == GitStagedChangeKind.Deleted || !file.ExistsInIndex) reason = DeletedReason;
+            else if (file.IsBinary) reason = BinaryReason;
+            else if (file.Content is null) reason = UnreadableReason;
+            else if (!MintLintAnalyzer.SupportsFile(file.RelativePath)) reason = UnsupportedReason;
             else if (exemptions.FirstOrDefault(rule => CodeAnalyzerIgnoreRules.IsIgnored(file.RelativePath, [rule])) is { } exemption)
-                reason = $"Exempted{(string.IsNullOrWhiteSpace(exemption.Author) ? "" : $" by {BoardPromptComposer.SanitizeLine(exemption.Author, 60)}")}: "
+                reason = $"{ExemptedPrefix}{(string.IsNullOrWhiteSpace(exemption.Author) ? "" : $" by {BoardPromptComposer.SanitizeLine(exemption.Author, 60)}")}: "
                     + BoardPromptComposer.SanitizeLine(exemption.ReasonText ?? "no reason recorded", 300);
             else if (ignoreRules.FirstOrDefault(rule => CodeAnalyzerIgnoreRules.IsIgnored(file.RelativePath, [rule])) is { } ignore)
-                reason = "Hidden by local Code quality ignore settings"
+                reason = IgnoredPrefix
                     + (string.IsNullOrWhiteSpace(ignore.ReasonText) ? "." : ": " + BoardPromptComposer.SanitizeLine(ignore.ReasonText, 300));
-            else if (string.IsNullOrWhiteSpace(file.AddedContent ?? file.Content)) reason = "No added lines (only removals or whitespace).";
+            else if (string.IsNullOrWhiteSpace(file.AddedContent ?? file.Content)) reason = NoAddedLinesReason;
             else continue;
             result.Add(new(file.RelativePath, reason));
         }
         return result;
     }
+
+    /// <summary>A saved not-reviewed reason in a few words, for counting them in the card's comment.</summary>
+    internal static string NotCheckedGroup(string reason) =>
+        reason.StartsWith(IgnoredPrefix, StringComparison.Ordinal) ? "hidden by your ignore list"
+        : reason.StartsWith(ExemptedPrefix, StringComparison.Ordinal) ? "exempted"
+        : reason switch
+        {
+            UnsupportedReason => "not a supported language",
+            NoAddedLinesReason => "no added lines",
+            DeletedReason => "deleted",
+            BinaryReason => "binary or too large",
+            UnreadableReason => "unreadable",
+            _ => "other reasons"
+        };
 
     private static BoardCheckRecord WithNotReviewed(BoardCheckRecord record, IReadOnlyList<BoardCheckSkippedFile> files) =>
         files.Count == 0 ? record : record with
@@ -233,8 +256,10 @@ public sealed class BoardCheckService(
                     BoardCheckRecord.GradeNotChecked => "not checked, so this step failed",
                     _ => "not evaluated"
                 }}. {record.GradeSummary}".TrimEnd());
-        var worst = WorstFiles(record.ResultJson);
-        if (worst.Length > 0) findings.AppendLine("Worst files (concern score/100, rating, top categories):").AppendLine(worst);
+        var files = CodeQualityFindings.Read(record.ResultJson);
+        if (files.Count > 0) AppendCheckedFiles(findings, files);
+        else if (WorstFiles(record.ResultJson) is { Length: > 0 } worst)
+            findings.AppendLine("Worst files (concern score/100, rating, top categories):").AppendLine(worst);
         if (record.UnlinkedCommits is { Count: > 0 } unlinked)
         {
             findings.AppendLine($"Unlinked commits ({unlinked.Count}): made from this card's sessions but not linked to it, so not reviewed.");
@@ -244,7 +269,7 @@ public sealed class BoardCheckService(
         if (record.NotReviewed is { Count: > 0 } skipped)
         {
             var total = skipped.Count + record.NotReviewedOmitted;
-            findings.AppendLine($"Not reviewed ({total} {(total == 1 ? "file" : "files")} in scope):");
+            findings.AppendLine($"Not checked ({total} {(total == 1 ? "file" : "files")} in scope):");
             foreach (var file in skipped) findings.Append("- ").Append(file.Path).Append(": ").AppendLine(file.Reason);
             if (record.NotReviewedOmitted > 0)
                 findings.AppendLine($"- and {record.NotReviewedOmitted} more; read_board_check checkId={record.Id} file=\"*\" lists the whole scope.");
@@ -269,27 +294,60 @@ public sealed class BoardCheckService(
             ReportedUtc: reported, ScopeFiles: record.ScopeFiles?.Take(1000).ToList());
     }
 
+    // The agent-facing report names every file that needs work and its problems; the comment, which people
+    // read first, only the worst few. Both bound what one huge change can put into a single record.
+    private const int ReportFiles = 20, ReportProblems = 10, ReportOtherFiles = 50;
+    private const int ReceiptFiles = 3, ReceiptProblems = 3;
+
+    /// <summary>The report's file section: each file that needs work with its problems worst first, then
+    /// the other files the check read, so an agent sees what was graded and what to change.</summary>
+    private static void AppendCheckedFiles(StringBuilder findings, IReadOnlyList<CodeQualityFindings.FileResult> files)
+    {
+        var needsWork = files.Where(file => file.NeedsWork).ToList();
+        findings.AppendLine(needsWork.Count == 0
+            ? $"No file needs work ({Plural(files.Count, "file")} checked)."
+            : $"Files that need work ({needsWork.Count} of {files.Count} checked):");
+        foreach (var file in needsWork.Take(ReportFiles))
+        {
+            findings.Append("- ").Append(file.Path).Append(" · ").Append(file.RatingLabel).Append(", health ").Append(file.HealthText)
+                .Append("/100 · ").AppendLine(ProblemCount(file));
+            foreach (var problem in file.Problems.Take(ReportProblems))
+                findings.Append("  - ").AppendLine(CodeQualityFindings.Describe(problem, markdown: false));
+            if (file.Problems.Count > ReportProblems) findings.Append("  - and ").Append(file.Problems.Count - ReportProblems).AppendLine(" more");
+        }
+        if (needsWork.Count > ReportFiles) findings.Append("- and ").Append(needsWork.Count - ReportFiles).AppendLine(" more files that need work");
+        var others = files.Where(file => !file.NeedsWork).ToList();
+        if (others.Count == 0) return;
+        findings.AppendLine(needsWork.Count == 0 ? "Files checked:" : "Other files checked:");
+        foreach (var file in others.Take(ReportOtherFiles))
+            findings.Append("- ").Append(file.Path).Append(" · ").Append(file.RatingLabel).Append(", health ").Append(file.HealthText)
+                .Append("/100 · ").AppendLine(file.Problems.Count == 0 ? "no measurement past a limit" : ProblemCount(file));
+        if (others.Count > ReportOtherFiles) findings.Append("- and ").Append(others.Count - ReportOtherFiles).AppendLine(" more");
+    }
+
+    private static string ProblemCount(CodeQualityFindings.FileResult file) => file.Problems.Count == 0
+        ? "no single measurement past a limit"
+        : file.CriticalCount == 0 ? Plural(file.Problems.Count, "problem")
+        : file.CriticalCount == file.Problems.Count ? $"{file.Problems.Count} critical {(file.Problems.Count == 1 ? "problem" : "problems")}"
+        : $"{Plural(file.Problems.Count, "problem")}, {file.CriticalCount} critical";
+
     /// <summary>
-    /// The discussion receipt people read on the card (VIBE-338): the outcome and what to do first,
-    /// then the counts, with the report id kept on the last line for agents.
+    /// The comment people read on the card (VIBE-338, VIBE-362): the outcome with a button that opens the
+    /// full report, what to do first, then the files that need work with their worst problems, and one
+    /// line on what was not checked. The report link is <c>[label](check:&lt;id&gt;)</c>: the card editor
+    /// renders it as a button, and its id is what <c>read_board_check</c> takes.
     /// </summary>
     internal static string CheckReceipt(BoardCheckRecord record)
     {
         var text = new StringBuilder("**").Append(record.Status).Append("**")
             .Append(record.FailsAction ? " · this step failed" : record.MinimumGrade is null ? " · feedback only" : " · step passed")
+            .Append(" · [Open the full report](check:").Append(record.Id).Append(')')
             .Append("\n\n");
         if (record.FailureReason is { } reason) text.Append(reason).Append("\n\n");
         else if (record.MinimumGradeResult == BoardCheckRecord.GradeMet) text.Append("Minimum grade ").Append(record.MinimumGrade).Append(" met.\n\n");
-        var notReviewed = (record.NotReviewed?.Count ?? 0) + record.NotReviewedOmitted;
         if (record.Status is not ("Failed to run" or "Cancelled") && record.FileCount > 0)
-        {
-            text.Append("- ").Append(Plural(record.AnalyzedCount, "file")).Append(" analyzed, ")
-                .Append(record.FindingCount).Append(" with findings\n");
-            if (notReviewed > 0) text.Append("- ").Append(Plural(notReviewed, "file")).Append(" not reviewed (listed in the report)\n");
-        }
-        if (record.UnlinkedCommits is { Count: > 0 } unlinked)
-            text.Append("- ").Append(Plural(unlinked.Count, "unlinked commit")).Append('\n');
-        text.Append("- Scope: ").Append(record.Scope switch
+            AppendReceiptFiles(text, record, CodeQualityFindings.Read(record.ResultJson));
+        text.Append(NotCheckedSentence(record)).Append("Scope: ").Append(record.Scope switch
         {
             "card" => "the card's linked commits",
             "commit" => $"commit {record.HeadCommit?[..Math.Min(8, record.HeadCommit.Length)]}",
@@ -298,9 +356,51 @@ public sealed class BoardCheckService(
             "unpushed" => "unpushed commits",
             "repository" => "the whole repository",
             _ => record.Scope
-        }).Append("\n\n");
-        text.Append("Full report under **Code reviews** · `").Append(CheckReviewPrefix).Append(record.Id).Append('`');
+        }).Append('.');
         return text.ToString();
+    }
+
+    private static void AppendReceiptFiles(StringBuilder text, BoardCheckRecord record, IReadOnlyList<CodeQualityFindings.FileResult> files)
+    {
+        var needsWork = files.Where(file => file.NeedsWork).ToList();
+        if (record.AnalyzedCount == 0) { text.Append("No supported added code to check.\n\n"); return; }
+        // "Single": below a minimum grade the overall grade can fail with no one file rated Needs work.
+        if (record.FindingCount == 0) { text.Append("No single file needs work (").Append(record.AnalyzedCount).Append(" checked).\n\n"); return; }
+        text.Append("**").Append(record.FindingCount == 1 ? "1 file needs work" : $"{record.FindingCount} files need work")
+            .Append("** (").Append(record.AnalyzedCount).Append(" checked)\n");
+        // An older record without the engine's report keeps its counts; the full report still opens.
+        if (needsWork.Count == 0) { text.Append('\n'); return; }
+        // The editor clamps a long comment, so the first file follows its heading without a blank line.
+        foreach (var (file, index) in needsWork.Take(ReceiptFiles).Select((file, index) => (file, index)))
+        {
+            if (index > 0) text.Append('\n');
+            text.Append('`').Append(file.Path.Replace('`', '\'')).Append("` · ").Append(file.RatingLabel)
+                .Append(", health ").Append(file.HealthText).Append("/100\n");
+            if (file.Problems.Count == 0) text.Append("- No single measurement is past its limit; together they lower the file's score.\n");
+            foreach (var problem in file.Problems.Take(ReceiptProblems))
+                text.Append("- ").Append(CodeQualityFindings.Describe(problem, markdown: true)).Append('\n');
+            if (file.Problems.Count > ReceiptProblems)
+                text.Append("- and ").Append(Plural(file.Problems.Count - ReceiptProblems, "more problem")).Append('\n');
+        }
+        if (needsWork.Count > ReceiptFiles)
+            text.Append('\n').Append(needsWork.Count - ReceiptFiles == 1 ? "1 more file needs work" : $"{needsWork.Count - ReceiptFiles} more files need work")
+                .Append("; the full report lists them.\n");
+        text.Append('\n');
+    }
+
+    /// <summary>"Not checked: 4 files (2 hidden by your ignore list, 2 not a supported language). ", or empty.</summary>
+    private static string NotCheckedSentence(BoardCheckRecord record)
+    {
+        if (record.Status is "Failed to run" or "Cancelled" || record.FileCount == 0) return "";
+        var named = record.NotReviewed ?? [];
+        var total = named.Count + record.NotReviewedOmitted;
+        // Records from before VIBE-338 counted skipped files without naming them.
+        if (total == 0) return record.NotReviewed is null && record.SkippedCount > 0 ? $"Not checked: {Plural(record.SkippedCount, "file")}. " : "";
+        var groups = named.GroupBy(file => NotCheckedGroup(file.Reason))
+            .OrderByDescending(group => group.Count()).ThenBy(group => group.Key, StringComparer.Ordinal)
+            .Select(group => $"{group.Count()} {group.Key}").ToList();
+        if (record.NotReviewedOmitted > 0) groups.Add($"{record.NotReviewedOmitted} more");
+        return $"Not checked: {Plural(total, "file")} ({string.Join(", ", groups)}). ";
     }
 
     private static string Plural(int count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";

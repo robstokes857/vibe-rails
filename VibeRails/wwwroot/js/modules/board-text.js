@@ -33,9 +33,13 @@ const BLOCK_CLOSE = '\u0000';
 const FENCE_RE = /```([a-zA-Z0-9_+#.-]*)[ \t]*\r?\n?([\s\S]*?)```/g;
 const INLINE_CODE_RE = /`([^`\n]+)`/g;
 const IMAGE_RE = /!\[([^\]\n]*)\]\(attachment:([A-Za-z0-9_-]+)\)/g;
+const CHECK_LINK_RE = /\[([^\]\n]+)\]\(check:[a-f0-9]{32}\)/g;
 // Parse inline constructs together: a URL/backtick inside an image caption is
 // caption text, and image syntax/URLs inside inline code are code. Trailing URL
 // punctuation is excluded so "see https://x.com/a." does not swallow the period.
+//
+// `[label](check:<32 hex>)` (VIBE-362) is a saved card check: the editor opens its report. The id
+// is a strict pattern, so it can sit in an attribute; the label was escaped with the source.
 //
 // `@path` file references (VB-35) sit right after inline code so `@x` stays code.
 // A reference starts the text or follows whitespace — an email or "@claude" in
@@ -45,7 +49,7 @@ const IMAGE_RE = /!\[([^\]\n]*)\]\(attachment:([A-Za-z0-9_-]+)\)/g;
 // ever be part of a token: an `@<img onerror>` stays literal text. Like URLs, a
 // trailing period/comma/bracket stays outside the reference. A bare reference
 // must also contain a slash or a dot (see the callback), so it looks like a path.
-const INLINE_TOKEN_RE = /`(?<code>[^`\n\u0000]+)`|[@!]\[(?<cardLabel>[^\]\n\u0000]+)\]\(card:(?<cardId>[A-Za-z0-9_-]+)\)|(?<![^\s])@(?:&quot;(?<quotedPath>[^\n\u0000]+?)&quot;|(?<barePath>[^\s&`\u0000]*[^\s&`\u0000.,;:!?)\]}]))|!\[(?<alt>[^\]\n\u0000]*)\]\(attachment:(?<id>[A-Za-z0-9_-]+)\)|(?<![^\s])!(?<session>[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}|[a-fA-F0-9]{32})(?![\w-])|(?<![^\s])#(?<commit>[a-fA-F0-9]{7,40})(?![\w-])|(?<!!)(?<!\[)\[(?<label>[^\]\n\u0000]+)\]\((?<href>https?:\/\/[^\s()\u0000]+)\)|\bhttps?:\/\/[^\s<>"'`\u0000]+[^\s<>"'`.,;:!?)\]}\u0000]/g;
+const INLINE_TOKEN_RE = /`(?<code>[^`\n\u0000]+)`|[@!]\[(?<cardLabel>[^\]\n\u0000]+)\]\(card:(?<cardId>[A-Za-z0-9_-]+)\)|\[(?<checkLabel>[^\]\n\u0000]+)\]\(check:(?<checkId>[a-f0-9]{32})\)|(?<![^\s])@(?:&quot;(?<quotedPath>[^\n\u0000]+?)&quot;|(?<barePath>[^\s&`\u0000]*[^\s&`\u0000.,;:!?)\]}]))|!\[(?<alt>[^\]\n\u0000]*)\]\(attachment:(?<id>[A-Za-z0-9_-]+)\)|(?<![^\s])!(?<session>[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}|[a-fA-F0-9]{32})(?![\w-])|(?<![^\s])#(?<commit>[a-fA-F0-9]{7,40})(?![\w-])|(?<!!)(?<!\[)\[(?<label>[^\]\n\u0000]+)\]\((?<href>https?:\/\/[^\s()\u0000]+)\)|\bhttps?:\/\/[^\s<>"'`\u0000]+[^\s<>"'`.,;:!?)\]}\u0000]/g;
 const BARE_FILE_REF_LOOKS_LIKE_A_PATH = /[./]/;
 const RASTER_DATA_URL_RE = /^data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=\s]+$/i;
 
@@ -93,11 +97,15 @@ export function renderCommentHtml(text, { attachments = [], sessions = [], commi
 
     // 3. Only source text is tokenized; generated attributes never enter a regex.
     work = work.replace(INLINE_TOKEN_RE, (match, ...args) => {
-        const { code, quotedPath, barePath, alt, id, session, commit, cardId, cardLabel, label, href } = args.at(-1);
+        const { code, quotedPath, barePath, alt, id, session, commit, cardId, cardLabel, checkId, checkLabel, label, href } = args.at(-1);
         // A local card owned by another repository can display references without
         // sending session/commit requests through the open repository's APIs.
         if (!interactiveReferences && (cardId || session || commit)) return park(`<code class="board-inline-code">${match}</code>`);
+        // Elsewhere the check's report is not one this card's APIs can open: keep the words only.
+        if (!interactiveReferences && checkId) return park(checkLabel);
         if (cardId) return park(`<button type="button" class="board-text-reference" data-board-ref-card="${cardId}">${cardLabel}</button>`);
+        if (checkId) return park(`<button type="button" class="board-text-reference board-check-report-link" data-board-ref-check="${checkId}">`
+            + `<i class="fa-solid fa-file-lines" aria-hidden="true"></i> ${checkLabel}</button>`);
         if (session) {
             const linked = sessions.find(item => item.id.replaceAll('-', '').toLowerCase() === session.replaceAll('-', '').toLowerCase());
             return park(`<button type="button" class="board-text-reference" data-board-ref-session="${session}">! ${escapeHtml(linked?.displayName || session)}</button>`);
@@ -155,6 +163,7 @@ export function toPlainPreview(text, maxLength = 140) {
     const flat = stripControlChars(text)
         .replace(FENCE_RE, ' [code] ')
         .replace(IMAGE_RE, ' [image] ')
+        .replace(CHECK_LINK_RE, '$1')
         .replace(INLINE_CODE_RE, '$1')
         .replace(/\s+/g, ' ')
         .trim();

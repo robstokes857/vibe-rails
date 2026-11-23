@@ -230,3 +230,21 @@ test('an @ followed by markup or quotes stays literal text and never reaches an 
 test('toPlainPreview leaves @path references exactly as typed', () => {
     assert.equal(toPlainPreview('see @a/b.cs and @"c d.md" now'), 'see @a/b.cs and @"c d.md" now');
 });
+
+// VIBE-362: a saved check's comment ends its first line with [Open the full report](check:<id>).
+// The id reaches an attribute, so only a lower-case 32-hex id becomes a button; the label stays text.
+test('a check link becomes a report button only for a well-formed check id', () => {
+    const id = 'a'.repeat(32);
+    const html = renderCommentHtml(`**Findings** · feedback only · [Open <b>the</b> report](check:${id})`);
+    assert.match(html, new RegExp(`<button type="button" class="board-text-reference board-check-report-link" data-board-ref-check="${id}">`));
+    assert.match(html, /Open &lt;b&gt;the&lt;\/b&gt; report<\/button>/, 'the label is escaped text');
+    assert.doesNotMatch(html, /<b>/);
+    for (const bad of ['A'.repeat(32), 'a'.repeat(31), `${'a'.repeat(32)}" onclick="x`, 'review_check_' + 'a'.repeat(32)]) {
+        assert.doesNotMatch(renderCommentHtml(`[Open](check:${bad})`), /data-board-ref-check/, bad);
+    }
+    // A card from another repository cannot open this check: the words stay, the button does not.
+    const foreign = renderCommentHtml(`[Open the full report](check:${id})`, { interactiveReferences: false });
+    assert.doesNotMatch(foreign, /button|check:/);
+    assert.match(foreign, /Open the full report/);
+    assert.equal(toPlainPreview(`**Passed** · [Open the full report](check:${id})`), '**Passed** · Open the full report');
+});

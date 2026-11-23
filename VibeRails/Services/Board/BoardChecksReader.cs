@@ -8,7 +8,9 @@ public sealed record BoardChecksResponse(IReadOnlyList<BoardCheckRecord> Checks,
     IReadOnlyList<BoardCheckRecord> Pending, IReadOnlyList<BoardCheckAutomation> Automations, bool HasMore,
     IReadOnlyList<BoardCheckRecord> Latest);
 public sealed record BoardCheckAutomation(long Id, string Name, bool Enabled, IReadOnlyList<string> Scopes, string? DefinitionId = null);
-public sealed record BoardCheckReportResponse(BoardCheckRecord Check, string Freshness);
+/// <summary>One saved check for its report (VIBE-362: with whether its step failed and why, which the record
+/// computes but does not serialize).</summary>
+public sealed record BoardCheckReportResponse(BoardCheckRecord Check, string Freshness, bool FailsStep = false, string? FailureReason = null);
 
 /// <summary>Joins local run liveness with durable evidence without altering either history.</summary>
 public sealed class BoardChecksReader(IBoardStore boards, BoardCheckService engine, VibeRails.Launches.ILaunchStore? launches = null)
@@ -57,7 +59,9 @@ public sealed class BoardChecksReader(IBoardStore boards, BoardCheckService engi
         if (card is null) return null;
         var check = await boards.GetCheckAsync(project, card.Id, id, ct);
         if (check is null) return null;
-        return new(await ResolveAsync(check, ct), verify ? await engine.FreshnessAsync(project, check, ct) : "Unknown freshness — compare inputs to check this checkout.");
+        var resolved = await ResolveAsync(check, ct);
+        return new(resolved, verify ? await engine.FreshnessAsync(project, check, ct) : "Unknown freshness — compare inputs to check this checkout.",
+            resolved.FailsAction, resolved.FailureReason);
     }
 
     private async Task<BoardCheckRecord> ResolveAsync(BoardCheckRecord check, CancellationToken ct)

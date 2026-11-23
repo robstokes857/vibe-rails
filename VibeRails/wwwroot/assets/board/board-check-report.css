@@ -1,0 +1,83 @@
+/* A saved card check's report (VIBE-362, board-check-report.js): a native dialog over the card editor.
+   Shared tokens only; tones follow DESIGN_SYSTEM.md's status tones (good = success). */
+.code-report .board-check-report {
+    width: min(960px, calc(100vw - 48px));
+    max-height: calc(100dvh - 48px);
+    padding: 0;
+    margin: auto;
+    overflow: hidden;
+    color: var(--color-text);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--control-border);
+    border-radius: var(--radius-surface);
+    box-shadow: var(--shadow-dialog);
+}
+.board-check-report::backdrop { background: var(--dialog-backdrop); }
+.board-check-report[open] { display: flex; flex-direction: column; }
+.board-check-report-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 16px 24px; border-bottom: 1px solid var(--color-border); }
+.board-check-report-header > div { min-width: 0; }
+.board-check-report-header [data-check-report-close] { flex-shrink: 0; }
+.code-report .board-check-report-header h2 { margin: 0; font-family: var(--font-display); font-size: 21px; font-weight: 600; }
+.code-report .board-check-report-meta { margin: 4px 0 0; font-size: 13px; color: var(--color-text-muted); }
+.board-check-report-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 16px 24px 24px; display: grid; gap: 16px; align-content: start; }
+.code-report .board-check-report-body p { margin: 0; }
+.code-report .board-check-report-error { color: var(--feedback-error-fg); }
+
+/* Tones: one place maps a tone name to its colours. */
+.board-check-report [data-tone] { --check-fg: var(--tone-neutral-fg); --check-bg: var(--tone-neutral-bg); --check-edge: var(--control-border); }
+.board-check-report [data-tone="good"] { --check-fg: var(--tone-success-fg); --check-bg: var(--tone-success-bg); --check-edge: var(--color-success); }
+.board-check-report [data-tone="warning"] { --check-fg: var(--tone-warning-fg); --check-bg: var(--tone-warning-bg); --check-edge: var(--color-warning); }
+.board-check-report [data-tone="danger"] { --check-fg: var(--tone-danger-fg); --check-bg: var(--tone-danger-bg); --check-edge: var(--color-danger); }
+.board-check-pill { display: inline-block; flex: none; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1.4; color: var(--check-fg); background: var(--check-bg); }
+
+.board-check-verdict { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; border: 1px solid var(--color-border); border-left: 3px solid var(--check-edge); border-radius: var(--radius-control); background: var(--color-bg-base); }
+.board-check-verdict > div { display: grid; gap: 4px; min-width: 0; }
+.code-report .board-check-headline { font-size: 16px; font-weight: 600; }
+.code-report .board-check-step { font-size: 13px; color: var(--color-text-muted); }
+.code-report .board-check-reason { font-size: 13px; overflow-wrap: anywhere; }
+
+.board-check-section { display: grid; gap: 10px; min-width: 0; }
+.code-report .board-check-section h3 { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-family: var(--font-display); font-size: 15px; font-weight: 600; }
+.board-check-count { padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 600; color: var(--tone-neutral-fg); background: var(--tone-neutral-bg); }
+.code-report .board-check-hint { font-size: 12px; color: var(--color-text-muted); }
+.board-check-path { font-family: var(--font-mono); font-size: 13px; color: var(--color-text); overflow-wrap: anywhere; }
+.board-check-health { font-size: 12px; color: var(--color-text-muted); }
+
+.board-check-file { display: grid; gap: 8px; padding: 12px 16px; border: 1px solid var(--color-border); border-left: 3px solid var(--check-edge); border-radius: var(--radius-control); background: var(--color-bg-base); min-width: 0; }
+.board-check-file > header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.code-report .board-check-file-summary { font-size: 13px; color: var(--color-text-muted); }
+.board-check-file-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+
+.board-check-problems { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.board-check-problems li { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.board-check-level { font-size: 11px; font-weight: 700; color: var(--color-warning); }
+.board-check-problems li[data-level="critical"] .board-check-level { color: var(--feedback-error-fg); }
+.board-check-problem { display: grid; gap: 1px; min-width: 0; font-size: 13px; }
+.board-check-problem small { color: var(--color-text-muted); overflow-wrap: anywhere; }
+
+.board-check-others, .board-check-skipped { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.board-check-others li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.board-check-others .btn-link { padding: 0; font-size: 12px; }
+.board-check-skipped li { display: grid; gap: 1px; min-width: 0; }
+.board-check-skipped li > span { font-size: 12px; color: var(--color-text-muted); overflow-wrap: anywhere; }
+
+.board-check-fold { padding-top: 12px; border-top: 1px solid var(--color-border); }
+.board-check-fold > summary { display: grid; gap: 2px; cursor: pointer; list-style-position: inside; }
+.board-check-fold > summary h3 { display: inline-flex; }
+.board-check-fold ul { margin: 0; padding-left: 1.2em; font-size: 13px; }
+.board-check-capture { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: 12px; }
+.board-check-capture dt { color: var(--color-text-muted); font-weight: 600; }
+.board-check-capture dd { margin: 0; overflow-wrap: anywhere; }
+.board-check-engine { max-height: 320px; overflow: auto; margin: 8px 0 0; padding: 12px; font: 12px/1.5 var(--font-mono); color: var(--color-text); background: var(--color-bg-base); border: 1px solid var(--color-border); border-radius: var(--radius-control); }
+
+@media (max-width: 640px) {
+    .code-report .board-check-report { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+    .board-check-report-header, .board-check-report-body { padding-left: 16px; padding-right: 16px; }
+    .board-check-problems li { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .board-check-capture { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The comment's "Open the full report" button: the reference chip, read as an action. */
+.board-text-reference.board-check-report-link { padding: .05em .5em; font-weight: 600; white-space: nowrap; }
+.board-text-reference.board-check-report-link:hover,
+.board-text-reference.board-check-report-link:focus-visible { background: var(--color-bg-surface-hover); border-color: var(--color-primary); }

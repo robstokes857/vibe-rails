@@ -143,15 +143,17 @@ public sealed partial class BoardChecksTests
         Assert.Equal(0, check.NotReviewedOmitted);
 
         var review = Assert.Single(await store.GetReviewsAsync(repo, card.Id, 0, Ct));
-        Assert.Contains("Not reviewed (3 files in scope):", review.Findings);
+        Assert.Contains("Not checked (3 files in scope):", review.Findings);
         Assert.Contains("- docs/readme.md: Not a supported source language.", review.Findings);
-        // The card's comment is written for people: outcome first, counts, then where the report is.
+        Assert.Contains("No file needs work (1 file checked).", review.Findings);
+        // The card's comment is written for people (VIBE-362): the outcome with a button to the full
+        // report, what was found, and what was not checked, grouped by why.
         var receipt = Assert.Single(await store.GetNotesAsync(repo, card.Id, Ct), comment => comment.Author.Kind == BoardAuthor.SystemKind);
-        Assert.StartsWith($"**{check.Status}**", receipt.Body);
-        Assert.Contains("- 1 file analyzed, 0 with findings", receipt.Body);
-        Assert.Contains("- 3 files not reviewed (listed in the report)", receipt.Body);
-        Assert.Contains("- Scope: the card's linked commits", receipt.Body);
-        Assert.EndsWith($"`{review.Id}`", receipt.Body);
+        Assert.StartsWith($"**{check.Status}** · feedback only · [Open the full report](check:{check.Id})", receipt.Body);
+        Assert.Contains("No single file needs work (1 checked).", receipt.Body);
+        Assert.Contains("Not checked: 3 files (1 deleted, 1 exempted, 1 not a supported language).", receipt.Body);
+        Assert.EndsWith("Scope: the card's linked commits.", receipt.Body);
         Assert.DoesNotContain("get_board_reviews", receipt.Body);
+        Assert.DoesNotContain(review.Id, receipt.Body);
     }
 }

@@ -1705,7 +1705,8 @@ for (const width of [1440, 390]) {
     test(`card Checks stay under Advanced and preserve scope and safe reports at ${width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 950 });
         await openBoard(page);
-        const check = { id: 'check-1', tool: 'Code quality', status: 'Skipped/not applicable', scope: 'working-tree',
+        const checkId = '0123456789abcdef0123456789abcdef';
+        const check = { id: checkId, tool: 'Code quality', status: 'Skipped/not applicable', scope: 'working-tree',
             startedUtc: '2026-09-30T12:00:00Z', endedUtc: '2026-09-30T12:01:00Z', analyzedCount: 1, findingCount: 0, skippedCount: 2,
             baseCommit: 'a'.repeat(40), headCommit: 'b'.repeat(40), runId: 'run-1', toolVersion: '1',
             summary: '<img src=x onerror="window.__checksXss=1">', limitations: ['Unsupported files were skipped.'],
@@ -1718,7 +1719,7 @@ for (const width of [1440, 390]) {
             checks: rows, latest: rows, pending: [], hasMore: false,
             automations: [{ id: 8, name: 'Review checks', enabled: true, scopes: ['unpushed', 'unpushed'] }]
         } }));
-        await page.route('**/api/v1/board/cards/card_test/checks/check-1*', route => route.fulfill({ json: { check, freshness: route.request().url().includes('verify=true') ? 'Stale: inputs changed' : 'Unknown freshness' } }));
+        await page.route(`**/api/v1/board/cards/card_test/checks/${checkId}*`, route => route.fulfill({ json: { check, freshness: route.request().url().includes('verify=true') ? 'Stale: inputs changed' : 'Unknown freshness' } }));
         await page.route('**/api/v1/code-analyzer/graph', route => route.fulfill({ status: 500, json: { error: 'Map unavailable' } }));
         await page.route('**/api/v1/board/cards/card_test/automations', route => {
             if (route.request().method() === 'POST') { runs++; return route.fulfill({ json: { success: true } }); }
@@ -1737,32 +1738,41 @@ for (const width of [1440, 390]) {
         await expect(page.locator('[data-board-reviews]')).toHaveCount(1);
         rows = [check];
         await panel.getByRole('button', { name: 'Refresh checks', exact: true }).click();
-        await expect(panel.locator('[data-check-summary]')).toContainText('2 files skipped');
-        await panel.locator('[data-check-summary]').getByRole('button', { name: 'View report' }).click();
-        const report = panel.locator('[data-check-report]');
+        await expect(panel.locator('[data-check-summary]')).toContainText('1 file checked · 0 need work · 2 not checked');
+        // VIBE-362: the report opens in a dialog over the card, not squeezed into the rail.
+        const viewReport = panel.locator('[data-check-summary]').getByRole('button', { name: 'View report' });
+        await viewReport.click();
+        const report = page.getByRole('dialog', { name: 'Code quality report' });
+        await expect(report).toBeVisible();
+        await expect(report).toContainText('No file needs work. 1 file was checked.');
+        await expect(report).toContainText('src/example.cs');
+        await report.locator('summary', { hasText: 'Limitations' }).click();
+        await expect(report).toContainText('Unsupported files were skipped');
+        await report.getByText('Capture details', { exact: true }).click();
         await expect(report).toContainText('Unknown freshness');
         await report.getByRole('button', { name: 'Compare inputs' }).click();
         await expect(report).toContainText('Stale: inputs changed');
-        await expect(report).toContainText('Unsupported files were skipped');
+        await report.getByText('Code map and charts', { exact: true }).click();
         await expect(report.locator('.code-report')).toBeVisible();
-        await expect(report).toContainText('example.cs');
         expect(await page.evaluate(() => window.__checksXss)).toBeUndefined();
-        expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-        await report.scrollIntoViewIfNeeded();
+        expect(await report.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
         await page.screenshot({ path: testInfo.outputPath(`checks-${width}.png`) });
-        await report.getByRole('button', { name: 'Close report' }).click();
-        await expect(panel.locator('.code-report')).toHaveCount(0);
-        await expect(panel.getByRole('button', { name: 'Refresh checks' })).toBeFocused();
+        // Escape closes the report only; the card stays open and focus returns to the opener.
+        await page.keyboard.press('Escape');
+        await expect(report).toHaveCount(0);
+        await expect(page.locator('[data-board-card-editor]')).toBeVisible();
+        await expect(viewReport).toBeFocused();
         let release;
         const gate = new Promise(resolve => { release = resolve; });
-        await page.route('**/api/v1/board/cards/card_test/checks/check-1*', async route => {
+        await page.route(`**/api/v1/board/cards/card_test/checks/${checkId}*`, async route => {
             await gate; await route.fulfill({ json: { check, freshness: 'Unknown' } }).catch(() => {});
         });
-        await panel.locator('[data-check-summary]').getByRole('button', { name: 'View report' }).click();
-        await expect(panel.locator('[data-check-report]')).toContainText('Loading saved evidence');
+        await viewReport.click();
+        await expect(page.getByRole('dialog', { name: 'Check report' })).toContainText('Loading the saved report');
         await page.evaluate(() => window.app.closeModal());
         release();
         await expect(page.locator('[data-board-checks]')).toHaveCount(0);
+        await expect(page.locator('.board-check-report')).toHaveCount(0);
     });
 }
 
@@ -2812,7 +2822,7 @@ for (const width of [375, 1280]) test(`agent skip, step rows and check receipt r
         saved = card;
         card.agentSkip = skip;
         card.comments.push({ id: 'comment_check', author: { kind: 'system', label: 'Code quality check' }, createdAt: '2026-11-16T08:07:00Z',
-            body: '**Needs review** · this step failed\n\nNo commits are linked to this card. Link them with link_board_commit, then retry the step.\n\n- Scope: the card\'s linked commits\n\nFull report under **Code reviews** · `review_check_abc`' });
+            body: '**Needs review** · this step failed · [Open the full report](check:' + 'a'.repeat(32) + ')\n\nNo commits are linked to this card. Link them with link_board_commit, then retry the step.\n\nScope: the card\'s linked commits.' });
     } });
     const state = await installLaunchFixture(page);
     state.activity = [
@@ -2843,6 +2853,78 @@ for (const width of [375, 1280]) test(`agent skip, step rows and check receipt r
     await rail.getByRole('button', { name: 'Dismiss', exact: true }).click();
     await expect.poll(() => dismissed).toBe(1);
     await expect(rail.locator('.board-agent-skip-notice')).toHaveCount(0);
+});
+
+// VIBE-362: a check's comment names what needs work and opens the full report over the card; the report
+// leads with the problems and opens each file's reader. The Code reviews list opens the same report.
+for (const width of [390, 1280]) test(`a check comment opens its full report over the card at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const checkId = 'fedcba9876543210fedcba9876543210';
+    const metric = (name, value, warn, critical, source = null, line = null) =>
+        ({ name, value, score: 100, warn, critical, higherIsBetter: false, source, line, snippet: source ? 'function f() {}' : null, direction: 'LB' });
+    const atRisk = { file: 'src/minified.js', score: 80, rating: 'AtRisk', priority: 10, categories: [
+        { name: 'Complexity', score: 100, weight: 1, weightedScore: 100,
+            metrics: [metric('cyclomatic_complexity', 70, 10, 20, '_drawToCache', 1), metric('cognitive_complexity', 115, 15, 30, 'anonymous', 1)] },
+        { name: 'Testability', score: 100, weight: 1, weightedScore: 100, metrics: [metric('ambient_dependencies', 38, 3, 10)] }] };
+    const fine = { file: 'src/fine.js', score: 8.8, rating: 'Clean', categories: [] };
+    const check = { id: checkId, tool: 'Code quality', status: 'Findings', scope: 'card', startedUtc: '2026-11-19T23:21:58Z', endedUtc: '2026-11-19T23:22:00Z',
+        analyzedCount: 2, findingCount: 1, skippedCount: 1, limitations: ['Code quality is advisory.'], toolVersion: '1.0.0.0',
+        notReviewed: [{ path: 'docs/readme.md', reason: 'Not a supported source language.' }], notReviewedOmitted: 0,
+        resultJson: JSON.stringify({ details: { report: JSON.stringify({ score: 44.4, rating: 'Okay', analyzedFileCount: 2, skippedFileCount: 1, files: [fine, atRisk] }) } }) };
+    await openBoard(page, { onCard: card => {
+        card.comments.push({ id: 'comment_check', author: { kind: 'system', label: 'Code quality check' }, createdAt: '2026-11-19T23:22:00Z',
+            body: `**Findings** · feedback only · [Open the full report](check:${checkId})\n\n**1 file needs work** (2 checked)\n`
+                + '`src/minified.js` · At risk, health 20/100\n- Ambient dependencies **38** in the whole file (critical at 10)\n'
+                + '- Cognitive complexity **115** in `anonymous`, line 1 (critical at 30)\n- Cyclomatic complexity **70** in `_drawToCache`, line 1 (critical at 20)\n\n'
+                + "Not checked: 1 file (1 not a supported language). Scope: the card's linked commits." });
+    } });
+    let reads = 0;
+    await page.route(`**/api/v1/board/cards/card_test/checks/${checkId}*`, route => {
+        reads++;
+        return route.fulfill({ json: { check, freshness: 'Unknown freshness', failsStep: false, failureReason: null } });
+    });
+    await page.route('**/api/v1/board/cards/card_test/reviews**', route => route.fulfill({ json: { hasMore: false, latest: null, reviews: [{
+        id: `review_check_${checkId}`, reviewer: 'Code quality check', provider: 'VibeRails', processStatus: 'Succeeded', result: 'Findings',
+        createdUtc: '2026-11-19T23:21:58Z', reportedUtc: '2026-11-19T23:22:00Z', scope: 'card' }] } }));
+    await page.getByText('Description images', { exact: true }).click();
+    const editor = page.locator('[data-board-card-editor]');
+    await editor.locator('#board-card-title').fill('Unsaved title while reading the report');
+    const comment = editor.locator('.board-comment', { hasText: 'Code quality check' });
+    await expect(comment).toContainText('1 file needs work');
+    await expect(comment.locator('code', { hasText: 'src/minified.js' })).toBeVisible();
+    await expect(comment).not.toContainText('check:');
+    await comment.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`check-comment-${width}.png`) });
+    const open = comment.getByRole('button', { name: 'Open the full report' });
+    await open.click();
+    const report = page.getByRole('dialog', { name: 'Code quality report' });
+    await expect(report).toContainText('1 file needs work, of 2 checked.');
+    await expect(report).toContainText('Feedback only: findings do not fail the step.');
+    const file = report.locator('.board-check-file');
+    await expect(file).toHaveCount(1);
+    await expect(file).toContainText('src/minified.js');
+    await expect(file).toContainText('At risk');
+    await expect(file.locator('.board-check-problems li')).toHaveText([/Ambient dependencies 38/, /Cognitive complexity 115/, /Cyclomatic complexity 70/]);
+    await expect(report.locator('.board-check-others')).toContainText('src/fine.js');
+    await expect(report).toContainText('Not checked');
+    expect(await report.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`check-report-${width}.png`) });
+    await file.getByRole('button', { name: /Open details/ }).click();
+    const reader = page.getByRole('dialog', { name: 'File quality · minified.js' });
+    await expect(reader).toContainText('What to fix first');
+    await expect(reader.getByRole('button', { name: 'Show in code explorer' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(reader).toHaveCount(0);
+    await expect(report).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(report).toHaveCount(0);
+    await expect(editor.locator('#board-card-title')).toHaveValue('Unsaved title while reading the report');
+    await expect(open).toBeFocused();
+    const reviews = editor.getByRole('region', { name: 'Code reviews', exact: true });
+    await expect(reviews).not.toContainText('No terminal session yet');
+    await reviews.getByRole('button', { name: 'View report' }).click();
+    await expect(page.getByRole('dialog', { name: 'Code quality report' })).toContainText('src/minified.js');
+    expect(reads).toBe(2);
 });
 
 test('waiting badge follows server activity and skip preserves editor drafts', async ({ page }, testInfo) => {
