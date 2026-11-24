@@ -12,7 +12,7 @@ const {
     findEnvironmentForPrompt
 } = await import(pathToFileURL(sourceModule).href);
 
-test('optional user message never opens a required field and stays literal until the server pass', () => {
+test('user message is separate from custom variables and stays literal until the server pass', () => {
     const template = '{{user_message}} {{ USER_MESSAGE }} {{ticket}}';
     assert.deepEqual(extractPromptTemplateVariables(template).map(v => v.name), ['ticket']);
     assert.equal(hasPromptTemplateVariables('{{user_message}}'), false);

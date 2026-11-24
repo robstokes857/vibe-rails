@@ -4,14 +4,15 @@ import { stepDisplayName } from './environment-steps.js';
 const TOKEN_PATTERN = /\{\{\s*([A-Za-z_][A-Za-z0-9_.-]*)([^{}]*)\s*\}\}/g;
 const DEFAULT_PATTERN = /\bdefault\s*=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s}]+))/i;
 
-// Reserved names that never become fill-in fields. Mirrors PromptPlaceholderService in the
+// Reserved names excluded from custom-variable fields. Mirrors PromptPlaceholderService in the
 // backend, which owns the authoritative resolution pass at launch. datetime/date/time/env_name
 // resolve here too (for the preview and the submitted text); git_branch, board_card, worktree and step need
 // the server (a git call / run context / workspace creation / a shell run), so their tokens are deliberately left
 // literal for it.
 // "step" is on this list because {{step:<id>}} parses under TOKEN_PATTERN as name "step" with
 // ":<id>" falling into the argument capture.
-// user_message stays literal here: the server inserts the separate per-run value without rescanning it.
+// user_message is collected separately when requested and stays literal here:
+// the server inserts the per-run value without rescanning it.
 const BUILTIN_TOKEN_NAMES = Object.freeze(['datetime', 'date', 'time', 'git_branch', 'env_name', 'board_card', 'worktree', 'user_message']);
 const STEP_ID_PATTERN = /step\s*:\s*([0-9a-fA-F-]+)/i;
 
@@ -146,11 +147,18 @@ export async function resolvePromptTemplateForLaunch(app, options = {}) {
     );
     const sourcePrompt = explicitPrompt ?? environment?.customPrompt ?? '';
     const variables = extractPromptTemplateVariables(sourcePrompt);
+    // Only callers with a separate userMessage transport opt in. Never render the
+    // answer into initialPrompt: the server would interpret its placeholder syntax.
+    if (options.collectUserMessage && !options.userMessage?.trim()
+        && [...sourcePrompt.matchAll(TOKEN_PATTERN)].some(match => lower(match[1]) === 'user_message')) {
+        variables.unshift({ name: 'user_message', label: 'User message', defaultValue: '', hasDefault: false, maxLength: 8000 });
+    }
 
     if (variables.length === 0) {
         return {
             canceled: false,
-            initialPrompt: explicitPrompt
+            initialPrompt: explicitPrompt,
+            userMessage: options.userMessage
         };
     }
 
@@ -166,7 +174,8 @@ export async function resolvePromptTemplateForLaunch(app, options = {}) {
 
     return {
         canceled: resolved == null,
-        initialPrompt: resolved
+        initialPrompt: resolved?.initialPrompt ?? null,
+        userMessage: resolved?.userMessage ?? options.userMessage
     };
 }
 
@@ -227,14 +236,17 @@ function buildPreviewHtml(template, values = {}, context = {}) {
         if (lower(token.name) === 'user_message') hasUserMessage = true;
         html += escapeHtml(text.slice(lastIndex, match.index));
 
-        if (isReservedToken(token.name)) {
+        const editableUserMessage = lower(token.name) === 'user_message'
+            && Object.hasOwn(values, 'user_message');
+        if (isReservedToken(token.name) && !editableUserMessage) {
             // Auto-filled — rendered as a chip but not clickable: there is no input to focus.
             html += `<span class="vb-prompt-template-token vb-prompt-template-token-builtin">${escapeHtml(reservedTokenPreview(token, context))}</span>`;
         } else {
-            const value = values[token.name] ?? '';
+            const name = editableUserMessage ? 'user_message' : token.name;
+            const value = values[name] ?? '';
             const display = value.length > 0 ? value : token.token;
             const emptyClass = value.length > 0 ? '' : ' vb-prompt-template-token-empty';
-            html += `<span class="vb-prompt-template-token${emptyClass}" role="button" tabindex="0" data-prompt-template-focus="${escapeHtml(token.name)}">${escapeHtml(display)}</span>`;
+            html += `<span class="vb-prompt-template-token${emptyClass}" role="button" tabindex="0" data-prompt-template-focus="${escapeHtml(name)}">${escapeHtml(display)}</span>`;
         }
 
         lastIndex = match.index + token.token.length;
@@ -253,7 +265,7 @@ function renderModalHtml({ template, variables, environmentName, context }) {
         : '';
 
     return `
-        <form class="vb-prompt-template-modal" id="vb-prompt-template-form" data-prompt-template-modal>
+        <form class="vb-prompt-template-modal" id="vb-prompt-template-form" data-prompt-template-modal novalidate>
             <p class="text-muted small mb-3">
                 Fill the template values${envSuffix}. The resolved message below is what will be sent when the terminal starts.
             </p>
@@ -265,9 +277,11 @@ function renderModalHtml({ template, variables, environmentName, context }) {
                                 <label class="form-label" for="vb-prompt-template-input-${index}">${escapeHtml(variable.label)}</label>
                                 <textarea class="form-control" id="vb-prompt-template-input-${index}" rows="2"
                                     data-prompt-template-input="${escapeHtml(variable.name)}"
+                                    aria-describedby="vb-prompt-template-help-${index}"
+                                    ${variable.maxLength ? `maxlength="${variable.maxLength}"` : ''}
                                     spellcheck="false"
                                     ${variable.hasDefault ? '' : 'required'}>${escapeHtml(variable.defaultValue)}</textarea>
-                                <small class="form-text text-muted">
+                                <small class="form-text text-muted" id="vb-prompt-template-help-${index}">
                                     <code>{{${escapeHtml(variable.name)}}}</code>${variable.hasDefault ? ' default value loaded' : ' required for this launch'}
                                 </small>
                             </div>
@@ -312,6 +326,7 @@ function showPromptTemplateModal(app, options) {
         const form = modalContainer?.querySelector('#vb-prompt-template-form');
         const preview = modalContainer?.querySelector('[data-prompt-template-preview]');
         const variables = options.variables || [];
+        const userMessageInput = form?.querySelector('[data-prompt-template-input="user_message"]');
         let settled = false;
         let dismissObserver = null;
 
@@ -334,6 +349,8 @@ function showPromptTemplateModal(app, options) {
             if (!preview || !form) {
                 return;
             }
+            userMessageInput?.setCustomValidity('');
+            userMessageInput?.removeAttribute('aria-invalid');
             preview.innerHTML = buildPreviewHtml(options.template, buildValues(variables, form), context);
         };
 
@@ -369,17 +386,25 @@ function showPromptTemplateModal(app, options) {
 
         function onSubmit(event) {
             event.preventDefault();
+            if (userMessageInput) {
+                const message = userMessageInput.value;
+                const error = !message.trim() ? 'Enter a user message.'
+                    : message.length > 8000 ? 'Use 8,000 characters or fewer.' : '';
+                userMessageInput.setCustomValidity(error);
+                userMessageInput.setAttribute('aria-invalid', String(Boolean(error)));
+            }
             if (!form?.reportValidity?.()) {
                 return;
             }
 
             const resolved = renderPromptTemplate(options.template, buildValues(variables, form), context);
-            if (!resolved.trim() && !options.userMessage?.trim()) {
+            const userMessage = userMessageInput?.value ?? options.userMessage;
+            if (!resolved.trim() && !userMessage?.trim()) {
                 app.showError?.('Resolved initial message is empty.');
                 return;
             }
 
-            settle(resolved);
+            settle({ initialPrompt: resolved, userMessage });
         }
 
         modalContainer?.addEventListener('click', onCloseClick, true);

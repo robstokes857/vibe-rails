@@ -257,11 +257,13 @@ export class AiAgentsController {
                     {
                         initialPrompt: preset.initialPrompt,
                         environmentName: preset.name,
-                        userMessage
+                        userMessage,
+                        collectUserMessage: true
                     }
                 );
                 if (!resolved || resolved.canceled || signal?.aborted) return;
                 initialPrompt = resolved.initialPrompt;
+                userMessage = resolved.userMessage;
                 expectedRevision = preset.revision;
                 terminalMetadata = {
                     selection: terminalSelection,

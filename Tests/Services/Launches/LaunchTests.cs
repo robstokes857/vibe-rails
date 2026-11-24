@@ -103,19 +103,23 @@ public sealed class LaunchTests : IDisposable
         Assert.DoesNotContain("\"workingDirectory\"", json);
     }
 
-    [Fact]
-    public async Task LiteralUserMessageSurvivesResolutionAndSpawnValidation()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LiteralUserMessageSurvivesResolutionAndSpawnValidation(bool nativeTerminal)
     {
         var preset = (await Preset("Review {{user_message}}")).Preset;
         const string message = "Explain {{step:old}} and {{worktree}} literally";
-        var run = await service.EnqueueAsync("preset", preset.Id, new(root, root, "manual", "literal", UserMessage: message), Ct);
+        var run = await service.EnqueueAsync("preset", preset.Id,
+            new(root, root, "manual", "literal", UserMessage: message, NativeTerminal: nativeTerminal), Ct);
         var claim = (await store.TryClaimAsync(run.Id, 3, Environment.ProcessId, DateTime.UtcNow, Ct))!;
         run = (await store.GetRunAsync(run.Id, Ct))!;
         var resolved = await new VibeRails.Services.Environments.PromptPlaceholderService().ResolveLaunchAsync(
-            run.Snapshot.Context.ComposedPrompt, new(root, UserMessage: run.Snapshot.Context.UserMessage), Ct);
+            nativeTerminal ? NativeLaunchRunner.ComposePrompt(run.Snapshot) : run.Snapshot.Context.ComposedPrompt,
+            new(root, UserMessage: run.Snapshot.Context.UserMessage), Ct);
         var execution = new LaunchExecution(store, service, run);
         await execution.BeforeSpawnAsync("literal-session", resolved.Prompt, resolved.WorkingDirectory, Ct);
-        Assert.Equal("Review " + message, (await store.GetRunAsync(run.Id, Ct))!.ResolvedPrompt);
+        Assert.EndsWith("Review " + message, (await store.GetRunAsync(run.Id, Ct))!.ResolvedPrompt);
         await LaunchExecution.CompleteSessionAsync("literal-session", 0);
     }
 

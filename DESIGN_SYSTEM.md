@@ -892,11 +892,19 @@ the helper paragraph below the field. Enter runs; Shift+Enter adds a new line.
 Opening the menu focuses the first Run; opening the box focuses the textarea.
 Collapsing returns Run beside the name, keeps the text and the link then reads **Edit message**; Run
 sends whatever the box holds. Each opening starts collapsed and empty, and blank
-input launches normally. In the VS Code Launch view, the play icon and a row click
-run at once without asking. Agent and Quick Launch rows add an inline **Run with
+input launches normally unless the saved prompt requires a user message (below).
+In the VS Code Launch view, the play icon and a row click use the same launch flow.
+Agent and Quick Launch rows add an inline **Run with
 message…** (`comment` icon, left of play; also in the row's context menu) that asks
 for the same optional message: Enter accepts a blank value, Escape cancels. Messages
 fill `{{user_message}}` in the saved prompt, or append when it has no such token.
+For manual saved-Agent launches, `{{user_message}}` requires a nonblank answer.
+Reuse a message already supplied; otherwise open the shared prompt-values dialog
+with a labelled **User message** multiline field (8,000 characters maximum), alongside
+any custom template fields. Show the answer in the resolved-message preview. Cancel
+or Escape starts nothing. Apply this before both native-terminal and in-app launches,
+including the VS Code bridge. Keep the answer separate from the saved template so
+placeholder-like text in the answer stays literal. Unattended runs do not open dialogs.
 Actions and library scripts keep their existing launch controls.
 
 Signed scripts from the script library follow the saved launches in the same list, with

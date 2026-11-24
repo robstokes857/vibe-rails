@@ -296,6 +296,27 @@ for (const width of [1280, 390]) test(`terminal picker opens a regular Agent tab
     expect(fixture.deleted).not.toContain('picker-agent'); // Normal tabs retain the close/undo grace period.
 });
 
+test('terminal picker collects user_message before opening an Agent tab', async ({ page }) => {
+    const fixture = await openFixture(page, 1, [{ id: 'reviewer', name: 'Saved reviewer', cli: 'codex',
+        initialPrompt: 'Review {{user_message}}', revision: 4 }]);
+    await page.locator('#terminal-header-select-ts-control').click();
+    await page.locator('.ts-dropdown .option[data-value="preset:reviewer:codex"]').click();
+    await page.locator('#terminal-start-btn').click();
+    const form = page.locator('[data-prompt-template-modal]');
+    await expect(form.getByLabel('User message', { exact: true })).toBeFocused();
+    expect(fixture.launches).toHaveLength(0);
+    await form.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(page.locator('#terminal-start-btn')).toBeEnabled();
+    await page.locator('#terminal-start-btn').click();
+    await form.getByLabel('User message', { exact: true }).fill('the {{worktree}} example');
+    await form.getByRole('button', { name: 'Start Terminal', exact: true }).click();
+    await expect(page.locator(normalTabs)).toHaveCount(2);
+    expect(fixture.launches).toEqual([expect.objectContaining({
+        definitionId: 'reviewer', terminalTab: true, nativeTerminal: false,
+        initialPrompt: 'Review {{user_message}}', userMessage: 'the {{worktree}} example', expectedRevision: 4
+    })]);
+});
+
 test('terminal picker starts the same saved launch again as a second tab', async ({ page }) => {
     // One active run of a definition per project was the rule for every launch, and a picker
     // tab's run stays active while the tab is open: the second Start waited 30 seconds and gave up.

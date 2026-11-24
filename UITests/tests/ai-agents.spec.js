@@ -160,6 +160,72 @@ for (const width of [320, 375, 768, 1024]) test(`optional launch message reaches
     expect(state.presets[0].initialPrompt).toBe('Review {{user_message}}');
 });
 
+for (const [source, width] of [['catalog', 320], ['quick-actions', 1024], ['vscode', 1024]]) {
+    test(`user_message requires an answer before a native launch from ${source}`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 850 });
+        const state = await setup(page);
+        state.runUpdate = { status: 'running' };
+        const template = source === 'catalog' ? '{{user_message}}'
+            : 'Review {{ticket}}: {{ USER_MESSAGE }} / {{user_message}}';
+        state.presets.push({ id: 'review', name: 'Review', cli: 'codex', initialPrompt: template, enabled: true, revision: 3 });
+        await page.locator('[data-agent-refresh]').click();
+        const launch = async () => {
+            if (source === 'catalog') await page.locator('[data-agent-run="review"]').click();
+            else if (source === 'quick-actions') {
+                await page.locator('[data-action="automation-launcher"]').click();
+                await page.getByRole('dialog', { name: 'Quick actions', exact: true })
+                    .getByRole('button', { name: 'Run Review', exact: true }).click();
+            } else await page.evaluate(async () => {
+                const { setupVSCodeLauncherBridge } = await import('/js/modules/vscode-launcher-bridge.js');
+                let receive;
+                const host = { __viberails_VSCODE__: true, parent: {}, addEventListener: (type, handler) => { receive = handler; } };
+                setupVSCodeLauncherBridge(window.app, host);
+                receive({ source: host.parent, data: { command: 'launchDefinition', definitionId: 'review', definitionType: 'preset', userMessage: '' } });
+            });
+        };
+        const form = page.locator('[data-prompt-template-modal]');
+        const input = form.getByLabel('User message', { exact: true });
+        for (const dismissal of ['cancel', 'escape']) {
+            await launch();
+            await expect(input).toBeFocused();
+            if (dismissal === 'cancel') await form.getByRole('button', { name: 'Cancel', exact: true }).click();
+            else await input.press('Escape');
+            await expect(form).toHaveCount(0);
+            expect(state.runs).toHaveLength(0);
+        }
+        await launch();
+        await expect(input).toBeFocused();
+        await expect(input).toHaveAttribute('required', '');
+        await expect(input).toHaveAttribute('maxlength', '8000');
+        await expect(form.locator('textarea')).toHaveCount(source === 'catalog' ? 1 : 2);
+        if (source !== 'catalog') await form.getByLabel('Ticket', { exact: true }).fill('VB-123');
+        for (const empty of ['', '  \n ']) {
+            await input.fill(empty);
+            await form.getByRole('button', { name: 'Start Terminal', exact: true }).click();
+            await expect(input).toHaveAttribute('aria-invalid', 'true');
+            expect(state.runs).toHaveLength(0);
+        }
+        const message = 'Explain {{worktree}} and {{date}} literally.\nInclude <details> and $&.';
+        await input.fill(message);
+        await expect(form.locator('[data-prompt-template-preview]')).toContainText(message);
+        await form.locator('[data-prompt-template-focus="user_message"]').first().click();
+        await expect(input).toBeFocused();
+        expect(await form.evaluate(el => {
+            const body = el.closest('.modal-body');
+            return body.scrollWidth <= body.clientWidth;
+        })).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`required-user-message-${source}.png`) });
+        await form.getByRole('button', { name: 'Start Terminal', exact: true }).click();
+        await expect.poll(() => state.runs.length).toBe(1);
+        const body = state.requests.find(r => r.path === '/api/v1/runs' && r.method === 'POST').body;
+        expect(body).toMatchObject({ userMessage: message, nativeTerminal: true, expectedRevision: 3,
+            initialPrompt: template.replace('{{ticket}}', 'VB-123') });
+        expect(state.presets[0].initialPrompt).toBe(template);
+        expect(state.requests.some(r => r.method === 'PUT')).toBe(false);
+        await expect(form).toHaveCount(0);
+    });
+}
+
 for (const suffix of ['', ' {{user_message}}']) test(`optional message survives the required variable dialog (${suffix || 'appended'}) and cancellation queues nothing`, async ({ page }) => {
     const state = await setup(page);
     state.runUpdate = { status: 'running' };

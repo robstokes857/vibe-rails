@@ -1701,7 +1701,13 @@ runs the row, Shift+Enter adds a newline, and a collapsed box still sends its te
 `launch-menu.js` passes it through `ai-agents-controller.js` and
 `launch-api.js` as `userMessage`, separately from `initialPrompt`. The VS Code
 bridge accepts the same bounded string. `{{user_message}}` is a reserved built-in
-in template preview, shared help and caret suggestions; only the backend inserts
+in template preview, shared help and caret suggestions. Manual preset launches
+opt into `collectUserMessage` in the shared prompt-values dialog: if that token
+appears and no nonblank message was supplied, collect a required User message
+(maximum 8,000 characters) alongside any custom variables before queuing the run.
+The controller forwards the returned `userMessage` separately for native terminals,
+the VS Code bridge and the terminal picker. Cancel/Escape queues nothing.
+Only the backend inserts
 it (empty when omitted), or appends it if there is no placeholder. Never substitute
 it in the browser and then send its contents through the backend template pass.
 
