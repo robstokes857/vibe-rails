@@ -3,6 +3,7 @@ using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.Board;
+using VibeRails.Utils;
 
 namespace VibeRails.Services;
 
@@ -11,7 +12,8 @@ public class ChatHistoryService(
     ISessionTranscriptService sessionTranscriptService,
     ISummaryService summaryService,
     ISessionDataExportService sessionDataExportService,
-    IBoardStore boardStore) : IChatHistoryService
+    IBoardStore boardStore,
+    IBoardProjectResolver projectResolver) : IChatHistoryService
 {
     public async Task<ChatHistoryResponse> GetHistoryAsync(int page, int pageSize, string? preferredWorkingDirectory, string? sortBy, string? sortDirection, CancellationToken cancellationToken)
     {
@@ -112,14 +114,26 @@ public class ChatHistoryService(
             throw SummaryService.TooLarge(estimatedTokens, SessionHandoffLimits.MaxInputTokens);
 
         // Board references are appended at launch, outside the remote text (as for summaries).
-        var cards = (await boardStore.GetSessionCardsAsync([sessionId], cancellationToken))
-            .Select(ToCard).ToArray();
+        var sessionCards = await boardStore.GetSessionCardsAsync([sessionId], cancellationToken);
+        var cards = sessionCards.Select(ToCard).ToArray();
+
+        // viberails.ai is told where the session came from as Board publication tells it: card ids
+        // and keys (never titles), the repository's folder name and this computer's name (never a
+        // path). Cards on another project's board are left out, as the launch leaves them out
+        // (API_SEC.md, VIBE-6). A card's board names the repository; else the session's directory.
+        var project = await projectResolver.ResolveAsync(cancellationToken);
+        var projectCards = sessionCards
+            .Where(card => card.ProjectPath is null || ProjectPathComparer.Matches(card.ProjectPath, project))
+            .ToList();
+        var source = new SessionHandoffSource(
+            sessionId,
+            RemoteSourceNames.Repository(projectCards.FirstOrDefault(card => card.ProjectPath is not null)?.ProjectPath ?? session.WorkingDirectory),
+            RemoteSourceNames.Computer(),
+            [.. projectCards.Select(card => new HandoffCardDto { CardId = card.CardId, CardKey = card.Key })]);
 
         // No transcript or summary cache: every Send to renders the recording as it is now,
         // so a still-running session and a second attempt both get current content.
-        // The project's display name, as the history sidebar shows it; its path stays local.
-        var projectName = await repository.GetProjectDisplayNameAsync(session.WorkingDirectory, cancellationToken);
-        var summary = await summaryService.GetHandoffAsync(sessionId, projectName, renderedSession, SessionResumeService.MaxResumeSummaryChars, cancellationToken);
+        var summary = await summaryService.GetHandoffAsync(source, renderedSession, SessionResumeService.MaxResumeSummaryChars, cancellationToken);
         return new SessionHandoffResponse(summary, SessionResumeService.MaxResumeSummaryChars, cards);
     }
 }

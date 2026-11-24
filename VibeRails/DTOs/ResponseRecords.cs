@@ -1854,14 +1854,24 @@ namespace VibeRails.DTOs
     public class HandoffPostDto
     {
         /// <summary>
-        /// The desktop's id for the recorded session the handoff is written from, and that session's
-        /// project display name (never its path). viberails.ai does not read either yet; its request
+        /// Where the handoff's session came from, named as Board publication names it: the desktop's
+        /// session id, the repository's folder name and this computer's name (never a path), and the
+        /// session's cards on this project's Board. viberails.ai does not read these yet; its request
         /// binding ignores fields it does not know.
         /// </summary>
         public string SessionId { get; set; } = string.Empty;
-        public string ProjectName { get; set; } = string.Empty;
+        public string SourceRepository { get; set; } = string.Empty;
+        public string SourceComputer { get; set; } = string.Empty;
+        public List<HandoffCardDto> Cards { get; set; } = [];
         public string SessionText { get; set; } = string.Empty;
         public int MaxChars { get; set; }
+    }
+
+    /// <summary>A card as Board publication identifies it: its row id and permanent key, never its title.</summary>
+    public class HandoffCardDto
+    {
+        public string CardId { get; set; } = string.Empty;
+        public string CardKey { get; set; } = string.Empty;
     }
 
     /// <summary>The fields VibeRails reads from a viberails.ai refusal before the stream starts.</summary>

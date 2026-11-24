@@ -1090,16 +1090,8 @@ public sealed partial class BoardSyncService(
 
     private static string Trim(string value) => value.Length <= MaxErrorLength ? value : value[..MaxErrorLength];
 
-    private static string SourceRepository(string projectPath)
-    {
-        var name = Path.GetFileName(projectPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        return name.Length <= 120 ? name : name[..120];
-    }
+    private static string SourceRepository(string projectPath) => RemoteSourceNames.Repository(projectPath);
 
-    private static string SourceComputer()
-    {
-        var name = Environment.MachineName;
-        return name.Length <= 100 ? name : name[..100];
-    }
+    private static string SourceComputer() => RemoteSourceNames.Computer();
 
 }

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using VibeRails.DTOs;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Utils;
 using Xunit;
@@ -173,8 +174,8 @@ public sealed class SummaryServiceTests : IDisposable
         var service = CreateService(handler);
 
         var result = await service.GetHandoffAsync(
-            "4f0c3b2e-source-session",
-            "vibe-rails",
+            new SessionHandoffSource("4f0c3b2e-source-session", "vibe-rails", "DEV-BOX",
+                [new HandoffCardDto { CardId = "card_08de6a681bff", CardKey = "VB-X6CY2-435" }]),
             "Keep the screen.\npassword=super_secret_value_here\nconfigured-api-key\n└─ done",
             SessionResumeServiceMaxChars, TestContext.Current.CancellationToken);
 
@@ -189,7 +190,11 @@ public sealed class SummaryServiceTests : IDisposable
         Assert.DoesNotContain("configured-api-key", sent, StringComparison.Ordinal);
         Assert.Equal(SessionResumeServiceMaxChars, payload.RootElement.GetProperty("maxChars").GetInt32());
         Assert.Equal("4f0c3b2e-source-session", payload.RootElement.GetProperty("sessionId").GetString());
-        Assert.Equal("vibe-rails", payload.RootElement.GetProperty("projectName").GetString());
+        Assert.Equal("vibe-rails", payload.RootElement.GetProperty("sourceRepository").GetString());
+        Assert.Equal("DEV-BOX", payload.RootElement.GetProperty("sourceComputer").GetString());
+        var card = Assert.Single(payload.RootElement.GetProperty("cards").EnumerateArray());
+        Assert.Equal("card_08de6a681bff", card.GetProperty("cardId").GetString());
+        Assert.Equal("VB-X6CY2-435", card.GetProperty("cardKey").GetString());
     }
 
     [Theory]
@@ -206,7 +211,7 @@ public sealed class SummaryServiceTests : IDisposable
             $": started\n\ndata: {{\"type\":\"error\",\"status\":503,\"code\":\"{code}\",\"error\":\"remote text with configured-api-key\"}}\n\n")));
 
         var exception = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
-            service.GetHandoffAsync("source-session", "project", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
+            service.GetHandoffAsync(Source(), "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
 
         Assert.Equal(local, exception.StatusCode);
         Assert.Contains(expected, exception.Message, StringComparison.Ordinal);
@@ -221,7 +226,7 @@ public sealed class SummaryServiceTests : IDisposable
         var service = CreateService(new StatusHandler(() => Stream(": started\n\n: working\n\n")));
 
         var exception = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
-            service.GetHandoffAsync("source-session", "project", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
+            service.GetHandoffAsync(Source(), "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
 
         Assert.Equal(502, exception.StatusCode);
         Assert.Contains("without a result", exception.Message, StringComparison.Ordinal);
@@ -244,7 +249,7 @@ public sealed class SummaryServiceTests : IDisposable
         }));
 
         var exception = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
-            service.GetHandoffAsync("source-session", "project", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
+            service.GetHandoffAsync(Source(), "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
 
         Assert.Equal(local, exception.StatusCode);
         Assert.Equal(upstream, exception.UpstreamStatus);
@@ -258,14 +263,14 @@ public sealed class SummaryServiceTests : IDisposable
         ParserConfigs.SetApiKey("configured-api-key");
         var handler = new CapturingHandler();
         var disabled = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
-            CreateService(handler).GetHandoffAsync("source-session", "project", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
+            CreateService(handler).GetHandoffAsync(Source(), "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
         Assert.Equal(400, disabled.StatusCode);
         Assert.Equal(0, handler.RequestCount);
 
         ParserConfigs.SetRemoteAccess(true);
         var timedOut = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
             CreateService(new StatusHandler(() => throw new TaskCanceledException("timeout")))
-                .GetHandoffAsync("source-session", "project", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
+                .GetHandoffAsync(Source(), "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
         Assert.Equal(504, timedOut.StatusCode);
         Assert.Contains("25 minutes", timedOut.Message, StringComparison.Ordinal);
     }
@@ -280,6 +285,8 @@ public sealed class SummaryServiceTests : IDisposable
     }
 
     private const int SessionResumeServiceMaxChars = VibeRails.Services.SessionResumeService.MaxResumeSummaryChars;
+
+    private static SessionHandoffSource Source() => new("source-session", "repo", "computer", []);
 
     private static HttpResponseMessage Stream(string body) => new(HttpStatusCode.OK)
     {

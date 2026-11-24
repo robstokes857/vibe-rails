@@ -1232,7 +1232,8 @@ The text goes to `POST /api/v1/chatHistory/{id}/handoff`; Regenerate replays aga
 The dialog displays the response's associated card links and permanent keys separately from the
 editable handoff. `SessionResumeService.AppendBoardContextAsync` re-reads all source-session
 attachments through `IBoardStore` at launch and appends IDs, local references and MCP retrieval/review
-guidance after the handoff. Card labels never enter the remote request or recap cache. Keep the
+guidance after the handoff. Card titles and display labels never enter the remote request or recap
+cache; the request names in-project cards by row id and permanent key only. Keep the
 handoff limit (the response's `maxChars`, 20,000) separate from the overall prompt cap; never
 silently drop cards to fit. Opening a card uses the existing local-card editor for cross-project
 history. Closing, replacing or destroying the modal aborts the replay and invalidates late

@@ -108,7 +108,7 @@ public class SessionResumeServiceTests
         var board = new Mock<IBoardStore>();
         board.Setup(b => b.GetSessionCardsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([new("source", "card-a", "VB-ABCDE-1", "First", "VIBE-67"), new("source", "card-b", "VB-FGHIJ-2", "Second")]);
-        var service = new ChatHistoryService(repository.Object, transcripts.Object, summaries.Object, Mock.Of<ISessionDataExportService>(), board.Object);
+        var service = new ChatHistoryService(repository.Object, transcripts.Object, summaries.Object, Mock.Of<ISessionDataExportService>(), board.Object, Resolver());
 
         var result = await service.GetSummaryAsync("source", regenerate, TestContext.Current.CancellationToken);
         Assert.Equal(expected, result.Summary);

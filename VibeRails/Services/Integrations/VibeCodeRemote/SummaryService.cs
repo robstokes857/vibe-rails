@@ -13,12 +13,18 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote
         /// <summary>
         /// Send to (VIBE-363): redacts the text xterm.js rendered from a whole recording and asks
         /// viberails.ai (gpt-6.1-terra, high reasoning) for a handoff of at most
-        /// <paramref name="maxChars"/> characters. <paramref name="sessionId"/> and
-        /// <paramref name="projectName"/> (the project's display name, never its path) name the
-        /// recorded session the text came from. Failures are <see cref="RemoteSummaryException"/>s.
+        /// <paramref name="maxChars"/> characters. <paramref name="source"/> names the recorded
+        /// session the text came from. Failures are <see cref="RemoteSummaryException"/>s.
         /// </summary>
-        Task<string> GetHandoffAsync(string sessionId, string projectName, string renderedSession, int maxChars, CancellationToken cancellationToken);
+        Task<string> GetHandoffAsync(SessionHandoffSource source, string renderedSession, int maxChars, CancellationToken cancellationToken);
     }
+
+    /// <summary>
+    /// The recorded session a Send to handoff is written from, as viberails.ai is told about it:
+    /// its id, <see cref="RemoteSourceNames"/>' repository and computer names, and its cards on this
+    /// project's Board (ids and keys only).
+    /// </summary>
+    public sealed record SessionHandoffSource(string SessionId, string Repository, string Computer, IReadOnlyList<HandoffCardDto> Cards);
 
     /// <summary>
     /// A summary could not be produced. <see cref="Exception.Message"/> is fixed local text written
@@ -104,9 +110,10 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote
                 }, cancellationToken);
         }
 
-        public async Task<string> GetHandoffAsync(string sessionId, string projectName, string renderedSession, int maxChars, CancellationToken cancellationToken)
+        public async Task<string> GetHandoffAsync(SessionHandoffSource source, string renderedSession, int maxChars, CancellationToken cancellationToken)
         {
-            ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+            ArgumentNullException.ThrowIfNull(source);
+            ArgumentException.ThrowIfNullOrWhiteSpace(source.SessionId);
             ArgumentNullException.ThrowIfNullOrWhiteSpace(renderedSession);
             var apiKey = RequireRemoteSummaries();
 
@@ -114,7 +121,15 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote
             using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/summary/handoff")
             {
                 Content = JsonContent.Create(
-                    new HandoffPostDto { SessionId = sessionId, ProjectName = projectName, SessionText = redacted, MaxChars = maxChars },
+                    new HandoffPostDto
+                    {
+                        SessionId = source.SessionId,
+                        SourceRepository = source.Repository,
+                        SourceComputer = source.Computer,
+                        Cards = [.. source.Cards],
+                        SessionText = redacted,
+                        MaxChars = maxChars
+                    },
                     AppJsonSerializerContext.Default.HandoffPostDto)
             };
             request.Headers.Add("X-Api-Key", apiKey);

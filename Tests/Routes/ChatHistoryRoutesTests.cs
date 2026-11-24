@@ -21,6 +21,10 @@ namespace Tests.Routes;
 public sealed class ChatHistoryRoutesTests
 {
     private static readonly HttpClient Client = new();
+    private const string ProjectPath = "C:/repos/vibe-rails";
+
+    private static IBoardProjectResolver Resolver() =>
+        Mock.Of<IBoardProjectResolver>(r => r.ResolveAsync(It.IsAny<CancellationToken>()) == Task.FromResult(ProjectPath));
 
     [Fact]
     public async Task HistoryAndSingleLookup_EnrichCards_UseAotJson_AndRequireBothCredentials()
@@ -53,6 +57,7 @@ public sealed class ChatHistoryRoutesTests
         builder.Services.AddSingleton(Mock.Of<ISessionTranscriptService>());
         builder.Services.AddSingleton(Mock.Of<ISummaryService>());
         builder.Services.AddSingleton(Mock.Of<ISessionDataExportService>());
+        builder.Services.AddSingleton(Resolver());
         builder.Services.AddSingleton<IChatHistoryService, ChatHistoryService>();
         var auth = new Mock<IAuthService>();
         auth.Setup(a => a.ValidateToken(It.IsAny<string?>())).Returns((string? token) => token == "session-token");
@@ -138,6 +143,7 @@ public sealed class ChatHistoryRoutesTests
         builder.Services.AddSingleton(transcripts.Object);
         builder.Services.AddSingleton(summaries.Object);
         builder.Services.AddSingleton(Mock.Of<ISessionDataExportService>());
+        builder.Services.AddSingleton(Resolver());
         builder.Services.AddSingleton<IChatHistoryService, ChatHistoryService>();
         var auth = new Mock<IAuthService>();
         auth.Setup(a => a.ValidateToken(It.IsAny<string?>())).Returns((string? token) => token == "session-token");
@@ -178,14 +184,23 @@ public sealed class ChatHistoryRoutesTests
             .ReturnsAsync(new SessionResponse("session", "codex", null, "C:/project", DateTime.UtcNow, null, null));
         repository.Setup(r => r.GetSessionByIdAsync("missing", It.IsAny<CancellationToken>()))
             .ReturnsAsync((SessionResponse?)null);
-        repository.Setup(r => r.GetProjectDisplayNameAsync("C:/project", It.IsAny<CancellationToken>()))
-            .ReturnsAsync("Project Name");
         var board = new Mock<IBoardStore>(MockBehavior.Strict);
         board.Setup(s => s.GetSessionCardsAsync(It.Is<IReadOnlyList<string>>(ids => ids.Count == 1 && ids[0] == "session"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync([new("session", "card", "VB-M66G2-64", "Filters", "VIBE-7")]);
+            .ReturnsAsync([
+                new("session", "card", "VB-M66G2-64", "Filters", "VIBE-7", ProjectPath),
+                new("session", "elsewhere", "VB-OTHER-9", "Another project's card", null, "C:/repos/other")]);
         var summaries = new Mock<ISummaryService>(MockBehavior.Strict);
         const string rendered = "PS> codex\n=== Full-screen view (at the end of the recording) ===\n› fix the tests\n=== End of full-screen view ===";
-        summaries.Setup(s => s.GetHandoffAsync("session", "Project Name", rendered, SessionResumeService.MaxResumeSummaryChars, It.IsAny<CancellationToken>()))
+        // Named as Board publication names it: the card's board repository (not the session's
+        // directory), this computer, and only this project's card, by id and key.
+        summaries.Setup(s => s.GetHandoffAsync(
+                It.Is<SessionHandoffSource>(source => source.SessionId == "session"
+                    && source.Repository == "vibe-rails"
+                    && source.Computer == RemoteSourceNames.Computer()
+                    && source.Cards.Count == 1
+                    && source.Cards[0].CardId == "card"
+                    && source.Cards[0].CardKey == "VB-M66G2-64"),
+                rendered, SessionResumeService.MaxResumeSummaryChars, It.IsAny<CancellationToken>()))
             .ReturnsAsync("Here's where we are.");
 
         var builder = WebApplication.CreateSlimBuilder();
@@ -196,6 +211,7 @@ public sealed class ChatHistoryRoutesTests
         builder.Services.AddSingleton(Mock.Of<ISessionTranscriptService>(MockBehavior.Strict));
         builder.Services.AddSingleton(summaries.Object);
         builder.Services.AddSingleton(Mock.Of<ISessionDataExportService>());
+        builder.Services.AddSingleton(Resolver());
         builder.Services.AddSingleton<IChatHistoryService, ChatHistoryService>();
         var auth = new Mock<IAuthService>();
         auth.Setup(a => a.ValidateToken(It.IsAny<string?>())).Returns((string? token) => token == "session-token");
@@ -251,7 +267,7 @@ public sealed class ChatHistoryRoutesTests
                 Assert.Contains("800,000", json.RootElement.GetProperty("error").GetString());
             }
 
-            summaries.Verify(s => s.GetHandoffAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
+            summaries.Verify(s => s.GetHandoffAsync(It.IsAny<SessionHandoffSource>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
         }
         finally { await app.StopAsync(CancellationToken.None); }
     }
