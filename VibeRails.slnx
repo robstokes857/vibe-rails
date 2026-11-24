@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/headless/">
+    <Project Path="Tests/headless/GitProcessFixture/GitProcessFixture.csproj" />
+  </Folder>
   <Project Path="IntegrationTest/IntegrationTest.csproj" />
   <Project Path="MintLint/MintLint.csproj" />
   <Project Path="PyBridge/src/PyBridge/PyBridge.csproj" />
