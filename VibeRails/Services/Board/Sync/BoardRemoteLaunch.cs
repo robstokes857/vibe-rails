@@ -4,7 +4,7 @@ using VibeRails.Services.Integrations.VibeCodeRemote;
 namespace VibeRails.Services.Board.Sync;
 
 /// <summary>An open project root advertising its published boards to their owner.</summary>
-public sealed record BoardLaunchPoll(Guid InstanceId, string Name, List<Guid> BoardIds);
+public sealed record BoardLaunchPoll(Guid InstanceId, string Name, List<Guid> BoardIds, bool AcceptLaunch = true);
 /// <summary>A single-use request identifying a saved card and the required sync sequence.</summary>
 public sealed record BoardLaunchCommand(Guid Id, Guid BoardId, string CardId, long RequiredSeq);
 /// <summary>A poll can consume at most one launch command.</summary>
@@ -80,17 +80,22 @@ public sealed class BoardRemoteLaunchHostedService(IServiceScopeFactory scopes, 
     private readonly Dictionary<Guid, DateTime> handled = [];
     private DateTime proRecheckUtc = DateTime.MinValue;
     private bool proPauseLogged;
+    private Task activeLaunch = Task.CompletedTask;
+    private string? pollState;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+        try
         {
-            try { await PollOnceAsync(stoppingToken); }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
-            try { await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken); }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            do { await PollOnceAsync(stoppingToken); }
+            while (await timer.WaitForNextTickAsync(stoppingToken));
         }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+        finally { await WaitForLaunchAsync(); }
     }
+
+    internal Task WaitForLaunchAsync() => activeLaunch;
 
     /// <summary>One poll. Only cancellation escapes; every failure is logged and left for the next turn.</summary>
     internal async Task PollOnceAsync(CancellationToken stoppingToken)
@@ -99,6 +104,7 @@ public sealed class BoardRemoteLaunchHostedService(IServiceScopeFactory scopes, 
         {
             if (client.IsConfigured && client.DestinationKey is { } destination)
                 await PollAsync(destination, stoppingToken);
+            else ReportState("not_configured");
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
         catch (BoardSyncClientException ex) when (ex.Code == ProDenial.Code)
@@ -113,8 +119,10 @@ public sealed class BoardRemoteLaunchHostedService(IServiceScopeFactory scopes, 
         }
         catch (BoardSyncClientException ex)
         {
-            // Old hosted versions answer 404 until the companion release is deployed.
-            if (ex.Status != 404) Log.Warning("[BoardRemoteLaunch] Poll failed: {Code}", ex.Code);
+            // A 404 can also mean an advertised board is unavailable. Never hide it as
+            // an assumed older server: otherwise a live root silently disappears.
+            Log.Warning("[BoardRemoteLaunch] Poll failed: {Code} (HTTP {Status})", ex.Code, ex.Status);
+            pollState = null;
         }
         catch (Exception ex) { Log.Warning(ex, "[BoardRemoteLaunch] Live launch poll failed"); }
     }
@@ -125,23 +133,57 @@ public sealed class BoardRemoteLaunchHostedService(IServiceScopeFactory scopes, 
         var store = scope.ServiceProvider.GetRequiredService<IBoardStore>();
         var project = await scope.ServiceProvider.GetRequiredService<IBoardProjectResolver>().ResolveAsync(ct);
         var ids = new List<Guid>();
-        foreach (var board in (await store.GetBoardsAsync(project, ct)).Take(100))
+        foreach (var board in await store.GetBoardsAsync(project, ct))
         {
             if (!board.SyncEnabled) continue;
             var link = await store.GetSyncLinkAsync(project, board.Id, ct);
             if (link is { Imported: false, Enabled: true } && link.DestinationKey == destination
-                && Guid.TryParse(link.RemoteBoardId, out var remote)) ids.Add(remote);
+                && Guid.TryParse(link.RemoteBoardId, out var remote) && remote != Guid.Empty && !ids.Contains(remote)) ids.Add(remote);
+            if (ids.Count == 100) break;
         }
-        if (ids.Count == 0) return;
+        if (ids.Count == 0) { ReportState("no_eligible_boards", project); return; }
         // Asked only when there is a board to advertise; the answer is cached between polls.
-        if (DateTime.UtcNow < proRecheckUtc || entitlements is not null && !await entitlements.AllowsAsync(ProFeatures.RemoteBoards, ct)) return;
+        if (DateTime.UtcNow < proRecheckUtc || entitlements is not null && !await entitlements.AllowsAsync(ProFeatures.RemoteBoards, ct))
+        { ReportState("plan_paused", project, ids.Count); return; }
         var label = Environment.MachineName + " · " + Path.GetFileName(project.TrimEnd(Path.DirectorySeparatorChar));
         if (label.Length > 100) label = label[..100];
-        var response = await client.PollLaunchAsync(new(instance, label, ids), ct, destination);
+        var accepting = activeLaunch.IsCompleted;
+        var response = await client.PollLaunchAsync(new(instance, label, ids, accepting), ct, destination);
+        ReportState("registered", project, ids.Count);
         proPauseLogged = false;
         if (response.Command is not { } command || client.DestinationKey != destination || !ids.Contains(command.BoardId)) return;
         foreach (var id in handled.Where(p => DateTime.UtcNow - p.Value > TimeSpan.FromMinutes(15)).Select(p => p.Key).ToList()) handled.Remove(id);
         if (handled.Count >= 1024 || !handled.TryAdd(command.Id, DateTime.UtcNow)) return;
+        if (!accepting)
+        {
+            // Older servers ignore AcceptLaunch. Decline a new command rather than
+            // running two launches concurrently or replaying it later.
+            await client.CompleteLaunchAsync(command.Id, new(instance, "busy", null), ct, destination);
+            return;
+        }
+        activeLaunch = ProcessCommandAsync(project, destination, command, ct);
+    }
+
+    private void ReportState(string state, string? project = null, int boards = 0)
+    {
+        var next = $"{state}|{project}|{boards}";
+        if (pollState == next) return;
+        pollState = next;
+        Log.Information("[BoardRemoteLaunch] Discovery {State}; project={Project}; eligibleBoards={BoardCount}", state, project, boards);
+    }
+
+    private async Task ProcessCommandAsync(string project, string destination, BoardLaunchCommand command, CancellationToken ct)
+    {
+        try { await LaunchAndCompleteAsync(project, destination, command, ct); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex) { Log.Warning(ex, "[BoardRemoteLaunch] Launch result delivery failed"); }
+    }
+
+    private async Task LaunchAndCompleteAsync(string project, string destination, BoardLaunchCommand command, CancellationToken ct)
+    {
+        // The worker owns its scope until sync, launch and result delivery finish.
+        // Polling continues independently and never starts another worker meanwhile.
+        await using var scope = scopes.CreateAsyncScope();
         BoardLaunchResult result;
         try
         {
