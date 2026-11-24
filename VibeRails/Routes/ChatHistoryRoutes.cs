@@ -135,5 +135,35 @@ public static class ChatHistoryRoutes
                return Results.Json(new ErrorResponse(ex.Message), statusCode: ex.StatusCode);
            }
        }).WithName("GetChatHistorySummary");
+
+        // Send to (VIBE-363): the browser replays the whole recording through xterm.js and posts
+        // the rendered text; this redacts it and asks viberails.ai for the handoff.
+        app.MapPost("/api/v1/chatHistory/{sessionId}/handoff", async (
+            IChatHistoryService chatHistoryService,
+            string sessionId,
+            SessionHandoffRequest request,
+            CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+                return Results.BadRequest(new ErrorResponse("Session id is required."));
+            if (string.IsNullOrWhiteSpace(request.Text))
+                return Results.BadRequest(new ErrorResponse("This session has no terminal output to send."));
+
+            try
+            {
+                var result = await chatHistoryService.GetHandoffAsync(sessionId, request.Text, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound(new ErrorResponse("Chat history entry not found."));
+            }
+            catch (RemoteSummaryException ex)
+            {
+                Log.Warning("[ChatHistory] Handoff failed: local {Status}, viberails.ai {UpstreamStatus}",
+                    ex.StatusCode, ex.UpstreamStatus);
+                return Results.Json(new ErrorResponse(ex.Message), statusCode: ex.StatusCode);
+            }
+        }).WithName("PostChatHistoryHandoff");
     }
 }

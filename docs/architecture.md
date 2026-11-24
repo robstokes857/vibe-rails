@@ -263,13 +263,24 @@ with a selected immutable card ID; the shared Board `Find a card` picker searche
 before selection, independently of loaded history pages. See the
 [frontend contract](../VibeRails/wwwroot/AGENTS.md#chat-history-sidebar).
 
-Send To returns those card labels alongside the recap for linked-card navigation. At terminal
-launch, `SessionResumeService.AppendBoardContextAsync` reads the source session's current cards
-again and appends stable keys/row IDs, display labels, local card references and VibeRails MCP
-retrieval/review guidance after the edited or generated recap. References remain outside the remote
-summary request and cached recap. The recap retains its 6,000-character limit and the complete
-launch prompt keeps the normal cap; no cards are silently omitted. This read-only enrichment
-does not attach the new session or change tool authorization.
+Send To (VIBE-363) writes the handoff from the whole recording, not the parsed transcript. The
+browser pages the recording from the session-replay API, plays it through an off-screen xterm.js
+at the recorded window sizes (`session-handoff-text.js`) and posts the rendered text to
+`POST /api/v1/chatHistory/{sessionId}/handoff`. That route redacts it and sends it to viberails.ai
+(`gpt-6.1-terra`, high reasoning), up to about 800,000 tokens; a longer session is refused with its
+size, never cut. It reads and writes no transcript or summary cache, so a running session and
+Regenerate both get current output. The response carries the card labels for linked-card
+navigation and the handoff limit, 20,000 characters (`SessionResumeService.MaxResumeSummaryChars`):
+the handoff rides on the launch command line, in a 30,000-character prompt it shares with card
+references and up to 8,000 characters of App and Project context, under Windows' 32,000-character
+command limit. `GET /summary` and its cache remain for the launch-time fallback and card sharing.
+
+At terminal launch, `SessionResumeService.AppendBoardContextAsync` reads the source session's
+current cards again and appends stable keys/row IDs, display labels, local card references and
+VibeRails MCP retrieval/review guidance after the edited or generated handoff. References remain
+outside the remote request and cached recap. The complete launch prompt keeps the normal cap; no
+cards are silently omitted. This read-only enrichment does not attach the new session or change
+tool authorization.
 
 ## Project Overview
 

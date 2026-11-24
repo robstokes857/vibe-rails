@@ -1216,16 +1216,27 @@ All associations get separate links, while unlinked sessions have none. Replay s
 The three-dot menu offers session replay and **Share session**, which opens the existing
 `terminal-session-share.js` dialog for the selected history entry's session ID and display name.
 There is no Session Data Dump action. Send to keeps the
-editable summary, regeneration and terminal launch; it does not display the raw transcript.
+editable handoff, regeneration and terminal launch; it does not display the rendered text it sends.
 These are presentation choices only: stored session data, transcripts and backend APIs remain intact.
 
-Send To displays the summary response's associated card links and permanent keys separately from
-the editable recap. `SessionResumeService.AppendBoardContextAsync` re-reads all source-session
+Send To (VIBE-363) renders the recording itself: `session-handoff-text.js` pages
+`/api/v1/session-replay/sessions/{id}/frames`, applies recorded resizes with
+`session-replay/timeline.mjs` and writes everything into an xterm.js that is never opened. Lines are
+read as they scroll out of a 10,000-line scrollback, before xterm trims them, and a full-screen
+program's screen (Codex, Grok, OpenCode) is kept before each user message, when it leaves the
+alternate screen and at the end, as `=== Full-screen view (...) ===` blocks. Do not filter or
+parse the text into turns: imperfect rendering is accepted, a conversation extractor is not wanted.
+A session over 800,000 estimated tokens (four UTF-8 bytes each) is refused before anything is sent.
+The text goes to `POST /api/v1/chatHistory/{id}/handoff`; Regenerate replays again (no cache).
+
+The dialog displays the response's associated card links and permanent keys separately from the
+editable handoff. `SessionResumeService.AppendBoardContextAsync` re-reads all source-session
 attachments through `IBoardStore` at launch and appends IDs, local references and MCP retrieval/review
-guidance after the recap. Card labels never enter the remote summarizer or recap cache. Keep the
-6,000-character recap limit separate from the overall prompt cap; never silently drop cards to fit.
-Opening a card uses the existing local-card editor for cross-project history. Closing, replacing or
-destroying the modal invalidates late summary responses. No Board grants or attachments are inferred.
+guidance after the handoff. Card labels never enter the remote request or recap cache. Keep the
+handoff limit (the response's `maxChars`, 20,000) separate from the overall prompt cap; never
+silently drop cards to fit. Opening a card uses the existing local-card editor for cross-project
+history. Closing, replacing or destroying the modal aborts the replay and invalidates late
+responses. No Board grants or attachments are inferred.
 
 `chat-history-sidebar.js` combines provider, selected Board card and current-folder filters.
 Provider selections are OR; the other filters intersect. The **Find a card** dropdown reuses

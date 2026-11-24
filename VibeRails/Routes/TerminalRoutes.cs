@@ -138,8 +138,8 @@ public static class TerminalRoutes
             // Resume summary: prefer the user-edited text from the modal,
             // fall back to generating one server-side if only a session ID was sent.
             var summary = request.ResumeSummary ?? "";
-            if (summary.Length > 6000)
-                return Results.BadRequest(new ErrorResponse("Resume summary exceeds 6000 character limit."));
+            if (summary.Length > SessionResumeService.MaxResumeSummaryChars)
+                return Results.BadRequest(new ErrorResponse(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"Resume summary exceeds the {SessionResumeService.MaxResumeSummaryChars:N0} character limit.")));
 
             if (string.IsNullOrEmpty(summary) && !string.IsNullOrEmpty(request.ResumeSessionId))
             {

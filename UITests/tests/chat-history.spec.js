@@ -23,9 +23,24 @@ async function prepareResume(page) {
             startWithOptions: options => { window.resumeLaunch = options; }
         } };
         window.resumeCalls = [];
-        app.apiCall = async url => {
+        window.resumePosts = [];
+        // VIBE-363: Send to reads the recording from the replay API, replays it in an off-screen
+        // xterm.js and posts the rendered text to the handoff route.
+        window.replayFixture = (url, output = 'PS> codex\r\n\x1b[?1049h\x1b[H• fixed the tests\r\n› commit it') => {
+            const bytes = new TextEncoder().encode(output);
+            if (/\/session-replay\/sessions\/[^/]+$/.test(url)) {
+                return { frameSource: 'raw', frameMaxId: 1, frameCount: 1, session: { started: 1000 }, prompts: [],
+                    geometry: [{ at: 1000, cols: 80, rows: 10, bytes: bytes.length }] };
+            }
+            if (url.includes('/frames?')) return { items: [{ id: 1, at: 1000, data: btoa(String.fromCharCode(...bytes)) }], next: 1, done: true };
+            return null;
+        };
+        app.apiCall = async (url, method, data) => {
             resumeCalls.push(url);
-            return { summary: url.includes('regenerate') ? 'regenerated recap' : 'cached recap', boardCards: [
+            const replay = replayFixture(url);
+            if (replay) return replay;
+            resumePosts.push({ url, method, text: data?.text });
+            return { summary: resumePosts.length > 1 ? 'regenerated handoff' : 'first handoff', maxChars: 20000, boardCards: [
                 { id: 'card-a', key: 'VB-ABCDE-1', displayId: 'VIBE-67', title: 'First <img src=x onerror=alert(1)>' },
                 { id: 'card-b', key: 'VB-FGHIJ-2', title: 'Second' }
             ] };
@@ -41,9 +56,20 @@ test('Send To shows all current cards separately, regenerates and launches the e
     await expect(page.locator('[data-resume-card="card-a"]')).toContainText('VIBE-67');
     await expect(page.locator('#ch-resume-body')).toContainText('VB-ABCDE-1');
     await expect(page.locator('#ch-resume-body img')).toHaveCount(0);
-    await expect(page.locator('#ch-resume-summary')).toHaveValue('cached recap');
+    await expect(page.locator('#ch-resume-summary')).toHaveValue('first handoff');
+    await expect(page.locator('#ch-resume-char-count')).toHaveText('13 / 20,000');
+    const posted = await page.evaluate(() => resumePosts[0]);
+    expect(posted).toMatchObject({ url: '/api/v1/chatHistory/source/handoff', method: 'POST' });
+    // The rendered terminal text, including the full-screen program's screen, not a parsed transcript.
+    expect(posted.text).toBe('PS> codex\n=== Full-screen view (at the end of the recording) ===\n• fixed the tests\n› commit it\n=== End of full-screen view ===');
+    expect(await page.evaluate(() => resumeCalls.slice(0, 2))).toEqual([
+        '/api/v1/session-replay/sessions/source',
+        '/api/v1/session-replay/sessions/source/frames?after=0&max=1&source=raw'
+    ]);
     await page.getByRole('button', { name: 'Regenerate' }).click();
-    await expect(page.locator('#ch-resume-summary')).toHaveValue('regenerated recap');
+    await expect(page.locator('#ch-resume-summary')).toHaveValue('regenerated handoff');
+    // Regenerate replays the recording again rather than reusing anything cached.
+    expect(await page.evaluate(() => resumeCalls.filter(url => url.endsWith('/session-replay/sessions/source')).length)).toBe(2);
     await expect(page.locator('[data-resume-card]')).toHaveCount(2);
     await page.locator('#ch-resume-summary').fill('edited recap');
     await page.getByRole('button', { name: 'Launch Terminal' }).click();
@@ -59,18 +85,39 @@ test('Send To ignores a late summary from a replaced modal and handles sessions 
         let finishOld;
         historySidebar.app.apiCall = () => new Promise(resolve => { finishOld = resolve; });
         const old = historySidebar._showResumeModal({ cli: 'codex' }, 'Codex');
-        historySidebar.app.apiCall = async () => ({ summary: 'new session recap', boardCards: [] });
+        historySidebar.app.apiCall = async (url, method, data) => replayFixture(url)
+            ?? (method === 'POST' ? { summary: 'new session recap', maxChars: 20000, boardCards: [] } : null);
         historySidebar.activeItem = { id: 'new-source', cli: 'claude' };
         await historySidebar._showResumeModal({ cli: 'claude' }, 'Claude');
-        finishOld({ summary: 'stale recap', boardCards: [{ id: 'stale', key: 'VB-OLD-1' }] });
+        // The replaced modal's recording arrives late; it is aborted and never shows anything.
+        finishOld(replayFixture('/api/v1/session-replay/sessions/source'));
         await old;
     });
     await expect(page.locator('#ch-resume-summary')).toHaveValue('new session recap');
     await expect(page.locator('[data-resume-card]')).toHaveCount(0);
-    await page.locator('#ch-resume-summary').fill('x'.repeat(6001));
+    await page.locator('#ch-resume-summary').fill('x'.repeat(20001));
     await expect(page.getByRole('button', { name: 'Launch Terminal' })).toBeDisabled();
-    await page.locator('#ch-resume-summary').fill('x'.repeat(6000));
+    await page.locator('#ch-resume-summary').fill('x'.repeat(20000));
     await expect(page.getByRole('button', { name: 'Launch Terminal' })).toBeEnabled();
+});
+
+test('Send To reports a session over the token allowance and a failed handoff, then retries', async ({ page }) => {
+    await prepareResume(page);
+    await page.evaluate(() => {
+        let attempt = 0;
+        historySidebar.app.apiCall = async (url, method) => {
+            const replay = replayFixture(url, 'short session\r\n');
+            if (replay) return replay;
+            attempt++;
+            if (attempt === 1) throw new Error('This session is about 912,345 tokens of text. Send to accepts up to 800,000, so nothing was sent to the model.');
+            return { summary: 'retried handoff', maxChars: 20000, boardCards: [] };
+        };
+        historySidebar._showResumeModal({ cli: 'codex' }, 'Codex');
+    });
+    await expect(page.locator('#ch-resume-body')).toContainText('Could not write the handoff: This session is about 912,345 tokens');
+    await expect(page.getByRole('button', { name: 'Launch Terminal' })).toBeDisabled();
+    await page.getByRole('button', { name: 'Regenerate' }).click();
+    await expect(page.locator('#ch-resume-summary')).toHaveValue('retried handoff');
 });
 
 // Mount the production sidebar and stylesheet with a paged, read-only API fixture.
@@ -80,7 +127,8 @@ async function openHistory(page) {
         <!doctype html><html><head>
         <link rel="stylesheet" href="/assets/bootstrap.min.css">
         <link rel="stylesheet" href="/assets/fontawesome/all.min.css">
-        <link rel="stylesheet" href="/style.css"></head>
+        <link rel="stylesheet" href="/style.css">
+        <script src="/assets/xterm/xterm.min.js"></script></head>
         <body style="margin:0;padding:12px;background:#121212"><main id="fixture"></main></body></html>` }));
     await page.goto('/history-fixture');
     await page.evaluate(async () => {

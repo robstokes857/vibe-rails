@@ -75,10 +75,13 @@ namespace VibeRails
             // Summary, terminal registration and push send X-Api-Key, so like every credential
             // client they follow no redirects: an automatic redirect would replay the key and the
             // request body to wherever the response pointed (VIBE-109 review R1).
+            // Each call sets its own deadline: 100 seconds for a summary, 25 minutes for a Send to
+            // handoff (VIBE-363), which streams keep-alives while the model works.
             serviceCollection.AddHttpClient<ISummaryService, SummaryService>(
                 x =>
                 {
                     x.BaseAddress = new Uri("https://viberails.ai");
+                    x.Timeout = Timeout.InfiniteTimeSpan;
                 })
                 .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 

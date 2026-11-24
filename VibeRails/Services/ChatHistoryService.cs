@@ -100,4 +100,24 @@ public class ChatHistoryService(
 
         return new ChatSummaryResponse(summary, transcript, cards);
     }
+
+    public async Task<SessionHandoffResponse> GetHandoffAsync(string sessionId, string renderedSession, CancellationToken cancellationToken)
+    {
+        if (await repository.GetSessionByIdAsync(sessionId, cancellationToken) is null)
+            throw new KeyNotFoundException($"Session not found: {sessionId}");
+
+        // Checked here too, so an over-allowance session is never uploaded just to be refused.
+        var estimatedTokens = SessionHandoffLimits.EstimateTokens(renderedSession);
+        if (estimatedTokens > SessionHandoffLimits.MaxInputTokens)
+            throw SummaryService.TooLarge(estimatedTokens, SessionHandoffLimits.MaxInputTokens);
+
+        // Board references are appended at launch, outside the remote text (as for summaries).
+        var cards = (await boardStore.GetSessionCardsAsync([sessionId], cancellationToken))
+            .Select(ToCard).ToArray();
+
+        // No transcript or summary cache: every Send to renders the recording as it is now,
+        // so a still-running session and a second attempt both get current content.
+        var summary = await summaryService.GetHandoffAsync(renderedSession, SessionResumeService.MaxResumeSummaryChars, cancellationToken);
+        return new SessionHandoffResponse(summary, SessionResumeService.MaxResumeSummaryChars, cards);
+    }
 }

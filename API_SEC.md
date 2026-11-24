@@ -449,6 +449,7 @@ middleware serves their paths rather than registering individual API endpoints.
 | PATCH | `/api/v1/chatHistory/{sessionId}` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
 | GET | `/api/v1/chatHistory/{sessionId}/raw-session` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
 | GET | `/api/v1/chatHistory/{sessionId}/replay` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
+| POST | `/api/v1/chatHistory/{sessionId}/handoff` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
 | GET | `/api/v1/chatHistory/{sessionId}/summary` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
 | GET | `/api/v1/chatHistory/{sessionId}/terminal-replay` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
 | GET | `/api/v1/chatHistory/{sessionId}/transcript` | [ChatHistoryRoutes.cs](VibeRails/Routes/ChatHistoryRoutes.cs) |
@@ -1025,6 +1026,20 @@ Credential cleaning lives in the pure static `VibeRails.Security.CredentialRedac
 exports use its configuration-value, argument and property helpers inside their JSON/TOML
 parsers. Search uses `ContainsKnownSecret`, preserving its existing filtering policy.
 Configuration cleaning and search detection are not substitutes for outbound transcript redaction.
+
+### Send to handoffs (VIBE-363)
+
+Send to sends far more than a recap: the text xterm.js renders from the session's **whole**
+recording, which the browser builds from the session-replay API and posts to
+`POST /api/v1/chatHistory/{sessionId}/handoff` (session and tab credentials, an existing session).
+The route redacts it with `RedactTranscript` (and the user's own key) and sends it only to fixed
+`https://viberails.ai/api/v1/summary/handoff`, under the same Remote Access, saved API key,
+`X-Api-Key`-only, no-redirect and no-cookie rules as summaries. viberails.ai forwards it to OpenAI.
+Up to about 800,000 estimated tokens are sent; both sides refuse more before any upload. The
+answer is an event stream (keep-alive comments, then one result line) read with a 25-minute
+deadline; error text shown to the user is fixed local text, never the remote body. Nothing is
+cached locally, and the local log records statuses only. viberails.ai retains the exchange under
+the account like its other generation routes.
 
 ### Public session sharing links
 

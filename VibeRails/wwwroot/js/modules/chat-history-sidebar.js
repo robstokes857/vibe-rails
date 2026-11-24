@@ -10,6 +10,11 @@ import { showSessionShareModal } from './terminal-session-share.js';
 import { cardDisplayId, cardLabel, cardSearchText } from './board-card-label.js';
 import { BoardApi } from './board-api.js';
 import { CardSearchPicker } from './board-card-search-picker.js';
+import { renderSessionHandoffText } from './session-handoff-text.js';
+
+// The longest handoff a launch accepts; the handoff route returns the current value as maxChars.
+const DEFAULT_HANDOFF_CHAR_LIMIT = 20000;
+const formatCount = value => value.toLocaleString('en-US');
 
 const DEFAULT_PAGE_SIZE = 20;
 const SCROLL_LOAD_THRESHOLD_PX = 48;
@@ -1259,7 +1264,7 @@ export class ChatHistorySidebar {
     async _showResumeModal(parsedLlm, llmDisplayLabel) {
         if (!this.activeItem) return;
 
-        const CHAR_LIMIT = 6000;
+        let charLimit = DEFAULT_HANDOFF_CHAR_LIMIT;
         const sessionId = this.activeItem.id;
         const activeItemSnapshot = this.activeItem;
         this._closeContextMenu();
@@ -1268,15 +1273,7 @@ export class ChatHistorySidebar {
 
         this.app.showModal(`Sending to ${llmDisplayLabel}`, `
             <div class="text-muted small mb-3">${escapeHtml(sessionId)}</div>
-            <div id="ch-resume-body">
-                <div class="d-flex flex-column gap-2 py-2 text-muted">
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="vb-spinner vb-spinner-sm flex-shrink-0" role="status" aria-label="Generating summary"></span>
-                        <span>Generating summary&hellip;</span>
-                    </div>
-                    <div class="small" style="padding-left:1.75rem;">This might take a moment.</div>
-                </div>
-            </div>
+            <div id="ch-resume-body"></div>
             <div class="d-flex justify-content-between align-items-center mt-3" id="ch-resume-actions" style="display:none !important;">
                 <button type="button" class="btn btn-outline-secondary btn-sm" id="ch-resume-regenerate-btn" disabled>
                     <i class="fa-solid fa-rotate-right me-1"></i>Regenerate
@@ -1298,42 +1295,63 @@ export class ChatHistorySidebar {
             && document.getElementById('ch-resume-body') === resumeBody;
         let loadGeneration = 0;
 
-        const showSpinner = (container) => {
+        const showSpinner = (container, label, detail) => {
             container.innerHTML = `
                 <div class="d-flex flex-column gap-2 py-2 text-muted">
                     <div class="d-flex align-items-center gap-2">
-                        <span class="vb-spinner vb-spinner-sm flex-shrink-0" role="status" aria-label="Generating summary"></span>
-                        <span>Generating summary&hellip;</span>
+                        <span class="vb-spinner vb-spinner-sm flex-shrink-0" role="status" aria-label="${escapeHtml(label)}"></span>
+                        <span id="ch-resume-status">${escapeHtml(label)}&hellip;</span>
                     </div>
-                    <div class="small" style="padding-left:1.75rem;">This might take a moment.</div>
+                    <div class="small" id="ch-resume-status-detail" style="padding-left:1.75rem;">${escapeHtml(detail)}</div>
                 </div>`;
         };
 
-        const loadSummary = async (regenerate) => {
+        // VIBE-363: play the whole recording through an off-screen xterm.js, then send the text it
+        // rendered for the handoff. Nothing is cached, so Regenerate also picks up newer output.
+        const loadSummary = async () => {
             if (!isCurrent()) return;
             const generation = ++loadGeneration;
+            const stillLoading = () => isCurrent() && generation === loadGeneration;
 
-            showSpinner(resumeBody);
+            showSpinner(resumeBody, 'Replaying the session', 'Reading everything this session has recorded so far.');
             if (actionsBar) actionsBar.style.cssText = 'display:none !important;';
             if (regenerateBtn) regenerateBtn.disabled = true;
             if (launchBtn) launchBtn.disabled = true;
 
             try {
-                const url = `/api/v1/chatHistory/${encodeURIComponent(sessionId)}/summary${regenerate ? '?regenerate=true' : ''}`;
+                const text = await renderSessionHandoffText(sessionId, {
+                    request: (path, signal) => this.app.apiCall(path, 'GET', null, { showLoading: false, signal }),
+                    createTerminal: options => this._createHandoffTerminal(options),
+                    signal: abort.signal,
+                    onProgress: ({ phase, done, total }) => {
+                        if (!stillLoading() || !total) return;
+                        const detail = document.getElementById('ch-resume-status-detail');
+                        const percent = Math.min(100, Math.floor(done / total * 100));
+                        if (detail) detail.textContent = phase === 'loading'
+                            ? `Reading the recording (${percent}%).`
+                            : `Rendering the terminal output (${percent}%).`;
+                    }
+                });
+                if (!stillLoading()) return;
+                if (!text.trim()) throw new Error('This session has no terminal output to send.');
+
+                showSpinner(resumeBody, 'Writing the handoff',
+                    'GPT-6.1 Terra is reading the whole session. A long session can take several minutes.');
                 // The backend answers a viberails.ai failure with JSON naming what went wrong; show it.
-                const result = await this.app.apiCall(url, 'GET', null,
-                    { showLoading: false, signal: abort.signal, preferErrorResponseMessage: true });
-                if (!isCurrent() || generation !== loadGeneration) return;
+                const result = await this.app.apiCall(`/api/v1/chatHistory/${encodeURIComponent(sessionId)}/handoff`, 'POST',
+                    { text }, { showLoading: false, signal: abort.signal, preferErrorResponseMessage: true });
+                if (!stillLoading()) return;
 
                 const summary = result?.summary ?? '';
+                charLimit = Number.isInteger(result?.maxChars) && result.maxChars > 0 ? result.maxChars : DEFAULT_HANDOFF_CHAR_LIMIT;
 
                 resumeBody.innerHTML = `
                     <div class="mb-2">
-                        <label class="form-label fw-semibold small text-muted text-uppercase mb-1" style="letter-spacing:.05em;">Summary</label>
-                        <textarea class="form-control" id="ch-resume-summary" rows="8"
+                        <label class="form-label fw-semibold small text-muted text-uppercase mb-1" style="letter-spacing:.05em;" for="ch-resume-summary">Handoff</label>
+                        <textarea class="form-control" id="ch-resume-summary" rows="14"
                             style="font-size:0.85rem;resize:vertical;">${escapeHtml(summary)}</textarea>
                         <div class="d-flex justify-content-end mt-1">
-                            <small id="ch-resume-char-count" class="${summary.length > CHAR_LIMIT ? 'text-danger' : 'text-muted'}">${summary.length} / ${CHAR_LIMIT}</small>
+                            <small id="ch-resume-char-count" class="${summary.length > charLimit ? 'text-danger' : 'text-muted'}">${formatCount(summary.length)} / ${formatCount(charLimit)}</small>
                         </div>
                     </div>
                     ${this._renderResumeCards(result?.boardCards || [])}`;
@@ -1350,8 +1368,8 @@ export class ChatHistorySidebar {
                 const charCount = document.getElementById('ch-resume-char-count');
                 const updateCharCount = () => {
                     const len = summaryTextarea.value.length;
-                    charCount.textContent = `${len} / ${CHAR_LIMIT}`;
-                    const overLimit = len > CHAR_LIMIT;
+                    charCount.textContent = `${formatCount(len)} / ${formatCount(charLimit)}`;
+                    const overLimit = len > charLimit;
                     charCount.classList.toggle('text-danger', overLimit);
                     charCount.classList.toggle('text-muted', !overLimit);
                     if (launchBtn) launchBtn.disabled = len === 0 || overLimit;
@@ -1360,21 +1378,21 @@ export class ChatHistorySidebar {
 
                 if (actionsBar) actionsBar.style.cssText = '';
                 if (regenerateBtn) regenerateBtn.disabled = false;
-                if (launchBtn) launchBtn.disabled = summary.length === 0 || summary.length > CHAR_LIMIT;
+                if (launchBtn) launchBtn.disabled = summary.length === 0 || summary.length > charLimit;
             } catch (error) {
-                if (!isCurrent() || generation !== loadGeneration) return;
-                resumeBody.innerHTML = `<div class="text-danger small">Failed to generate summary: ${escapeHtml(error.message)}</div>`;
+                if (!stillLoading() || error?.name === 'AbortError') return;
+                resumeBody.innerHTML = `<div class="text-danger small">Could not write the handoff: ${escapeHtml(error.message)}</div>`;
                 if (actionsBar) actionsBar.style.cssText = '';
                 if (regenerateBtn) regenerateBtn.disabled = false;
             }
         };
 
         // Wire buttons
-        document.getElementById('ch-resume-regenerate-btn')?.addEventListener('click', () => loadSummary(true));
+        document.getElementById('ch-resume-regenerate-btn')?.addEventListener('click', () => loadSummary());
         document.getElementById('ch-resume-launch-btn')?.addEventListener('click', () => {
             if (!isCurrent() || launchBtn.disabled) return;
             const summaryText = document.getElementById('ch-resume-summary')?.value?.trim() || '';
-            if (!summaryText || summaryText.length > CHAR_LIMIT) return;
+            if (!summaryText || summaryText.length > charLimit) return;
 
             this.app.closeModal();
 
@@ -1392,7 +1410,13 @@ export class ChatHistorySidebar {
             });
         });
 
-        await loadSummary(false);
+        await loadSummary();
+    }
+
+    // The replay terminal is never opened, so nothing is drawn. Tests replace this.
+    _createHandoffTerminal(options) {
+        if (typeof window.Terminal !== 'function') throw new Error('The terminal emulator did not load. Reload VibeRails and try again.');
+        return new window.Terminal(options);
     }
 
     _renderResumeCards(cards) {

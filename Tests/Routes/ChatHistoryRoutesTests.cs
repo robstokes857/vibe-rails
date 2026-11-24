@@ -165,4 +165,92 @@ public sealed class ChatHistoryRoutesTests
         }
         finally { await app.StopAsync(CancellationToken.None); }
     }
+
+    // VIBE-363: Send to posts the text xterm.js rendered from the whole recording. The route uses no
+    // transcript or summary cache (the strict repository fails on any such call), sends the text as
+    // posted, and refuses an over-allowance session without contacting viberails.ai.
+    [Fact]
+    public async Task Handoff_SendsTheRenderedText_WithoutCaches_AndRequiresBothCredentials()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var repository = new Mock<IRepository>(MockBehavior.Strict);
+        repository.Setup(r => r.GetSessionByIdAsync("session", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionResponse("session", "codex", null, "C:/project", DateTime.UtcNow, null, null));
+        repository.Setup(r => r.GetSessionByIdAsync("missing", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SessionResponse?)null);
+        var board = new Mock<IBoardStore>(MockBehavior.Strict);
+        board.Setup(s => s.GetSessionCardsAsync(It.Is<IReadOnlyList<string>>(ids => ids.Count == 1 && ids[0] == "session"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new("session", "card", "VB-M66G2-64", "Filters", "VIBE-7")]);
+        var summaries = new Mock<ISummaryService>(MockBehavior.Strict);
+        const string rendered = "PS> codex\n=== Full-screen view (at the end of the recording) ===\n› fix the tests\n=== End of full-screen view ===";
+        summaries.Setup(s => s.GetHandoffAsync(rendered, SessionResumeService.MaxResumeSummaryChars, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("Here's where we are.");
+
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddSingleton(repository.Object);
+        builder.Services.AddSingleton(board.Object);
+        builder.Services.AddSingleton(Mock.Of<ISessionTranscriptService>(MockBehavior.Strict));
+        builder.Services.AddSingleton(summaries.Object);
+        builder.Services.AddSingleton(Mock.Of<ISessionDataExportService>());
+        builder.Services.AddSingleton<IChatHistoryService, ChatHistoryService>();
+        var auth = new Mock<IAuthService>();
+        auth.Setup(a => a.ValidateToken(It.IsAny<string?>())).Returns((string? token) => token == "session-token");
+        auth.Setup(a => a.ValidateTabToken(It.IsAny<string?>())).Returns((string? token) => token == "tab-token");
+        builder.Services.AddSingleton(auth.Object);
+        builder.Services.ConfigureHttpJsonOptions(options =>
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default));
+        await using var app = builder.Build();
+        app.UseMiddleware<CookieAuthMiddleware>();
+        ChatHistoryRoutes.Map(app);
+        await app.StartAsync(ct);
+
+        async Task<HttpResponseMessage> PostAsync(string session, string text, string credential = "both")
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post,
+                new Uri(new Uri(app.Urls.First()), $"/api/v1/chatHistory/{session}/handoff"))
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new { text }), System.Text.Encoding.UTF8, "application/json")
+            };
+            if (credential is "session" or "both") request.Headers.Add("viberails_session", "session-token");
+            if (credential is "tab" or "both") request.Headers.Add("viberails_tab", "tab-token");
+            return await Client.SendAsync(request, ct);
+        }
+
+        try
+        {
+            foreach (var credential in new[] { "none", "session", "tab" })
+            {
+                using var denied = await PostAsync("session", rendered, credential);
+                Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+            }
+
+            using (var response = await PostAsync("session", rendered))
+            {
+                response.EnsureSuccessStatusCode();
+                using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                Assert.Equal("Here's where we are.", json.RootElement.GetProperty("summary").GetString());
+                Assert.Equal(SessionResumeService.MaxResumeSummaryChars, json.RootElement.GetProperty("maxChars").GetInt32());
+                Assert.Equal("VB-M66G2-64", json.RootElement.GetProperty("boardCards")[0].GetProperty("key").GetString());
+            }
+
+            using (var missing = await PostAsync("missing", rendered))
+                Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+
+            using (var blank = await PostAsync("session", "  "))
+                Assert.Equal(HttpStatusCode.BadRequest, blank.StatusCode);
+
+            using (var tooLarge = await PostAsync("session", new string('a', SessionHandoffLimits.MaxInputTokens * 4 + 1)))
+            {
+                Assert.Equal(HttpStatusCode.RequestEntityTooLarge, tooLarge.StatusCode);
+                using var json = JsonDocument.Parse(await tooLarge.Content.ReadAsStringAsync(ct));
+                Assert.Contains("800,001 tokens", json.RootElement.GetProperty("error").GetString());
+                Assert.Contains("800,000", json.RootElement.GetProperty("error").GetString());
+            }
+
+            summaries.Verify(s => s.GetHandoffAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+        finally { await app.StopAsync(CancellationToken.None); }
+    }
 }

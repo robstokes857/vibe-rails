@@ -39,6 +39,16 @@ public class SessionResumeService(
     IBoardStore boardStore,
     IBoardProjectResolver projectResolver) : ISessionResumeService
 {
+    /// <summary>
+    /// The longest resume summary or Send to handoff a launch accepts (VIBE-363, was 6,000). The
+    /// text rides on the CLI's command line, in a prompt cut at
+    /// <see cref="PromptPlaceholderService.MaxResolvedPromptChars"/> (30,000) that also carries the
+    /// source session's Board card references and up to 8,000 characters of App and Project context
+    /// (<see cref="Board.BoardService.MaxContextMessageLength"/> each), and Windows refuses a launch
+    /// command over 32,000 characters after quoting. 20,000 leaves room for all of them.
+    /// </summary>
+    public const int MaxResumeSummaryChars = 20_000;
+
     public async Task<string> AppendBoardContextAsync(string sessionId, string summary, CancellationToken cancellationToken)
     {
         // The board never trusts a project path from the request; the resolver derives it from
@@ -98,8 +108,8 @@ public class SessionResumeService(
         if (string.IsNullOrWhiteSpace(summary))
             throw new InvalidOperationException("Summary service returned an empty summary.");
 
-        if (summary.Length > 6000)
-            throw new InvalidOperationException($"Summary is too long ({summary.Length} chars). Max allowed is 6000.");
+        if (summary.Length > MaxResumeSummaryChars)
+            throw new InvalidOperationException($"Summary is too long ({summary.Length} chars). Max allowed is {MaxResumeSummaryChars}.");
 
         // Save to DB cache
         await repository.SaveChatSummaryAsync(new ChatSummary

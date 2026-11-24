@@ -1842,6 +1842,38 @@ namespace VibeRails.DTOs
         public string Summary { get; set; } = string.Empty;
     }
 
+    // Send to handoff (VIBE-363): browser -> local route -> viberails.ai.
+    public record SessionHandoffRequest(string? Text);
+
+    public record SessionHandoffResponse(
+        string Summary,
+        int MaxChars,
+        IReadOnlyList<ChatHistoryCard>? BoardCards = null
+    );
+
+    public class HandoffPostDto
+    {
+        public string SessionText { get; set; } = string.Empty;
+        public int MaxChars { get; set; }
+    }
+
+    /// <summary>The fields VibeRails reads from a viberails.ai refusal before the stream starts.</summary>
+    public class HandoffRefusalDto
+    {
+        public string? Code { get; set; }
+        public long EstimatedTokens { get; set; }
+        public long MaxTokens { get; set; }
+    }
+
+    /// <summary>The final data line of viberails.ai's handoff event stream.</summary>
+    public class HandoffStreamEventDto
+    {
+        public string? Type { get; set; }
+        public string? Summary { get; set; }
+        public int? Status { get; set; }
+        public string? Code { get; set; }
+    }
+
     public record AppToastNotification(
         string Title,
         string Message,
@@ -2123,6 +2155,11 @@ namespace VibeRails.DTOs
     // Summary DTOs
     [JsonSerializable(typeof(SummaryPostDto))]
     [JsonSerializable(typeof(SummaryResponseDto))]
+    [JsonSerializable(typeof(SessionHandoffRequest))]
+    [JsonSerializable(typeof(SessionHandoffResponse))]
+    [JsonSerializable(typeof(HandoffPostDto))]
+    [JsonSerializable(typeof(HandoffRefusalDto))]
+    [JsonSerializable(typeof(HandoffStreamEventDto))]
     // Version/Update DTOs
     [JsonSerializable(typeof(VersionResponse))]
     [JsonSerializable(typeof(ApiVersionResponse))]
