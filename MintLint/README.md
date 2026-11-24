@@ -59,16 +59,26 @@ numbers, and the text before:
 functions share names, and comparing by name let a complex new `Run` pass because another
 type's `Run` was already worse.
 
-1. A function that kept lines of a function of its own name was that function. Only a line
-   whose text occurs once in the previous version counts, because only that line is certain
-   to be the same line.
-2. A function that kept lines only of a function whose name is gone from the file is that
-   function renamed, so a rename does not turn inherited complexity into a new finding.
-3. A function left over takes the first function of its name that nobody kept lines of, in
-   file order: first the ones that kept some line, then the ones the change wrote every line
-   of. This covers a rewrite and a file whose every line changed (re-indented, new line
+1. A function that certainly kept lines of a function of its own name was that function.
+   A kept line is certain when its text occurs once in the previous version: it has nowhere
+   else to have come from.
+2. A function that certainly kept lines only of a function whose name is gone from the file
+   is that function renamed, so a rename does not turn inherited complexity into a new
+   finding.
+3. A function still unplaced was the function of its name it most likely kept lines of, one
+   function each, the surest pair first. A kept line right after a placed line, with the
+   same text as the previous version's next line, is taken to be that line
+   ([LineMap](LineMap.cs)). This tells apart namesakes that kept only a declaration, braces
+   and a return that the other also has.
+4. A function left over takes the first function of its name nobody has claimed, in file
+   order: first the ones that kept some line, then the ones the change wrote every line of.
+   This covers a rewrite and a file whose every line changed (re-indented, new line
    endings).
-4. Any other function is new.
+5. Any other function is new.
+
+File order means by line ([LineOwners](LineOwners.cs)). The engine lists a file's functions
+most complex first; pairing in that order swapped the histories of two namesakes whose
+complexities crossed in one change.
 
 Two cases are decided by rule, because nothing in the text tells them apart. A function
 deleted and another of the same name added in one change are compared with each other, which

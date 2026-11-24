@@ -7,26 +7,32 @@ namespace MintLint;
 /// Which function of the previous version each function of the current file was, so that a
 /// change is compared with that function and not with another of the same name. Methods of
 /// different types, overloads and anonymous functions all share names, so a name alone cannot
-/// say. In order:
+/// say. The lines a function kept say (<see cref="KeptLines"/>), in this order:
 /// <list type="number">
-/// <item>A function that kept lines of a function of its own name was that function
-/// (<see cref="KeptLines"/> says which lines count).</item>
-/// <item>A function that kept lines only of a function whose name is gone from the file is
-/// that function renamed.</item>
-/// <item>A function left over takes the first function of its name that nobody kept lines of,
-/// in file order: first the functions that kept some line, then the ones the change wrote
-/// every line of (a rewrite, or a file whose every line changed).</item>
+/// <item>A function that certainly kept lines of a function of its own name was that function.</item>
+/// <item>A function that certainly kept lines only of a function whose name is gone from the
+/// file is that function renamed.</item>
+/// <item>A function still unplaced was the function of its name it most likely kept lines of
+/// (lines placed by their neighbours), one function each, the surest pair first.</item>
+/// <item>A function left over takes the first function of its name nobody has claimed, in file
+/// order: first the functions that kept some line, then the ones the change wrote every line of
+/// (a rewrite, or a file whose every line changed).</item>
 /// </list>
-/// A function none of these places is new.
+/// A function none of these places is new. "File order" is by line: the engine lists a file's
+/// functions most complex first, and pairing in that order would swap the histories of two
+/// functions whose complexities cross.
 /// </summary>
 internal sealed class FunctionHistory
 {
-    private const int None = -1;
+    private const int None = LineOwners.None;
 
     private readonly IReadOnlyList<FunctionMetrics> _now;
     private readonly IReadOnlyList<FunctionMetrics> _before;
-    private readonly Dictionary<int, int>?[] _kept;
-    private readonly bool[] _keptAny;
+    private readonly KeptLines _kept;
+    private readonly int[] _nowOrder;
+    private readonly int[] _beforeOrder;
+    private readonly int[] _beforeRank;
+    private readonly HashSet<string> _names = new(StringComparer.Ordinal);
     private readonly int[] _was;
     private readonly bool[] _claimed;
 
@@ -34,7 +40,20 @@ internal sealed class FunctionHistory
     {
         _now = now.Functions;
         _before = before.Functions;
-        (_kept, _keptAny) = KeptLines.Count(_now, _before, change);
+        _kept = KeptLines.Count(_now, _before, change);
+        _nowOrder = LineOwners.InFileOrder(_now);
+        _beforeOrder = LineOwners.InFileOrder(_before);
+        _beforeRank = new int[_before.Count];
+        for (int rank = 0; rank < _beforeOrder.Length; rank++)
+        {
+            _beforeRank[_beforeOrder[rank]] = rank;
+        }
+
+        foreach (FunctionMetrics function in _now)
+        {
+            _names.Add(function.Name);
+        }
+
         _was = new int[_now.Count];
         Array.Fill(_was, None);
         _claimed = new bool[_before.Count];
@@ -50,93 +69,104 @@ internal sealed class FunctionHistory
     public static Dictionary<FunctionMetrics, FunctionMetrics> Of(FileMetrics now, FileMetrics before, ChangedSource change)
     {
         FunctionHistory history = new(now, before, change);
-        history.TakeKeptNamesakes();
-        history.TakeRenamed();
+        history.TakeKept(sameName: true);
+        history.TakeKept(sameName: false);
+        history.TakeNeighbours();
         history.TakeFreeNamesakes(keptAny: true);
         history.TakeFreeNamesakes(keptAny: false);
-        return history.Result();
-    }
 
-    private Dictionary<FunctionMetrics, FunctionMetrics> Result()
-    {
         Dictionary<FunctionMetrics, FunctionMetrics> result = new(ReferenceEqualityComparer.Instance);
-        for (int i = 0; i < _now.Count; i++)
+        for (int i = 0; i < history._now.Count; i++)
         {
-            if (_was[i] != None)
+            if (history._was[i] != None)
             {
-                result[_now[i]] = _before[_was[i]];
+                result[history._now[i]] = history._before[history._was[i]];
             }
         }
 
         return result;
     }
 
-    /// <summary>Rule 1: a function that kept lines of a function of its own name was that function.</summary>
-    private void TakeKeptNamesakes()
+    /// <summary>
+    /// Rule 1 (<paramref name="sameName"/>) and rule 2: a function is the function it certainly
+    /// kept the most lines of. Under another name that is a rename, and only when the old name is
+    /// gone from the file: a helper carved out of a function that is still there is new.
+    /// </summary>
+    private void TakeKept(bool sameName)
     {
-        for (int i = 0; i < _now.Count; i++)
+        foreach (int i in _nowOrder)
         {
-            int origin = MostKept(i, sameName: true);
-            if (origin != None)
+            int origin = _was[i] == None ? MostKept(i, sameName) : None;
+            if (origin != None && (sameName || !_names.Contains(_before[origin].Name)))
             {
-                _was[i] = origin;
-                _claimed[origin] = true;
+                Take(i, origin);
             }
         }
     }
 
-    /// <summary>Rule 2: another name on the lines of a function whose name is gone is a rename.</summary>
-    private void TakeRenamed()
+    /// <summary>
+    /// Rule 3: namesakes that kept only repeated lines (a declaration, braces and a return that
+    /// another function also has) are told apart by where those lines sit.
+    /// </summary>
+    private void TakeNeighbours()
     {
-        HashSet<string> names = new(StringComparer.Ordinal);
-        foreach (FunctionMetrics function in _now)
+        // Ordered as a tuple: most lines first, then the functions' places in their files.
+        List<(int Fewer, int Place, int OriginPlace, int Function, int Origin)> pairs = [];
+        for (int place = 0; place < _nowOrder.Length; place++)
         {
-            names.Add(function.Name);
+            int i = _nowOrder[place];
+            foreach ((int origin, int count) in _kept.Likely[i] ?? [])
+            {
+                if (_was[i] == None && string.Equals(_now[i].Name, _before[origin].Name, StringComparison.Ordinal))
+                {
+                    pairs.Add((-count, place, _beforeRank[origin], i, origin));
+                }
+            }
         }
 
-        for (int i = 0; i < _now.Count; i++)
+        pairs.Sort();
+        foreach ((int _, int _, int _, int function, int origin) in pairs)
         {
-            int origin = _was[i] == None ? MostKept(i, sameName: false) : None;
-            if (origin != None && !names.Contains(_before[origin].Name))
+            if (_was[function] == None && !_claimed[origin])
             {
-                _was[i] = origin;
-                _claimed[origin] = true;
+                Take(function, origin);
             }
         }
     }
 
-    /// <summary>Rule 3: a function left over takes the first function of its name that nobody kept lines of.</summary>
+    /// <summary>Rule 4: a function left over takes the first function of its name nobody has claimed, in file order.</summary>
     private void TakeFreeNamesakes(bool keptAny)
     {
-        for (int i = 0; i < _now.Count; i++)
+        foreach (int i in _nowOrder)
         {
-            if (_was[i] != None || _keptAny[i] != keptAny || ChangePlacement.IsTopLevel(_now[i]))
+            if (_was[i] == None && _kept.Any[i] == keptAny && !ChangePlacement.IsTopLevel(_now[i]))
             {
-                continue;
-            }
-
-            int origin = FirstFree(_now[i].Name);
-            if (origin != None)
-            {
-                _was[i] = origin;
-                _claimed[origin] = true;
+                Take(i, FirstFree(_now[i].Name));
             }
         }
     }
 
-    /// <summary>The previous function the most lines of function <paramref name="index"/> were in, of its own name or of another; the earlier one on a tie.</summary>
+    /// <summary>
+    /// The previous function, of this function's name or of another, that it certainly kept the
+    /// most lines of; the earlier one in the file on a tie.
+    /// </summary>
     private int MostKept(int index, bool sameName)
     {
+        Dictionary<int, int>? kept = _kept.Certain[index];
+        if (kept is null)
+        {
+            return None;
+        }
+
         int best = None;
         int most = 0;
-        foreach ((int origin, int count) in _kept[index] ?? [])
+        foreach (int origin in _beforeOrder)
         {
             bool named = string.Equals(_before[origin].Name, _now[index].Name, StringComparison.Ordinal);
-            bool better = count > most || (count == most && origin < best);
-            if (named == sameName && better)
+            if (named == sameName && kept.GetValueOrDefault(origin) > most)
             {
                 best = origin;
-                most = count;
+                most = kept[origin];
             }
         }
 
@@ -145,7 +175,7 @@ internal sealed class FunctionHistory
 
     private int FirstFree(string name)
     {
-        for (int i = 0; i < _before.Count; i++)
+        foreach (int i in _beforeOrder)
         {
             if (!_claimed[i] && string.Equals(_before[i].Name, name, StringComparison.Ordinal))
             {
@@ -154,5 +184,14 @@ internal sealed class FunctionHistory
         }
 
         return None;
+    }
+
+    private void Take(int function, int origin)
+    {
+        if (origin != None)
+        {
+            _was[function] = origin;
+            _claimed[origin] = true;
+        }
     }
 }

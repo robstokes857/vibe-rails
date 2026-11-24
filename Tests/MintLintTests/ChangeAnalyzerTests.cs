@@ -261,6 +261,56 @@ public sealed class ChangeAnalyzerTests
     }
 
     [Fact]
+    public void Namesakes_WhoseComplexitiesCross_KeepTheirOwnHistory()
+    {
+        // Two types, each with a Run. One change takes the 22 branches out of the first and puts
+        // 20 into the second: 23 becomes 1, and 1 becomes 21. Neither Run keeps a line the other
+        // does not also have, and the engine lists functions most complex first, so the two swap
+        // places in its lists. Each is still compared with itself, by where its lines sit.
+        string before = TypeWithRun("Existing", 22) + "\n\n" + TypeWithRun("Added", 0);
+        string after = TypeWithRun("Existing", 0) + "\n\n" + TypeWithRun("Added", 20, "x + 100");
+
+        ChangeAnalysis analysis = ChangeAnalyzer.Analyze([AddedBranches("Jobs.cs", before, after)]);
+
+        FileMetrics file = Assert.Single(analysis.Files);
+        FunctionMetrics run = Assert.Single(file.Functions);
+        Assert.Equal((21, LineOf(after, "class Added") + 2), (run.Cyclomatic, run.Line));
+        Assert.Equal(1, analysis.Baselines["Jobs.cs"][("Run", run.Line)].Cyclomatic);
+        Assert.Equal('F', MintLintScorer.Score(file).Overall.Grade);
+    }
+
+    [Fact]
+    public void ANamesakeMadeWorse_IsStillItself_WhenTheOtherIsDeleted()
+    {
+        // The type whose Run had 22 branches is deleted, and the Run that stays gains 20. It is
+        // compared with what it was (1), not with the Run that is gone (23).
+        string before = TypeWithRun("Existing", 22) + "\n\n" + TypeWithRun("Added", 0);
+        string after = TypeWithRun("Added", 20, "x + 100");
+
+        ChangeAnalysis analysis = ChangeAnalyzer.Analyze([AddedBranches("Jobs.cs", before, after)]);
+
+        FunctionMetrics run = Assert.Single(Assert.Single(analysis.Files).Functions);
+        Assert.Equal((21, 3), (run.Cyclomatic, run.Line));
+        Assert.Equal(1, analysis.Baselines["Jobs.cs"][("Run", 3)].Cyclomatic);
+    }
+
+    [Fact]
+    public void WhenEveryLineChanged_NamesakesPairInFileOrder_NotInTheEnginesOrder()
+    {
+        // Every line is re-indented, so no function kept a line and only order is left. First.Run
+        // goes from 1 to 31 and overtakes Second.Run's 23, so the engine's most-complex-first
+        // lists hold the two in opposite orders before and after. In file order each is itself.
+        string before = TypeWithRun("First", 0) + "\n\n" + TypeWithRun("Second", 22);
+        string after = Indented(TypeWithRun("First", 30) + "\n\n" + TypeWithRun("Second", 22));
+
+        ChangeAnalysis analysis = ChangeAnalyzer.Analyze([Change("Jobs.cs", before, after)]);
+
+        FunctionMetrics run = Assert.Single(Assert.Single(analysis.Files).Functions, function => function.Name == "Run");
+        Assert.Equal((31, 3), (run.Cyclomatic, run.Line));
+        Assert.Equal([1, 23], analysis.Baselines["Jobs.cs"].OrderBy(pair => pair.Key.Line).Select(pair => pair.Value.Cyclomatic));
+    }
+
+    [Fact]
     public void ARenamedFunction_IsStillTheFunctionItWas()
     {
         // Legacy becomes Lookup and nothing else changes. Its twelve paths were there before the
@@ -279,7 +329,7 @@ public sealed class ChangeAnalyzerTests
     {
         // The file is indented two more columns: every line is an added line and no function
         // kept one. Each is still the function of its name, so nothing is this change's finding.
-        string after = string.Join("\n", Before.Split('\n').Select(line => line.Length == 0 ? line : "  " + line));
+        string after = Indented(Before);
 
         ChangeAnalysis analysis = ChangeAnalyzer.Analyze([Change("Orders.cs", Before, after)]);
 
@@ -334,11 +384,29 @@ public sealed class ChangeAnalyzerTests
         Assert.Throws<ArgumentException>(() => ChangeAnalyzer.Analyze([null!]));
     }
 
-    /// <summary>A type with one method, Run, of <paramref name="branches"/> if statements: cyclomatic complexity one more.</summary>
-    private static string TypeWithRun(string type, int branches) =>
+    /// <summary>
+    /// A type with one method, Run, of <paramref name="branches"/> if statements on
+    /// <paramref name="subject"/>: cyclomatic complexity one more.
+    /// </summary>
+    private static string TypeWithRun(string type, int branches, string subject = "x") =>
         $"class {type}\n{{\n    int Run(int x)\n    {{\n"
-        + string.Concat(Enumerable.Range(1, branches).Select(i => $"        if (x == {i}) return {i};\n"))
+        + string.Concat(Enumerable.Range(1, branches).Select(i => $"        if ({subject} == {i}) return {i};\n"))
         + "        return 0;\n    }\n}";
+
+    /// <summary>Every line that is not blank, two columns further in.</summary>
+    private static string Indented(string source) =>
+        string.Join("\n", source.Split('\n').Select(line => line.Length == 0 ? line : "  " + line));
+
+    /// <summary>
+    /// A change as Git reports it when the only lines it added are the <c>x + 100</c> branches of
+    /// <paramref name="after"/>, whatever else it removed: one hunk of removals, one of additions.
+    /// </summary>
+    private static ChangedSource AddedBranches(string path, string before, string after)
+    {
+        string[] lines = after.Split('\n');
+        int[] added = Enumerable.Range(1, lines.Length).Where(line => lines[line - 1].Contains("x + 100", StringComparison.Ordinal)).ToArray();
+        return new ChangedSource(path, after, string.Join("\n", added.Select(line => lines[line - 1])), added, before);
+    }
 
     /// <summary>A JavaScript test whose body has <paramref name="branches"/> if statements.</summary>
     private static string Spec(string name, int branches) =>
