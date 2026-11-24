@@ -26,7 +26,12 @@ around the map, so opening either panel shortens the map down to its minimum hei
 - The findings sidebar leads with what is wrong (`findings.js`): the file's rating and health, how
   many measurements are past a limit and, when one function or type holds several of them, where.
   **What to fix first** lists every problem worst first with the first one open: where it was
-  measured, what the metric means, how to fix it and its limits. Selecting a finding moves
+  measured, what the metric means, how to fix it and its limits. A report lists its problems itself
+  (`file.findings`, VIBE-274): every function and type past a limit, in the engine's order, with
+  "was N before this change" when the change made an existing function worse. `findings.js` uses
+  that list as it is, so two functions that are both too complex are both shown; for a report saved
+  before then it derives the problems from the categories, which keep only the worst value of each
+  metric. The verdict also carries the letter grade (`findings.grade`). Selecting a finding moves
   Monaco to its source line; **Captured excerpt** shows its saved code instead. Measurements
   within their limits fold under one disclosure, and one row is open at a time. A radar category
   or score-card metric opens its own row instead. A problem is a raw value past its own warning or
@@ -35,8 +40,10 @@ around the map, so opening either panel shortens the map down to its minimum hei
   index, a composite that only rises when they are fixed, after them; then critical before
   warning; within a level, distance past the warning limit (capped at twice the
   warning-to-critical span, so NPath cannot drown the rest), then category weight.
-  `CodeQualityFindings.cs` (Board) repeats these rules and labels for a check's comment and report
-  text; its tests read this file's labels, so change both together.
+  `Services/GitPreflight` repeats this for a check's comment and report, Git Guard's output and the
+  `Code quality minimum` rule's failure: the labels and fixes in `CodeQualityGuide.cs`, the ranking
+  of an older report's problems in `QualityReportMetrics.cs`. `CodeQualityFindingsTests` reads this
+  file's labels and fixes, so change both together.
 - The Board's saved check report (`../board-check-report.js`) opens the same reader with no
   `onLocate`, so it has no **Show in code explorer**: there is no map behind it.
 - `source-editor.js` uses the shared `monaco-loader.js` and the existing authenticated

@@ -4,10 +4,12 @@ import { readFileSync } from 'node:fs';
 import {
     LANE_CHECK_SCOPES, DEFAULT_LANE_CHECK_SCOPE, LANE_BUILT_IN_CHECKS, LANE_CHECKS, LANE_PICKER_PREFERENCES,
     findLaneCheck, laneCheckName, laneCheckGrade, laneChoiceLabel, laneCheckScopeName, laneChoiceKey, laneChoiceDetail,
-    laneRowDetail, laneChoices, laneManageGroups, laneCheckReused
+    laneRowDetail, laneChoices, laneManageGroups, laneCheckReused, laneRowGradeEditable, laneRowGradeLabel, laneGradeSavedText
 } from '../../../VibeRails/wwwroot/js/modules/launch-lane-editor.js';
+import { checkMinimumOptions, CHECK_MINIMUM_HELP, CHECK_MINIMUM_LABEL } from '../../../VibeRails/wwwroot/js/modules/job-checks.js';
 
 const source = readFileSync(new URL('../../../VibeRails/wwwroot/js/modules/launch-lane-editor.js', import.meta.url), 'utf8');
+const agentsSource = readFileSync(new URL('../../../VibeRails/wwwroot/js/modules/ai-agents-controller.js', import.meta.url), 'utf8');
 // getCliBrand reads window for VS Code asset paths; Node has none.
 globalThis.window ??= {};
 
@@ -40,9 +42,66 @@ test('a new Code quality scan can fail below grade A, B or C, and its name says 
     // The saved name already says the scope and grade, so the picker does not repeat them.
     assert.equal(laneChoiceLabel({ kind: 'code-quality', name: laneCheckName('code-quality', 'repository', 'A'), check: { scope: 'repository', failGrade: 'A' } }),
         'Code quality scan · Repository, minimum A');
-    assert.match(source, /checkMinimumOptions\(''\)/, 'the Findings choice starts at feedback only');
+    assert.match(source, /checkMinimumOptions\(''\)/, 'a new scan’s minimum passing grade starts at None');
     assert.match(source, /check: failGrade \? \{ scope, failGrade \} : \{ scope \}/, 'feedback only sends no grade');
     assert.doesNotMatch(LANE_CHECKS['code-quality'].about, /set in AI Agents/);
+});
+
+test('the minimum is labelled Minimum passing grade, with None first and each option leading with its value (VIBE-274)', () => {
+    assert.equal(CHECK_MINIMUM_LABEL, 'Minimum passing grade');
+    const options = minimum => [...checkMinimumOptions(minimum).matchAll(/<option value="([^"]*)"( selected)?>([^<]*)<\/option>/g)]
+        .map(([, value, selected, text]) => [value, text, Boolean(selected)]);
+    assert.deepEqual(options(''), [
+        ['', 'None: findings are feedback only', true],
+        ['A', 'A: the step fails below grade A', false],
+        ['B', 'B: the step fails below grade B', false],
+        ['C', 'C: the step fails below grade C', false]
+    ]);
+    assert.deepEqual(options('B').filter(([, , selected]) => selected).map(([value]) => value), ['B']);
+    assert.equal(CHECK_MINIMUM_HELP, 'The grade is the overall Code quality grade of the code the change added, weighted by lines: '
+        + 'the same grade Git Guard’s “Code quality minimum” rule checks. Below the minimum the step fails and its report lists what to fix. '
+        + 'Explicit file exemptions apply. Either way, the result is saved on the card as a review.');
+    // The picker's text points at the control, so the owner can find where the grade is set.
+    assert.equal(LANE_CHECKS['code-quality'].about, 'Grades the added code A–F and saves a report on the card with what to fix. '
+        + 'Findings are feedback unless you set a minimum passing grade; below it, the step fails.');
+    // The lane picker, a run order row and the AI Agents editor share the label and the options.
+    assert.doesNotMatch(source, /<label>Findings</);
+    assert.match(source, /<label>\$\{CHECK_MINIMUM_LABEL\}<select class="form-select" data-lane-check-minimum /);
+    assert.match(source, /\$\{CHECK_MINIMUM_LABEL\}<select class="form-select" data-lane-row-grade [^>]*>\$\{checkMinimumOptions\(item\.check\.failGrade \|\| ''\)\}/);
+    assert.match(agentsSource, /select\(CHECK_MINIMUM_LABEL, 'grade', checkMinimumOptions\(saved\?\.check\?\.failGrade \|\| ''\)\)/);
+    assert.doesNotMatch(agentsSource, /Minimum grade \(optional\)/, 'the grade is chosen, never typed');
+});
+
+test('a run order row edits the grade of a lane-made Code quality scan only (VIBE-274)', () => {
+    const scan = (check, more = {}) => ({ id: 'scan', definitionType: 'action', kind: 'code-quality', name: 'Scan', canRunAutomatically: true, check, ...more });
+    for (const [scope] of LANE_CHECK_SCOPES) {
+        assert.equal(laneRowGradeEditable(scan({ scope })), true, scope);
+        assert.equal(laneRowGradeEditable(scan({ scope, failGrade: 'C' })), true, `${scope} C`);
+        // A catalog that sends the unset fields as null.
+        assert.equal(laneRowGradeEditable(scan({ scope, failGrade: null, baseCommit: null, headCommit: null })), true, `${scope} nulls`);
+    }
+    // A pinned commit or range is edited in AI Agents, as is a scope the lane picker cannot create.
+    assert.equal(laneRowGradeEditable(scan({ scope: 'commit', headCommit: 'abc1234' })), false);
+    assert.equal(laneRowGradeEditable(scan({ scope: 'range', baseCommit: 'a', headCommit: 'b' })), false);
+    assert.equal(laneRowGradeEditable(scan({ scope: 'card', headCommit: 'abc1234' })), false);
+    assert.equal(laneRowGradeEditable(scan({ scope: 'card', baseCommit: 'abc1234' })), false);
+    assert.equal(laneRowGradeEditable(scan({ scope: 'future' })), false);
+    assert.equal(laneRowGradeEditable(scan(undefined)), false);
+    assert.equal(laneRowGradeEditable(scan(null)), false);
+    // Only Code quality has a grade; a retired selection has no definition at all.
+    assert.equal(laneRowGradeEditable({ definitionType: 'action', kind: 'vca', check: { scope: 'card' } }), false);
+    assert.equal(laneRowGradeEditable({ definitionType: 'action', kind: 'script', script: { path: 'a.py' } }), false);
+    assert.equal(laneRowGradeEditable({ definitionType: 'preset', kind: 'agent' }), false);
+    assert.equal(laneRowGradeEditable(undefined), false);
+    assert.equal(laneRowGradeLabel({ name: 'Code quality scan · Linked commits' }), 'Minimum passing grade for Code quality scan · Linked commits');
+    assert.equal(laneGradeSavedText('Code quality scan · Linked commits, minimum C', 'C'),
+        'Saved. Code quality scan · Linked commits, minimum C fails the step below grade C.');
+    assert.equal(laneGradeSavedText('Code quality scan · Linked commits'), 'Saved. Code quality scan · Linked commits: findings are feedback only.');
+    assert.equal(laneGradeSavedText('Gate', ''), 'Saved. Gate: findings are feedback only.');
+    // The row switches to another check; a saved one is never renamed or edited in place.
+    assert.equal(source.match(/api\.save\(/g).length, 1, 'checks are only ever created');
+    assert.match(source, /api\.save\('action', null, \{/);
+    assert.match(source, /\{ \.\.\.selection, definitionId: target\.id, definitionType: target\.definitionType \}/, 'the row keeps its place and saved data');
 });
 
 test('picker labels say what a saved check analyzes without repeating its name, old names included', () => {

@@ -6,7 +6,8 @@ namespace MintLint;
 /// <summary>
 /// Measurement-to-grading bridge. Extracts each file's raw metric values from
 /// <see cref="FileMetrics"/> (worst function/class per metric, declaration attribution, the
-/// LCOM stateless-class guard) and hands them to an <see cref="IScoreCalculator"/> to grade.
+/// LCOM stateless-class guard) and hands them to an <see cref="IScoreCalculator"/> to grade,
+/// then lists every declaration past a limit (<see cref="FileScore.Findings"/>).
 /// No grading math lives here — the complete algorithm is in <see cref="ScoreCalculator"/>.
 /// </summary>
 public static class MintLintScorer
@@ -18,8 +19,7 @@ public static class MintLintScorer
     public static FileScore Score(FileMetrics file, ScoringProfile? profile = null, IScoreCalculator? calculator = null)
     {
         ArgumentNullException.ThrowIfNull(file);
-        return (calculator ?? ScoreCalculator.Instance)
-            .ScoreFile(ToMeasuredFile(file), profile ?? ScoringProfile.Default);
+        return ScoreOne(file, profile ?? ScoringProfile.Default, calculator ?? ScoreCalculator.Instance);
     }
 
     /// <summary>
@@ -37,7 +37,7 @@ public static class MintLintScorer
         List<FileScore> scored = [];
         foreach (FileMetrics file in files)
         {
-            scored.Add(effectiveCalculator.ScoreFile(ToMeasuredFile(file), effectiveProfile));
+            scored.Add(ScoreOne(file, effectiveProfile, effectiveCalculator));
         }
 
         // Compute the scan overall BEFORE sorting so the floating-point summation order
@@ -61,9 +61,13 @@ public static class MintLintScorer
         return new ScanResult(scored, overall);
     }
 
-    private static MeasuredFile ToMeasuredFile(FileMetrics file)
+    private static FileScore ScoreOne(FileMetrics file, ScoringProfile profile, IScoreCalculator calculator)
     {
-        return new MeasuredFile(file.File, ExtractMetrics(file), ExtractOrigins(file));
+        bool isTest = TestFileConvention.IsTestFile(file.File);
+        FileScore score = calculator.ScoreFile(
+            new MeasuredFile(file.File, ExtractMetrics(file), ExtractOrigins(file), isTest),
+            profile);
+        return score with { Findings = FindingList.Build(file, isTest, profile, score.Categories) };
     }
 
     private static Dictionary<string, double> ExtractMetrics(FileMetrics file)

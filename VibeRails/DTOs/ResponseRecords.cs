@@ -1076,6 +1076,9 @@ namespace VibeRails.DTOs
     // reach, used to rank which bad code matters most. BaselineScore is the committed
     // (pre-change) version's concern; IntroducedScore = Score - BaselineScore. Concern the
     // file already had counts half toward priority.
+    // Grade is the letter for health (100 - Score). Findings lists every function, type and
+    // file-level measurement past its warning limit, worst first; Categories carry only the
+    // worst value of each metric. Both are absent from reports saved before VIBE-274.
     public record MintLintFileReportResponse(
         string File,
         double Score,
@@ -1084,7 +1087,27 @@ namespace VibeRails.DTOs
         int ReferencedByCount = 0,
         double Priority = 0,
         double? BaselineScore = null,
-        double? IntroducedScore = null
+        double? IntroducedScore = null,
+        string? Grade = null,
+        List<MintLintFindingResponse>? Findings = null
+    );
+
+    // One measurement past its warning or critical limit, for one declaration. Level is
+    // "warning" or "critical"; Scope is "function", "class" or "file". Source is null for a
+    // file-level measurement and for code outside any function. Previous is the value the
+    // same-named function had before the change, when it existed.
+    public record MintLintFindingResponse(
+        string Name,
+        string Level,
+        double Value,
+        double Warn,
+        double Critical,
+        bool HigherIsBetter,
+        string Scope,
+        string? Source = null,
+        int? Line = null,
+        int? EndLine = null,
+        double? Previous = null
     );
 
     // The single worst measurement of one metric across the whole scan, with the code
@@ -1148,7 +1171,8 @@ namespace VibeRails.DTOs
         List<MintLintFileReportResponse> Files,
         List<MintLintWorstMetricResponse>? WorstMetrics = null,
         List<MintLintOverviewCardResponse>? Overview = null,
-        List<MintLintScorecardEntryResponse>? Scorecard = null
+        List<MintLintScorecardEntryResponse>? Scorecard = null,
+        string? Grade = null
     );
 
     // Full working-tree file content for the Code quality source pane. Content is null
@@ -2023,6 +2047,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(List<MintLintMetricResponse>))]
     [JsonSerializable(typeof(MintLintCategoryResponse))]
     [JsonSerializable(typeof(List<MintLintCategoryResponse>))]
+    [JsonSerializable(typeof(MintLintFindingResponse))]
+    [JsonSerializable(typeof(List<MintLintFindingResponse>))]
     [JsonSerializable(typeof(MintLintFileReportResponse))]
     [JsonSerializable(typeof(List<MintLintFileReportResponse>))]
     [JsonSerializable(typeof(MintLintWorstMetricResponse))]

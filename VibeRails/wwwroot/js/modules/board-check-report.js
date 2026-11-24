@@ -4,15 +4,18 @@ import { openFileDetailsModal } from './code-report/file-details-modal.js';
 import { CodeReportViewer } from './code-report/viewer.js';
 
 // A saved card check's report (VIBE-362), in a native dialog over the card editor so the card and its
-// drafts stay as they are. It leads with what needs fixing: each file that needs work and its worst
-// problems, judged by findings.js as the Quality page does, with the file reader one click away. What
-// was not checked, the limitations, the code map and the capture details follow, folded.
+// drafts stay as they are. It leads with what needs fixing: each file graded below the check's minimum
+// (below C when findings are feedback only) with its grade and its worst problems, as findings.js lists
+// them for the Quality page, with the file reader one click away. What was not checked, the limitations,
+// the code map and the capture details follow, folded.
 //
 // Opened from the check's comment ([label](check:<id>), see board-text.js), the card's Code reviews
 // list and Advanced > Checks. Report text is untrusted: everything is escaped, nothing is executed.
 
 const NEEDS_WORK = new Set(['AtRisk', 'NeedsWork']);
 const RATING_ORDER = { AtRisk: 3, NeedsWork: 2, Okay: 1 };
+/** The lowest health that still earns each grade a check can require; the same table as MintLint's. */
+const GRADE_HEALTH = { A: 90, B: 80, C: 70 };
 const SHOWN_PROBLEMS = 5;
 const STATUS_TONES = { Passed: 'good', Findings: 'warning', 'Needs review': 'warning', 'Failed to run': 'danger',
     'Completed with limitations': 'neutral', 'Skipped/not applicable': 'neutral', Cancelled: 'neutral' };
@@ -119,7 +122,7 @@ export function openCheckReport({ app, cardId, checkId }) {
             const response = await app.apiCall(url, 'GET', null, { showLoading: false, signal: request.signal, preferErrorResponseMessage: true });
             if (closed) return;
             check = response.check;
-            files = reportFiles(engineReport(check));
+            files = reportFiles(engineReport(check), check.minimumGrade);
             layer.querySelector(`#${prefix}-title`).textContent = `${check.tool} report`;
             layer.querySelector('[data-check-report-meta]').textContent = metaLine(check);
             body.innerHTML = reportHtml(response, files, prefix);
@@ -145,12 +148,23 @@ function engineReport(check) {
     try { return report ? JSON.parse(report) : null; } catch { return null; }
 }
 
-/** Analyzed files with their findings: those that need work first, as the comment orders them. */
-function reportFiles(report) {
+/** The grade a file must reach: the check's minimum, otherwise C (below it a file is rated Needs work or At risk). */
+export const checkGradeBar = minimumGrade => GRADE_HEALTH[minimumGrade] ? minimumGrade : 'C';
+
+/**
+ * Analyzed files with their findings: those below the bar first, as the comment orders them. A file
+ * needs work when its health is under the bar's; a report without scores falls back to its rating.
+ */
+export function reportFiles(report, minimumGrade) {
+    const floor = GRADE_HEALTH[checkGradeBar(minimumGrade)];
     return (Array.isArray(report?.files) ? report.files : [])
         .filter(file => file && typeof file.file === 'string')
-        .map(file => ({ file, findings: fileFindings(file), needsWork: NEEDS_WORK.has(file.rating) }))
-        .sort((a, b) => (RATING_ORDER[b.file.rating] ?? 0) - (RATING_ORDER[a.file.rating] ?? 0)
+        .map(file => {
+            const findings = fileFindings(file);
+            return { file, findings, needsWork: typeof findings.health === 'number' ? findings.health < floor : NEEDS_WORK.has(file.rating) };
+        })
+        .sort((a, b) => Number(b.needsWork) - Number(a.needsWork)
+            || (RATING_ORDER[b.file.rating] ?? 0) - (RATING_ORDER[a.file.rating] ?? 0)
             || (b.file.priority ?? 0) - (a.file.priority ?? 0) || (b.file.score ?? 0) - (a.file.score ?? 0)
             || a.file.file.localeCompare(b.file.file));
 }
@@ -180,8 +194,9 @@ function headline(check, files) {
     if (check.status === 'Failed to run' || check.status === 'Cancelled') return check.summary || 'The check did not finish.';
     if (!files.length) return check.summary || 'No saved findings.';
     const needsWork = files.filter(entry => entry.needsWork).length;
-    if (!needsWork) return `No file needs work. ${files.length === 1 ? '1 file was' : `${files.length} files were`} checked.`;
-    return `${needsWork === 1 ? '1 file needs' : `${needsWork} files need`} work, of ${files.length} checked.`;
+    const bar = checkGradeBar(check.minimumGrade);
+    if (!needsWork) return `No file grades below ${bar}. ${files.length === 1 ? '1 file was' : `${files.length} files were`} checked.`;
+    return `${needsWork === 1 ? '1 file grades' : `${needsWork} files grade`} below ${bar}, of ${files.length} checked.`;
 }
 
 const where = item => `${item.where} · ${item.limitText}`;
@@ -198,8 +213,8 @@ function needsWorkHtml(entry, index) {
     return `<article class="board-check-file" data-tone="${esc(findings.tone)}">
         <header><code class="board-check-path">${esc(file.file)}</code>
             <span class="board-check-pill" data-tone="${esc(findings.tone)}">${esc(findings.ratingLabel)}</span>
-            <span class="board-check-health">Health ${esc(findings.healthText)} / 100</span></header>
-        <p class="board-check-file-summary">${esc(findings.problems.length ? findings.headline : 'No single measurement is past its limit; together they lower the score.')}${findings.hotspot ? ` ${esc(findings.hotspot)}` : ''}</p>
+            <span class="board-check-health">Grade ${esc(findings.grade)} · health ${esc(findings.healthText)} / 100</span></header>
+        <p class="board-check-file-summary">${esc(findings.problems.length ? findings.headline : 'No measurement is past a limit; several are close to theirs.')}${findings.hotspot ? ` ${esc(findings.hotspot)}` : ''}</p>
         ${findings.problems.length ? problemList(findings.problems.slice(0, SHOWN_PROBLEMS)) : ''}
         <div class="board-check-file-actions">
             <button type="button" class="btn btn-sm btn-secondary" data-check-report-file="${index}">Open details${more > 0 ? ` (${more} more ${more === 1 ? 'problem' : 'problems'})` : ''}</button>
@@ -213,7 +228,7 @@ function otherFileHtml(entry, index) {
     const problems = findings.problems.length;
     return `<li><code class="board-check-path">${esc(file.file)}</code>
         <span class="board-check-pill" data-tone="${esc(findings.tone)}">${esc(findings.ratingLabel)}</span>
-        <span class="board-check-health">Health ${esc(findings.healthText)} / 100${problems ? ` · ${problems === 1 ? '1 problem' : `${problems} problems`}` : ''}</span>
+        <span class="board-check-health">Grade ${esc(findings.grade)} · health ${esc(findings.healthText)} / 100${problems ? ` · ${problems === 1 ? '1 problem' : `${problems} problems`}` : ''}</span>
         <button type="button" class="btn btn-link btn-sm" data-check-report-file="${index}">Details</button></li>`;
 }
 

@@ -2,7 +2,7 @@ import { escapeHtml, enhanceSelectWithTomSelect, focusTomSelectClosed, getCliBra
 import { LaunchApi } from './launch-api.js';
 import { launchPresentation } from './launch-presentation.js';
 import { boardBrandLogo } from './board-brand.js';
-import { checkMinimumOptions, CHECK_MINIMUM_GRADES, CHECK_MINIMUM_HELP } from './job-checks.js';
+import { checkMinimumOptions, CHECK_MINIMUM_GRADES, CHECK_MINIMUM_HELP, CHECK_MINIMUM_LABEL } from './job-checks.js';
 
 /**
  * Scopes a new lane check can use (VIBE-271). Each one makes sense on every card entry; a pinned
@@ -36,7 +36,7 @@ export const LANE_CHECKS = Object.freeze({
         link: 'Open Rules'
     }),
     'code-quality': Object.freeze({
-        about: 'Grades the added code A–F and saves a report on the card. Findings are feedback unless the scan has a minimum grade; below it, the step fails.',
+        about: 'Grades the added code A–F and saves a report on the card with what to fix. Findings are feedback unless you set a minimum passing grade; below it, the step fails.',
         view: 'code-quality',
         link: 'Open Quality'
     })
@@ -87,6 +87,45 @@ export const findLaneCheck = (items, kind, scope, failGrade = '') => items.find(
 export const laneCheckReused = (items, item) => Boolean(LANE_CHECKS[item.kind])
     && LANE_CHECK_SCOPES.some(([scope]) => scope === item.check?.scope)
     && findLaneCheck(items, item.kind, item.check.scope, item.check.failGrade || '') === item;
+
+/**
+ * True when a run order row can change its minimum passing grade in place (VIBE-274): a Code quality
+ * scan with a scope the lane picker can create and no pinned commit. Changing it switches the row to
+ * the check with that grade (found or created); a pinned or other check is edited in AI Agents.
+ */
+export const laneRowGradeEditable = item => item?.kind === 'code-quality'
+    && LANE_CHECK_SCOPES.some(([scope]) => scope === item.check?.scope)
+    && !item.check.baseCommit && !item.check.headCommit;
+
+/** The row select's accessible name: the visible label, then the entry it belongs to. */
+export const laneRowGradeLabel = item => `${CHECK_MINIMUM_LABEL} for ${item.name}`;
+
+/** A run order row's grade select, for the rows that have one; otherwise nothing (VIBE-274). */
+export const laneRowGradeMarkup = item => laneRowGradeEditable(item)
+    ? `<label class="launch-lane-row-grade">${CHECK_MINIMUM_LABEL}<select class="form-select" data-lane-row-grade aria-label="${escapeHtml(laneRowGradeLabel(item))}">${checkMinimumOptions(item.check.failGrade || '')}</select></label>`
+    : '';
+
+/**
+ * What a row's grade change asks for: nothing when the grade is unchanged, the saved check to switch
+ * to, or a refusal when another row of this lane already runs that check.
+ */
+export function laneGradeChange(items, selections, item, grade) {
+    const failGrade = laneCheckGrade(item.kind, grade);
+    if (failGrade === (item.check.failGrade || '')) return { unchanged: true };
+    const target = findLaneCheck(items, item.kind, item.check.scope, failGrade) || null;
+    const taken = Boolean(target) && selections.some(selection => selection.definitionId === target.id);
+    return { failGrade, target, taken };
+}
+
+/** The run order with one row pointed at another definition: same position, same saved row data. */
+export const laneSelectionsWith = (selections, index, target) => selections.map((selection, position) => position === index
+    ? { ...selection, definitionId: target.id, definitionType: target.definitionType }
+    : selection);
+
+/** The status line after a row's grade change: what the lane's scan now does with its grade. */
+export const laneGradeSavedText = (name, failGrade = '') => failGrade
+    ? `Saved. ${name} fails the step below grade ${failGrade}.`
+    : `Saved. ${name}: findings are feedback only.`;
 
 /** The stable Manage list key: a saved definition's type and id, or check:<kind> for a built-in new check. */
 export const laneChoiceKey = item => item.key || `${item.definitionType}:${item.id}`;
@@ -179,7 +218,9 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
             const item = definition(selection);
             const name = escapeHtml(item?.name || 'Unavailable / retired selection');
             const detail = item ? `<span class="launch-lane-row-detail">${escapeHtml(laneRowDetail(item))}</span>` : '';
-            return `<div class="launch-lane-row" data-lane-index="${index}"><div class="launch-lane-title"><span class="launch-lane-number" aria-hidden="true">${index + 1}</span><span class="launch-lane-row-text"><strong>${name}</strong>${detail}</span></div>${!item?.canRunAutomatically ? '<p class="text-warning">Unavailable for automatic runs. Remove or replace this selection.</p>' : ''}<div class="launch-run-actions"><button class="btn btn-sm btn-secondary" data-lane-move="-1"${index === 0 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} up"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Up</button><button class="btn btn-sm btn-secondary" data-lane-move="1"${index === selections.length - 1 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} down"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Down</button><button class="btn btn-sm btn-outline-danger" data-lane-remove>Remove</button></div></div>`;
+            // VIBE-274: a lane-made Code quality scan sets its minimum passing grade here, in place.
+            const grade = laneRowGradeMarkup(item);
+            return `<div class="launch-lane-row" data-lane-index="${index}"><div class="launch-lane-title"><span class="launch-lane-number" aria-hidden="true">${index + 1}</span><span class="launch-lane-row-text"><strong>${name}</strong>${detail}${grade}</span></div>${!item?.canRunAutomatically ? '<p class="text-warning">Unavailable for automatic runs. Remove or replace this selection.</p>' : ''}<div class="launch-run-actions"><button class="btn btn-sm btn-secondary" data-lane-move="-1"${index === 0 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} up"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Up</button><button class="btn btn-sm btn-secondary" data-lane-move="1"${index === selections.length - 1 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} down"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Down</button><button class="btn btn-sm btn-outline-danger" data-lane-remove>Remove</button></div></div>`;
         })
         .join('') || '<p class="launch-lane-empty">No runs yet. Add an agent, script or check below.</p>';
     const render = () => {
@@ -197,7 +238,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
                     <div class="launch-lane-check" data-lane-check-options hidden><label>Check scope<select class="form-select" data-lane-check-scope aria-describedby="${scopeHelpId}">${LANE_CHECK_SCOPES
         .map(([value, label]) => `<option value="${value}"${value === DEFAULT_LANE_CHECK_SCOPE ? ' selected' : ''}>${label}</option>`)
         .join('')}</select></label><p class="form-text" id="${scopeHelpId}" data-lane-check-help>${escapeHtml(scopeHelp(DEFAULT_LANE_CHECK_SCOPE))}</p>
-                        <div class="launch-lane-check" data-lane-check-minimum-options hidden><label>Findings<select class="form-select" data-lane-check-minimum aria-describedby="${minimumHelpId}">${checkMinimumOptions('')}</select></label><p class="form-text" id="${minimumHelpId}">${escapeHtml(CHECK_MINIMUM_HELP)}</p></div></div>
+                        <div class="launch-lane-check" data-lane-check-minimum-options hidden><label>${CHECK_MINIMUM_LABEL}<select class="form-select" data-lane-check-minimum aria-describedby="${minimumHelpId}">${checkMinimumOptions('')}</select></label><p class="form-text" id="${minimumHelpId}">${escapeHtml(CHECK_MINIMUM_HELP)}</p></div></div>
                 </div>
                 <div class="launch-lane-stage"><button type="button" class="btn btn-secondary" data-lane-add disabled aria-describedby="${addHelpId}">Add to run order</button><p class="form-text" id="${addHelpId}">Adding saves the lane. Nothing runs now: the run order starts when a card enters this lane.</p></div>
             </div><div><button type="button" class="btn btn-link btn-sm px-0" data-lane-manage-agents>Create an agent in AI Agents</button></div>`;
@@ -241,7 +282,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
         picker?.dropdown.classList.add('launch-lane-dropdown');
         choose(select.value);
     };
-    /** Shows what the chosen entry does, its page for a check, the scope field for a new check and Findings for a new scan. */
+    /** Shows what the chosen entry does, its page for a check, the scope field for a new check and the minimum passing grade for a new scan. */
     const choose = (value) => {
         const item = choiceItems.get(value);
         host.querySelector('[data-lane-add]').disabled = busy || !item;
@@ -260,7 +301,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
         // Only Code quality can fail its step below a grade; a Rules check is always feedback (VIBE-335).
         host.querySelector('[data-lane-check-minimum-options]').hidden = builtIn?.kind !== 'code-quality';
     };
-    /** A new check's scope and Findings start over after each Add. */
+    /** A new check's scope and minimum passing grade start over after each Add. */
     const resetCheckOptions = () => {
         host.querySelector('[data-lane-check-scope]').value = DEFAULT_LANE_CHECK_SCOPE;
         host.querySelector('[data-lane-check-help]').textContent = scopeHelp(DEFAULT_LANE_CHECK_SCOPE);
@@ -362,6 +403,25 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
             unlock();
         }
     };
+    /** Saves a new check for Add or a row's grade change. A failure shows its error and returns null; nothing runs. */
+    const createCheck = async (kind, scope, failGrade) => {
+        const unlock = lock();
+        try {
+            const saved = await api.save('action', null, {
+                name: laneCheckName(kind, scope, failGrade), kind, enabled: true, expectedRevision: 0,
+                check: failGrade ? { scope, failGrade } : { scope }, script: null
+            });
+            if (!current()) return null;
+            const item = { ...saved, definitionType: 'action', canRunAutomatically: true };
+            items.push(item);
+            return item;
+        } catch (failure) {
+            error(failure);
+            return null;
+        } finally {
+            unlock();
+        }
+    };
     const add = async () => {
         const value = host.querySelector('[data-lane-add-choice]')?.value || '';
         const check = LANE_BUILT_IN_CHECKS.find(check => check.id === value);
@@ -373,23 +433,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
             error({ message: `This lane already runs “${item.name}”.` }, { reload: false });
             return;
         }
-        if (check && !item) {
-            const unlock = lock();
-            try {
-                const saved = await api.save('action', null, {
-                    name: laneCheckName(check.kind, scope, failGrade), kind: check.kind, enabled: true, expectedRevision: 0,
-                    check: failGrade ? { scope, failGrade } : { scope }, script: null
-                });
-                if (!current()) return;
-                item = { ...saved, definitionType: 'action', canRunAutomatically: true };
-                items.push(item);
-            } catch (failure) {
-                error(failure);
-                return;
-            } finally {
-                unlock();
-            }
-        }
+        if (check && !item) item = await createCheck(check.kind, scope, failGrade);
         if (!item) return;
         if (!await saveOrder([...selections, { definitionId: item.id, definitionType: item.definitionType }])) return;
         renderRows();
@@ -397,6 +441,33 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
         resetCheckOptions();
         say(`Saved. ${item.name} runs when a card enters this lane.`);
         focusPicker();
+    };
+    /**
+     * A run order row's minimum passing grade, changed in place (VIBE-274). The row switches to the check
+     * with that grade, found or created like Add; the check it stops using is never edited or deleted,
+     * because other lanes may run it. A refused change puts the select back and returns focus to it.
+     */
+    const changeGrade = async (select, index) => {
+        const item = definition(selections[index]);
+        const restore = () => {
+            if (!select.isConnected) return;
+            select.value = item?.check?.failGrade || '';
+            select.focus();
+        };
+        if (busy || !laneRowGradeEditable(item)) return restore();
+        const change = laneGradeChange(items, selections, item, select.value);
+        if (change.unchanged) return;
+        if (change.taken) {
+            error({ message: `This lane already runs “${change.target.name}”.` }, { reload: false });
+            return restore();
+        }
+        const target = change.target || await createCheck(item.kind, item.check.scope, change.failGrade);
+        if (!target || !await saveOrder(laneSelectionsWith(selections, index, target))) return restore();
+        renderRows();
+        // The check this row used may be offered again; keep whatever the picker was showing.
+        renderPicker(host.querySelector('[data-lane-add-choice]')?.value || '');
+        say(laneGradeSavedText(target.name, change.failGrade));
+        host.querySelector(`[data-lane-index="${index}"] [data-lane-row-grade]`)?.focus();
     };
     /** Up, Down or Remove on one row, saved at once; focus stays with that entry's controls. */
     const change = async (button, index) => {
@@ -457,6 +528,10 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
             }
             if (event.target.hasAttribute('data-lane-add-choice')) {
                 choose(event.target.value);
+                return;
+            }
+            if (event.target.hasAttribute('data-lane-row-grade')) {
+                void changeGrade(event.target, Number(event.target.closest('[data-lane-index]').dataset.laneIndex));
                 return;
             }
             if (event.target.hasAttribute('data-lane-check-scope'))

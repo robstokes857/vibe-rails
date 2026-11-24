@@ -810,6 +810,15 @@ an agent's saved description (else "Starts Codex with its saved prompt"), a scri
 path and interpreter, or a check's scope. Keep process outcomes and review results
 visible in run activity.
 
+A Code quality scan's row also carries a labelled **Minimum passing grade** select
+under that line: None (findings are feedback only), A, B or C. It is the control
+people look for on the row, so do not make them remove the scan and add it again.
+A change saves at once, like Up, Down and Remove; the status line says what the
+scan now does, and focus stays on the select. The form that adds a new scan uses
+the same label and options. Each option leads with its value so a narrow closed
+select still shows the grade. A check with pinned commits is edited in AI Agents
+and shows no select.
+
 In **Card runs**, keep the run name, process/result status and actions visible.
 Put the report body in a native **Report** disclosure, collapsed by default;
 omit the disclosure when there is no report. Use a 14px semibold run name,

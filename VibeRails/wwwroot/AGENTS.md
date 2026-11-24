@@ -148,10 +148,25 @@ The **Create an agent in AI Agents** link below the picker opens the AI Agents p
 through guarded app navigation and cleanup.
 A new VCA or code-quality check asks for its scope below the picker (VIBE-271): linked commits
 (default for both), unpushed, working tree or repository. A new Code quality scan also asks for
-**Findings** (VIBE-335): `checkMinimumOptions` / `CHECK_MINIMUM_HELP` from `job-checks.js`, sent as
-`check.failGrade` only when a grade is chosen, and named with it (`laneCheckName`). An existing
-check with the same kind, scope and grade is reused rather than copied (`findLaneCheck`), and
-existing checks are labelled with their scope and grade from the catalog's `check` field.
+its **Minimum passing grade** (VIBE-335; labelled "Findings" until VIBE-274, when nobody could find
+it): `CHECK_MINIMUM_LABEL` / `checkMinimumOptions` / `CHECK_MINIMUM_HELP` from `job-checks.js`,
+sent as `check.failGrade` only when a grade is chosen, and named with it (`laneCheckName`). The
+options are **None: findings are feedback only**, then **A**, **B** and **C: the step fails below
+grade C**; each leads with its value so a narrow select still shows it. `checkMinimumOptions` is
+their one source: this picker, a run order row, the AI Agents editor's **Minimum passing grade**
+select (`grade` in `actionFields`, shown for Code quality only) and the older `checkFields`. An
+existing check with the same kind, scope and grade is reused rather than copied (`findLaneCheck`),
+and existing checks are labelled with their scope and grade from the catalog's `check` field.
+A Code quality scan already in the run order sets the grade on its own row (VIBE-274): a labelled
+select under the row's text (`data-lane-row-grade`, named "Minimum passing grade for <entry>"),
+shown when `laneRowGradeEditable` is true (a lane picker scope and no pinned commit; pinned checks
+stay in AI Agents). A change saves at once (`changeGrade`): the row switches to the check with that
+grade, found with `findLaneCheck` or created exactly as Add creates it, in the same position with
+its saved row data, through `saveOrder`. The check the row stops using is never edited, renamed or
+deleted, because other lanes may run it. If the lane already runs the target check, nothing is
+saved and the inline error names it; that or a refused save puts the select back and returns
+focus to it. A saved change re-renders the rows and picker, announces `laneGradeSavedText` on the
+status line and focuses the row's new select.
 The picker and Manage list leave out the saved check that `findLaneCheck` would reuse for its own
 settings (`laneCheckReused`): choosing the built-in entry adds it, so it is never offered twice
 under two names (a saved "Code quality check · Linked commits" beside **Code quality scan**).

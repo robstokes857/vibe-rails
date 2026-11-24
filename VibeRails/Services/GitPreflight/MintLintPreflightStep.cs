@@ -116,35 +116,18 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        var changedInputs = candidates
-            .Select(candidate => new SourceInput(
-                candidate.File.RelativePath,
-                candidate.AddedContent))
-            .ToList();
-        var analyzed = MintLintAnalyzer.AnalyzeSources(changedInputs);
-        var scan = MintLintScorer.Score(analyzed);
+        // Added lines are graded for size, dependencies and duplication; a function the change
+        // created or made worse is graded whole, at its real line (see ChangeAnalyzer).
+        var analysis = ChangeAnalyzer.Analyze(candidates.Select(candidate => ChangedCode.ToChange(candidate.File)).ToList());
+        var scan = MintLintScorer.Score(analysis.Files);
+        var health = string.Create(CultureInfo.InvariantCulture, $"{scan.Overall.Health:0.0}");
 
-        var output = new List<string>
-        {
-            ignoredCount > 0
-                ? $"Scanned added code in {scan.Files.Count} supported {sourceScope} source file(s); skipped {skippedCount}, ignored {ignoredCount} by user preference."
-                : $"Scanned added code in {scan.Files.Count} supported {sourceScope} source file(s); skipped {skippedCount}.",
-            $"Overall risk: {scan.Overall.Score:0.0}/100 · {scan.Overall.Rating}"
-        };
-
-        foreach (var file in scan.Files.Take(5))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var concerns = file.Categories
-                .Where(category => category.Score > 0)
-                .OrderByDescending(category => category.Score)
-                .ThenBy(category => category.Name, StringComparer.Ordinal)
-                .Take(2)
-                .Select(category => $"{category.Name} {category.Score:0.0}")
-                .ToList();
-            var concernText = concerns.Count == 0 ? "no notable concerns" : string.Join(", ", concerns);
-            output.Add($"{file.File}: {file.Overall.Score:0.0} {file.Overall.Rating} · {concernText}");
-        }
+        var scanned = ignoredCount > 0
+            ? $"Scanned added code in {scan.Files.Count} supported {sourceScope} source file(s); skipped {skippedCount}, ignored {ignoredCount} by user preference."
+            : $"Scanned added code in {scan.Files.Count} supported {sourceScope} source file(s); skipped {skippedCount}.";
+        var (output, needWork) = Describe(scanned, scan, analysis);
+        cancellationToken.ThrowIfCancellationRequested();
+        var worstFiles = WorstFiles(scan);
 
         foreach (var line in output)
         {
@@ -161,12 +144,13 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
             ["noAddedCodeFileCount"] = noAddedCodeCount.ToString(CultureInfo.InvariantCulture),
             ["overallScore"] = scan.Overall.Score.ToString("0.0", CultureInfo.InvariantCulture),
             ["overallRating"] = scan.Overall.Rating,
-            ["worstFiles"] = string.Join("\n", output.Skip(2))
+            ["overallGrade"] = scan.Overall.Grade.ToString(),
+            ["worstFiles"] = string.Join("\n", worstFiles)
         };
         if (context.Request.IncludeReport)
         {
             details[MintLintReportFactory.DetailsKey] = MintLintReportFactory.ToJson(
-                BuildReport(context, candidates, scan, skippedCount));
+                BuildReport(context, candidates, analysis, (scan, skippedCount)));
         }
 
         return new GitPreflightStepResult(
@@ -174,32 +158,73 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
             DisplayName,
             warning ? GitPreflightStepStatus.Warning : GitPreflightStepStatus.Passed,
             warning
-                ? $"MintLint found code-health concerns ({scan.Overall.Rating}); commit remains allowed."
-                : $"MintLint finished added-code analysis with a {scan.Overall.Rating} rating.",
+                ? $"MintLint graded the added code {scan.Overall.Grade} (health {health}/100); {needWork} file(s) need work. The commit remains allowed."
+                : $"MintLint graded the added code {scan.Overall.Grade} (health {health}/100).",
             output,
             DurationMs: 0,
             Blocking: false,
             details);
     }
 
+    // Git Guard's console shows the worst few; the saved report keeps every file and finding.
+    private const int OutputFiles = 5, OutputProblems = 4;
+
+    /// <summary>
+    /// The lines Git Guard prints: what was scanned, the overall grade, then what to fix in the words
+    /// the lane check and the Code quality rule use: each file below C with its problems, where they
+    /// are and how to fix them. Also returns how many files grade below C.
+    /// </summary>
+    private static (List<string> Output, int NeedWork) Describe(string scanned, ScanResult scan, ChangeAnalysis analysis)
+    {
+        var health = string.Create(CultureInfo.InvariantCulture, $"{scan.Overall.Health:0.0}");
+        var graded = CodeQualityFindings.FromReport(MintLintReportFactory.Build(scan, 0, functionBaselines: analysis.Baselines));
+        var needWork = CodeQualityFixList.ToFix(graded, null).Count;
+        List<string> output =
+        [
+            scanned,
+            $"Overall grade {scan.Overall.Grade} · health {health}/100, weighted by added lines.",
+            needWork == 0 ? "No file grades below C." : $"{needWork} file(s) grade below C. Fix these, worst first:",
+            .. CodeQualityFixList.FixLines(graded, null, OutputFiles, OutputProblems)
+        ];
+        return (output, needWork);
+    }
+
+    /// <summary>The older machine-readable form (path, concern, rating, top categories), kept for
+    /// readers of a result that has no report.</summary>
+    private static List<string> WorstFiles(ScanResult scan)
+    {
+        var worstFiles = new List<string>();
+        foreach (var file in scan.Files.Take(5))
+        {
+            var concerns = file.Categories
+                .Where(category => category.Score > 0)
+                .OrderByDescending(category => category.Score)
+                .ThenBy(category => category.Name, StringComparer.Ordinal)
+                .Take(2)
+                .Select(category => $"{category.Name} {category.Score:0.0}")
+                .ToList();
+            var concernText = concerns.Count == 0 ? "no notable concerns" : string.Join(", ", concerns);
+            worstFiles.Add($"{file.File}: {file.Overall.Score:0.0} {file.Overall.Rating} · {concernText}");
+        }
+        return worstFiles;
+    }
+
     private static MintLintReportResponse BuildReport(
         GitPreflightStepContext context,
         IReadOnlyList<MintLintChangeCandidate> candidates,
-        ScanResult scan,
-        int skippedCount)
+        ChangeAnalysis analysis,
+        (ScanResult Scan, int SkippedCount) scanned)
     {
+        var (scan, skippedCount) = scanned;
         // Reach across the repository: bad code that many files reference outranks bad
-        // code nothing uses. Discover declared names from each complete current file, while
-        // retaining change-only metrics for the score itself. Tracked files only by default;
-        // a full-repo scan adds untracked source. Failure here must never block the report.
+        // code nothing uses. Declared names come from each complete current file, which the
+        // change analysis already measured; the score itself stays change-only. Tracked files
+        // only by default; a full-repo scan adds untracked source. Failure here must never
+        // block the report.
         IReadOnlyDictionary<string, int> referencedBy;
         try
         {
-            var impactTargets = MintLintAnalyzer.AnalyzeSources(candidates
-                .Select(candidate => new SourceInput(
-                    candidate.File.RelativePath,
-                    candidate.File.Content!))
-                .ToList());
+            var impactTargets = analysis.WholeFiles;
             referencedBy = context.Snapshot.ImpactFiles is not null
                 ? ImpactAnalyzer.CountReferencingSources(
                     impactTargets,
@@ -216,9 +241,9 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
             referencedBy = new Dictionary<string, int>(StringComparer.Ordinal);
         }
 
+        // Lines in the scan are already lines of the current file, except where a patch came
+        // without its line numbers: those findings keep fragment lines, as they always did.
         var contentByFile = new Dictionary<string, string>(StringComparer.Ordinal);
-        var sourceLineNumbersByFile =
-            new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
         foreach (var candidate in candidates)
         {
             var displayPath = candidate.File.RelativePath.Replace('\\', '/');
@@ -228,10 +253,6 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
             }
 
             contentByFile[displayPath] = candidate.File.Content!;
-            if (candidate.File.AddedLineNumbers is { } sourceLines)
-            {
-                sourceLineNumbersByFile[displayPath] = sourceLines;
-            }
         }
 
         return MintLintReportFactory.Build(
@@ -239,7 +260,7 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
             skippedCount,
             contentByFile,
             referencedBy,
-            sourceLineNumbersByFile: sourceLineNumbersByFile);
+            functionBaselines: analysis.Baselines);
     }
 
     /// <summary>

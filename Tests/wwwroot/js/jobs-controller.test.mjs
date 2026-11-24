@@ -78,8 +78,9 @@ test('a Code quality minimum grade survives scope edits and only Code quality ma
     assert.equal(validCheckScope(['card', 'minimum', 'A'], 3), false);
     assert.equal(validCheckScope(['card', 'minimum', 'D'], 2), false);
     assert.equal(validCheckScope(['card', 'minimum'], 2), false);
-    assert.match(checkFields({ kind: 2, arguments: ['card', 'minimum', 'B'] }), /value="B" selected>Fail the step below grade B/);
-    assert.match(checkFields({ kind: 2, arguments: ['card'] }), /value="" selected>Post as feedback only/);
+    assert.match(checkFields({ kind: 2, arguments: ['card', 'minimum', 'B'] }), /value="B" selected>B: the step fails below grade B/);
+    assert.match(checkFields({ kind: 2, arguments: ['card'] }), /value="" selected>None: findings are feedback only/);
+    assert.match(checkFields({ kind: 2, arguments: ['card'] }), /<label class="form-label">Minimum passing grade\s/);
     assert.doesNotMatch(checkFields({ kind: 3, arguments: ['unpushed'] }), /checkMinimum/);
 });
 

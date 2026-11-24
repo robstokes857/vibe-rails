@@ -62,12 +62,42 @@ public sealed class CodeQualityTests
     }
 
     [Fact]
-    public async Task AggregatePassesEvenWhenOneFileFails()
+    public async Task SmallCleanFilesCannotAverageABadFileUp()
     {
+        // Twenty one-line files beside the 105-line Messy.cs. The overall grade is weighted by added
+        // lines (VIBE-274); as a plain mean of file grades this commit passed.
         await using var repo = await VcaRegressionRepository.CreateAsync("code-quality/minimum-c");
         for (var i = 0; i < 20; i++)
             await System.IO.File.WriteAllTextAsync(Path.Combine(repo.RepositoryPath, $"Good{i}.cs"), $"public class Good{i} {{ public int Value => {i}; }}\n", Ct);
         await repo.GitAsync("add", ".");
+        Expect.Blocked(await repo.RunPreCommitAndCrossCheckAsync(), "Code quality minimum C");
+    }
+
+    [Fact]
+    public async Task AggregatePassesWhenCleanCodeOutweighsOneBadFile()
+    {
+        // The rule grades the change as a whole, never each file: twenty clean files of 27 lines
+        // outweigh Messy.cs, so the commit passes while Messy.cs is still reported as an F.
+        await using var repo = await VcaRegressionRepository.CreateAsync("code-quality/minimum-c");
+        for (var i = 0; i < 20; i++)
+        {
+            var methods = string.Concat(Enumerable.Range(0, 6).Select(method =>
+                $"    public int Step{i}x{method}(int value)\n    {{\n        return value + {i * 10 + method};\n    }}\n"));
+            await System.IO.File.WriteAllTextAsync(Path.Combine(repo.RepositoryPath, $"Good{i}.cs"), $"public class Good{i}\n{{\n{methods}}}\n", Ct);
+        }
+        await repo.GitAsync("add", ".");
         Expect.Passed(await repo.RunPreCommitAndCrossCheckAsync(), 1);
+    }
+
+    [Fact]
+    public async Task AFailedGradeTellsTheCommitterWhatToFix()
+    {
+        await using var repo = await VcaRegressionRepository.CreateAsync("code-quality/minimum-c");
+        var report = await RulesTool.ValidateVcaReportAsync(new GitStagedSnapshotProvider(), repo.RepositoryPath);
+
+        Assert.Contains("is below minimum C (70/100). Fix these first:", report.Output);
+        Assert.Contains("F Messy.cs (health ", report.Output);
+        Assert.Contains(" in Run, line 3 (critical at ", report.Output);
+        Assert.Contains("Fix: ", report.Output);
     }
 }

@@ -257,7 +257,7 @@ public sealed class BoardCheckService(
                     _ => "not evaluated"
                 }}. {record.GradeSummary}".TrimEnd());
         var files = CodeQualityFindings.Read(record.ResultJson);
-        if (files.Count > 0) AppendCheckedFiles(findings, files);
+        if (files.Count > 0) AppendCheckedFiles(findings, files, Bar(record));
         else if (WorstFiles(record.ResultJson) is { Length: > 0 } worst)
             findings.AppendLine("Worst files (concern score/100, rating, top categories):").AppendLine(worst);
         if (record.UnlinkedCommits is { Count: > 0 } unlinked)
@@ -289,43 +289,41 @@ public sealed class BoardCheckService(
             ScopeDescription: $"Code quality check of {scope}{(record.MinimumGrade is null ? "" : $", minimum grade {record.MinimumGrade}")}; evidence read_board_check checkId={record.Id}",
             BaseCommit: record.BaseCommit, HeadCommit: record.HeadCommit, CapturedUtc: record.StartedUtc, Result: result,
             Findings: Bound(findings.ToString(), 20_000),
-            Validation: Bound($"Deterministic Code quality analysis (MintLint {record.ToolVersion}): {record.AnalyzedCount} files analyzed, {record.SkippedCount} skipped, {record.FindingCount} at NeedsWork or AtRisk. No code was run and no reviewer read the change.", 6_000),
+            Validation: Bound($"Deterministic Code quality analysis (MintLint {record.ToolVersion}): {record.AnalyzedCount} files analyzed, {record.SkippedCount} skipped, {record.FindingCount} graded D or F. No code was run and no reviewer read the change.", 6_000),
             Limitations: Bound(record.Limitations.Count == 0 ? "None recorded." : string.Join("\n", record.Limitations), 6_000),
             ReportedUtc: reported, ScopeFiles: record.ScopeFiles?.Take(1000).ToList());
     }
 
-    // The agent-facing report names every file that needs work and its problems; the comment, which people
-    // read first, only the worst few. Both bound what one huge change can put into a single record.
+    // The agent-facing report names every file to fix and its problems with their fixes; the comment,
+    // which people read first, only the worst few. Both bound what one huge change can put into a record.
     private const int ReportFiles = 20, ReportProblems = 10, ReportOtherFiles = 50;
     private const int ReceiptFiles = 3, ReceiptProblems = 3;
 
-    /// <summary>The report's file section: each file that needs work with its problems worst first, then
-    /// the other files the check read, so an agent sees what was graded and what to change.</summary>
-    private static void AppendCheckedFiles(StringBuilder findings, IReadOnlyList<CodeQualityFindings.FileResult> files)
+    /// <summary>The grade a file must reach: the check's minimum, or C when findings are feedback only
+    /// (below C a file is rated Needs work or At risk).</summary>
+    private static char? Bar(BoardCheckRecord record) => record.MinimumGrade is { Length: 1 } grade ? grade[0] : null;
+
+    /// <summary>The report's file section: each file below the bar with its grade and its problems, where they
+    /// are and how to fix them, in the order that raises the overall grade fastest; then the other files
+    /// the check read. A step that fails on its grade therefore always names something to change.</summary>
+    private static void AppendCheckedFiles(StringBuilder findings, IReadOnlyList<QualityFile> files, char? bar)
     {
-        var needsWork = files.Where(file => file.NeedsWork).ToList();
-        findings.AppendLine(needsWork.Count == 0
-            ? $"No file needs work ({Plural(files.Count, "file")} checked)."
-            : $"Files that need work ({needsWork.Count} of {files.Count} checked):");
-        foreach (var file in needsWork.Take(ReportFiles))
-        {
-            findings.Append("- ").Append(file.Path).Append(" · ").Append(file.RatingLabel).Append(", health ").Append(file.HealthText)
-                .Append("/100 · ").AppendLine(ProblemCount(file));
-            foreach (var problem in file.Problems.Take(ReportProblems))
-                findings.Append("  - ").AppendLine(CodeQualityFindings.Describe(problem, markdown: false));
-            if (file.Problems.Count > ReportProblems) findings.Append("  - and ").Append(file.Problems.Count - ReportProblems).AppendLine(" more");
-        }
-        if (needsWork.Count > ReportFiles) findings.Append("- and ").Append(needsWork.Count - ReportFiles).AppendLine(" more files that need work");
-        var others = files.Where(file => !file.NeedsWork).ToList();
+        var grade = bar ?? 'C';
+        var toFix = CodeQualityFixList.ToFix(files, bar);
+        findings.AppendLine(toFix.Count == 0
+            ? $"No file grades below {grade} ({Plural(files.Count, "file")} checked)."
+            : $"Files below {grade} ({toFix.Count} of {files.Count} checked), in the order to fix them:");
+        foreach (var line in CodeQualityFixList.FixLines(files, bar, ReportFiles, ReportProblems)) findings.AppendLine(line);
+        var others = files.Where(file => !CodeQualityFixList.Below(file, bar)).ToList();
         if (others.Count == 0) return;
-        findings.AppendLine(needsWork.Count == 0 ? "Files checked:" : "Other files checked:");
+        findings.AppendLine(toFix.Count == 0 ? "Files checked:" : "Other files checked:");
         foreach (var file in others.Take(ReportOtherFiles))
-            findings.Append("- ").Append(file.Path).Append(" · ").Append(file.RatingLabel).Append(", health ").Append(file.HealthText)
-                .Append("/100 · ").AppendLine(file.Problems.Count == 0 ? "no measurement past a limit" : ProblemCount(file));
+            findings.Append("- ").Append(file.Path).Append(" · ").Append(file.GradeText)
+                .Append(" · ").AppendLine(file.Problems.Count == 0 ? "no measurement past a limit" : ProblemCount(file));
         if (others.Count > ReportOtherFiles) findings.Append("- and ").Append(others.Count - ReportOtherFiles).AppendLine(" more");
     }
 
-    private static string ProblemCount(CodeQualityFindings.FileResult file) => file.Problems.Count == 0
+    private static string ProblemCount(QualityFile file) => file.Problems.Count == 0
         ? "no single measurement past a limit"
         : file.CriticalCount == 0 ? Plural(file.Problems.Count, "problem")
         : file.CriticalCount == file.Problems.Count ? $"{file.Problems.Count} critical {(file.Problems.Count == 1 ? "problem" : "problems")}"
@@ -360,32 +358,42 @@ public sealed class BoardCheckService(
         return text.ToString();
     }
 
-    private static void AppendReceiptFiles(StringBuilder text, BoardCheckRecord record, IReadOnlyList<CodeQualityFindings.FileResult> files)
+    private static void AppendReceiptFiles(StringBuilder text, BoardCheckRecord record, IReadOnlyList<QualityFile> files)
     {
-        var needsWork = files.Where(file => file.NeedsWork).ToList();
         if (record.AnalyzedCount == 0) { text.Append("No supported added code to check.\n\n"); return; }
-        // "Single": below a minimum grade the overall grade can fail with no one file rated Needs work.
-        if (record.FindingCount == 0) { text.Append("No single file needs work (").Append(record.AnalyzedCount).Append(" checked).\n\n"); return; }
-        text.Append("**").Append(record.FindingCount == 1 ? "1 file needs work" : $"{record.FindingCount} files need work")
-            .Append("** (").Append(record.AnalyzedCount).Append(" checked)\n");
-        // An older record without the engine's report keeps its counts; the full report still opens.
-        if (needsWork.Count == 0) { text.Append('\n'); return; }
+        var grade = Bar(record) ?? 'C';
+        var toFix = CodeQualityFixList.ToFix(files, Bar(record));
+        text.Append(ReceiptHeading(record, files.Count > 0, toFix.Count, grade)).Append(" (").Append(record.AnalyzedCount).Append(" checked)");
+        if (toFix.Count == 0) { text.Append(files.Count > 0 ? ".\n\n" : "\n\n"); return; }
         // The editor clamps a long comment, so the first file follows its heading without a blank line.
-        foreach (var (file, index) in needsWork.Take(ReceiptFiles).Select((file, index) => (file, index)))
-        {
-            if (index > 0) text.Append('\n');
-            text.Append('`').Append(file.Path.Replace('`', '\'')).Append("` · ").Append(file.RatingLabel)
-                .Append(", health ").Append(file.HealthText).Append("/100\n");
-            if (file.Problems.Count == 0) text.Append("- No single measurement is past its limit; together they lower the file's score.\n");
-            foreach (var problem in file.Problems.Take(ReceiptProblems))
-                text.Append("- ").Append(CodeQualityFindings.Describe(problem, markdown: true)).Append('\n');
-            if (file.Problems.Count > ReceiptProblems)
-                text.Append("- and ").Append(Plural(file.Problems.Count - ReceiptProblems, "more problem")).Append('\n');
-        }
-        if (needsWork.Count > ReceiptFiles)
-            text.Append('\n').Append(needsWork.Count - ReceiptFiles == 1 ? "1 more file needs work" : $"{needsWork.Count - ReceiptFiles} more files need work")
-                .Append("; the full report lists them.\n");
+        text.Append('\n').AppendJoin('\n', toFix.Take(ReceiptFiles).Select(ReceiptFile));
+        var more = toFix.Count - ReceiptFiles;
+        if (more > 0)
+            text.Append('\n').Append(more == 1 ? "1 more file grades" : $"{more} more files grade")
+                .Append(" below ").Append(grade).Append("; the full report lists them with how to fix each.\n");
         text.Append('\n');
+    }
+
+    /// <summary>"**2 files grade below C**", "No file grades below C", or the saved count for an older
+    /// record without the engine's report (the full report still opens).</summary>
+    private static string ReceiptHeading(BoardCheckRecord record, bool hasReport, int below, char grade)
+    {
+        if (!hasReport)
+            return record.FindingCount switch { 0 => "No file needs work", 1 => "**1 file needs work**", var count => $"**{count} files need work**" };
+        return below switch { 0 => $"No file grades below {grade}", 1 => $"**1 file grades below {grade}**", _ => $"**{below} files grade below {grade}**" };
+    }
+
+    /// <summary>One file in the comment: its path, grade and health, then its worst problems.</summary>
+    private static string ReceiptFile(QualityFile file)
+    {
+        var text = new StringBuilder().Append('`').Append(file.Path.Replace('`', '\'')).Append("` · **").Append(file.Grade)
+            .Append("** · health ").Append(file.HealthText).Append("/100\n");
+        if (file.Problems.Count == 0) text.Append("- No measurement is past a limit; several are close to theirs.\n");
+        foreach (var problem in file.Problems.Take(ReceiptProblems))
+            text.Append("- ").Append(CodeQualityFixList.Describe(problem, markdown: true)).Append('\n');
+        if (file.Problems.Count > ReceiptProblems)
+            text.Append("- and ").Append(Plural(file.Problems.Count - ReceiptProblems, "more problem")).Append('\n');
+        return text.ToString();
     }
 
     /// <summary>"Not checked: 4 files (2 hidden by your ignore list, 2 not a supported language). ", or empty.</summary>
@@ -504,7 +512,7 @@ public sealed class BoardCheckService(
                 : record.Scope == "repository" ? "All committed files at HEAD; dirty and untracked working files are excluded."
                 : record.Scope is "card" or "commit" ? "Only surviving added lines from the selected commits at the newest selected tree are analyzed. Interleaved commits and dirty/untracked files are excluded; rules and impact context come from that committed tree."
                 : "Net changes between the saved base and head; dirty and untracked working files are excluded.",
-            quality ? "Code quality is advisory. Only added code in supported languages is analyzed; reach is lexical, not compiler coverage. Local ignore settings apply."
+            quality ? "Code quality is advisory. Only added code in supported languages is analyzed, and a function the change created or made worse is graded whole; reach is lexical, not compiler coverage. Local ignore settings apply."
                 : "VCA preserves WARN, COMMIT and STOP findings. This run does not acknowledge commit messages or enforce a Git operation."
         };
         if (skipped > 0) limitations.Add($"{skipped} files skipped, ignored, deleted, binary or unavailable; see evidence for coverage.");
@@ -546,7 +554,7 @@ public sealed class BoardCheckService(
         var message = gate.Message ?? (gate.IsValid ? "The minimum grade is met." : "The minimum grade is not met.");
         var limitations = record.Limitations
             .Select(line => line.StartsWith("Code quality is advisory.", StringComparison.Ordinal)
-                ? $"Below minimum grade {minimum} this step fails. The grade is the overall Code quality grade of all added code in scope, as in Git Guard's “Code quality minimum {minimum}” rule; explicit file exemptions apply. Only added code in supported languages is analyzed; reach is lexical, not compiler coverage."
+                ? $"Below minimum grade {minimum} this step fails. The grade is the overall Code quality grade of all added code in scope, weighted by added lines, as in Git Guard's “Code quality minimum {minimum}” rule; explicit file exemptions apply. Only added code in supported languages is analyzed, and a function the change created or made worse is graded whole; reach is lexical, not compiler coverage."
                 : line).ToList();
         if (hiddenByIgnores > 0)
             limitations.Add($"{hiddenByIgnores} files hidden from the report by local ignore settings still count toward the minimum grade. Use exempt_code_quality_file to exempt a file.");

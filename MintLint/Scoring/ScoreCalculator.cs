@@ -5,20 +5,28 @@ namespace MintLint;
 
 /// <summary>
 /// THE one place MintLint turns raw metric values into grades. Every number the library
-/// reports — per-metric concern, category scores, the file overall, the scan overall, and
-/// the rating labels — is computed inside this class, in pipeline order, top to bottom
-/// (after stage 1 measures the raw metrics):
+/// reports — per-metric concern, category scores, the file overall, the scan overall, the
+/// letter grades and the rating labels — is computed inside this class, in pipeline order,
+/// top to bottom (after stage 1 measures the raw metrics):
 ///
 /// <code>
 ///   Stage 2  Normalize   raw value → 0–100 concern via warn/critical thresholds
+///                        (50 at the warning limit, 100 at the critical limit)
 ///   Stage 3  Category    worst metric wins within each category
-///   Stage 4  Roll-up     breadth-gated: the BreadthRank-th worst weighted category,
-///                        floored at DepthFloor × the single worst
-///   Stage 5  Rating      &lt;30 Clean · &lt;55 Okay · &lt;75 NeedsWork · ≥75 AtRisk;
-///                        scan overall = mean of the file overalls
+///   Stage 4  Roll-up     the worst BreadthRank weighted categories, each dampened while
+///                        inside its warning limit; past it the worst one climbs to
+///                        CriticalFloor at its critical limit, and every further category
+///                        at its critical limit adds a step, up to 100
+///   Stage 5  Grade       health = 100 − concern: A ≥90 · B ≥80 · C ≥70 · D ≥55 · F;
+///                        rating: A/B Clean · C Okay · D NeedsWork · F AtRisk;
+///                        scan overall = mean of the file overalls, weighted by lines
 /// </code>
 ///
-/// Tuning knob VALUES (thresholds, weights, BreadthRank, DepthFloor) live in
+/// Two consequences worth knowing. A file with nothing past a warning limit scores 15 or
+/// less, so it grades A or B; a grade of C or lower always comes with a finding. And one
+/// measurement at its critical limit in a full-weight category scores 60, an F.
+///
+/// Tuning knob VALUES (thresholds, weights, BreadthRank, DepthFloor, CriticalFloor) live in
 /// <see cref="ScoringProfile"/>; the FORMULAS live here and nowhere else. Document the rationale
 /// for changes to either and re-derive the hand-computed numbers in Tests/MintLintTests.
 /// </summary>
@@ -26,6 +34,9 @@ public sealed class ScoreCalculator : IScoreCalculator
 {
     /// <summary>The calculator used when callers do not supply their own.</summary>
     public static ScoreCalculator Instance { get; } = new();
+
+    /// <summary>A weighted category concern at or below this is inside its warning limit.</summary>
+    private const double WarningConcern = 50.0;
 
     // Which raw metrics feed which category. This wiring is part of the algorithm (moving a
     // metric between categories changes grades), so it lives here with the math rather than
@@ -58,7 +69,8 @@ public sealed class ScoreCalculator : IScoreCalculator
             foreach (string key in definition.Metrics)
             {
                 if (!file.Metrics.TryGetValue(key, out double raw) ||
-                    !profile.Thresholds.TryGetValue(key, out MetricThreshold? threshold))
+                    !profile.Thresholds.TryGetValue(key, out MetricThreshold? threshold) ||
+                    !IsScored(key, file.IsTest, profile))
                 {
                     continue;
                 }
@@ -90,14 +102,32 @@ public sealed class ScoreCalculator : IScoreCalculator
                 SharedDirection(scoredMetrics)));
         }
 
-        // Stage 4 — breadth-gated roll-up: the overall is the BreadthRank-th worst
-        // (weight-adjusted) category, so a file only rates badly when several independent
-        // smell dimensions are severe at once. Categories individually saturate easily
-        // (worst metric wins inside each one), so "worst category wins" here made nearly
-        // every real file AtRisk — and when everything is bad, nothing is. The DepthFloor
-        // keeps a single catastrophic category from vanishing entirely: it caps how far
-        // breadth gating can discount the worst dimension. Weights below 1.0 de-emphasize
-        // less critical smells.
+        double overall = RollUp(categories, profile);
+
+        // Stage 5 — rating label.
+        return new FileScore(file.File, file.Metrics, categories, new OverallScore(overall, RatingFor(overall)));
+    }
+
+    /// <summary>
+    /// Stage 4 — roll-up. Two questions, and the worst answer is the file's concern.
+    /// <para>
+    /// Severity: how bad is the single worst dimension? One measurement at its critical limit
+    /// must fail the file on its own. Before 2026-11-24 the worst category was only a 0.3
+    /// floor, so a function with cyclomatic complexity 25 capped the file at 30, a C, and
+    /// passed every gate.
+    /// </para>
+    /// <para>
+    /// Breadth: are several dimensions bad at once? Each further category at its critical
+    /// limit raises the concern, up to 100 when BreadthRank of them are, so a file that is
+    /// wrong four ways outranks one that is wrong one way.
+    /// </para>
+    /// Every position runs through the same curve (see <see cref="Graded"/>): a category inside
+    /// its warning limit is dampened by DepthFloor, because "worst metric wins" makes small
+    /// values loud, and past the limit it climbs in a straight line to that position's ceiling
+    /// (see <see cref="Ceiling"/>). Weights below 1.0 de-emphasize less critical smells.
+    /// </summary>
+    private static double RollUp(IReadOnlyList<CategoryScore> categories, ScoringProfile profile)
+    {
         List<double> weighted = new(categories.Count);
         foreach (CategoryScore category in categories)
         {
@@ -107,16 +137,13 @@ public sealed class ScoreCalculator : IScoreCalculator
         weighted.Sort(static (left, right) => right.CompareTo(left));
 
         double overall = 0;
-        if (weighted.Count > 0)
+        int rank = Math.Clamp(profile.BreadthRank, 1, Math.Max(1, weighted.Count));
+        for (int position = 1; position <= rank && position <= weighted.Count; position++)
         {
-            int rank = Math.Clamp(profile.BreadthRank, 1, weighted.Count);
-            overall = Math.Max(weighted[rank - 1], weighted[0] * profile.DepthFloor);
+            overall = Math.Max(overall, Graded(weighted[position - 1], profile.DepthFloor, Ceiling(position, rank, profile.CriticalFloor)));
         }
 
-        overall = Math.Round(Math.Clamp(overall, 0, 100), 1);
-
-        // Stage 5 — rating label.
-        return new FileScore(file.File, file.Metrics, categories, new OverallScore(overall, RatingFor(overall)));
+        return Math.Round(Math.Clamp(overall, 0, 100), 1);
     }
 
     /// <inheritdoc />
@@ -124,61 +151,154 @@ public sealed class ScoreCalculator : IScoreCalculator
     {
         ArgumentNullException.ThrowIfNull(files);
 
+        // Weighted by lines of code, so a large file counts for what it is. A plain mean let
+        // a few small clean files average a large failing one back up to a passing grade.
         double sum = 0;
+        double lines = 0;
         foreach (FileScore file in files)
         {
-            sum += file.Overall.Score;
+            double weight = file.Metrics.TryGetValue("lines_of_code", out double loc) && loc >= 1 ? loc : 1;
+            sum += file.Overall.Score * weight;
+            lines += weight;
         }
 
-        double mean = files.Count == 0 ? 0 : Math.Round(sum / files.Count, 1);
+        double mean = lines <= 0 ? 0 : Math.Round(sum / lines, 1);
         return new OverallScore(mean, RatingFor(mean));
     }
 
     /// <summary>
+    /// Stage 5: the letter grade for a concern score, read from health (100 − concern):
+    /// A from 90, B from 80, C from 70, D from 55, otherwise F. A score that is not a
+    /// number grades F.
+    /// </summary>
+    public static char GradeFor(double concern)
+    {
+        double health = 100 - Math.Clamp(concern, 0, 100);
+        if (health >= 90)
+        {
+            return 'A';
+        }
+
+        if (health >= 80)
+        {
+            return 'B';
+        }
+
+        if (health >= 70)
+        {
+            return 'C';
+        }
+
+        return health >= 55 ? 'D' : 'F';
+    }
+
+    /// <summary>The lowest health (100 − concern) that still earns <paramref name="grade"/>; 0 for F.</summary>
+    public static double HealthFor(char grade)
+    {
+        return grade switch
+        {
+            'A' => 90,
+            'B' => 80,
+            'C' => 70,
+            'D' => 55,
+            _ => 0,
+        };
+    }
+
+    /// <summary>
+    /// Whether a raw value is past a limit, in the direction the metric reads: critical at or
+    /// past the critical limit, warning past the warning limit, otherwise null. A value exactly
+    /// at its warning limit is still inside it.
+    /// </summary>
+    public static string? LevelOf(double value, MetricThreshold threshold)
+    {
+        ArgumentNullException.ThrowIfNull(threshold);
+        double sign = threshold.HigherIsBetter ? -1 : 1;
+        if (sign * value >= sign * threshold.Critical)
+        {
+            return MetricFinding.CriticalLevel;
+        }
+
+        return sign * value > sign * threshold.Warn ? MetricFinding.WarningLevel : null;
+    }
+
+    /// <summary>Whether a metric counts toward this file's grade; test files skip <see cref="ScoringProfile.NotScoredInTests"/>.</summary>
+    public static bool IsScored(string metric, bool isTest, ScoringProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        return !isTest || !profile.NotScoredInTests.Contains(metric);
+    }
+
+    /// <summary>
+    /// What the <paramref name="position"/>-th worst category scores at its critical limit: the
+    /// worst one alone gives <paramref name="criticalFloor"/>, and each further one adds an equal
+    /// step up to 100 at <paramref name="rank"/> (60, 73.3, 86.7, 100 by default). With a rank of
+    /// 1 the worst category is the whole score.
+    /// </summary>
+    private static double Ceiling(int position, int rank, double criticalFloor)
+    {
+        return rank <= 1 ? 100.0 : criticalFloor + (100.0 - criticalFloor) * (position - 1) / (rank - 1);
+    }
+
+    /// <summary>
+    /// Stage 4's curve for one weighted category concern. Inside the warning limit (50 or
+    /// less) the value is multiplied by <paramref name="depthFloor"/>. Past it, the result
+    /// climbs in a straight line from there to <paramref name="ceiling"/> at 100.
+    /// </summary>
+    private static double Graded(double weighted, double depthFloor, double ceiling)
+    {
+        if (weighted <= WarningConcern)
+        {
+            return weighted * depthFloor;
+        }
+
+        double atWarning = WarningConcern * depthFloor;
+        return atWarning + (weighted - WarningConcern) / (100.0 - WarningConcern) * (ceiling - atWarning);
+    }
+
+    /// <summary>
     /// Stage 2: 0→warn maps to concern 0–50, warn→critical maps to 50–100, at or past
-    /// critical pegs at 100. Higher-is-better metrics (maintainability index) invert the
-    /// scale. The result is always higher-is-worse regardless of the raw direction.
+    /// critical pegs at 100. Higher-is-better metrics (maintainability index) mirror it:
+    /// twice the warning limit or more is 0, falling to the warning limit maps to 0–50,
+    /// warn→critical maps to 50–100. The result is always higher-is-worse regardless of
+    /// the raw direction.
     /// </summary>
     private static double Normalize(double raw, MetricThreshold threshold)
     {
-        double score;
-        if (!threshold.HigherIsBetter)
-        {
-            if (raw <= 0 || threshold.Warn <= 0)
-            {
-                return raw > 0 ? 100.0 : 0.0;
-            }
-
-            if (raw <= threshold.Warn)
-            {
-                score = raw / threshold.Warn * 50.0;
-            }
-            else if (raw < threshold.Critical && threshold.Critical > threshold.Warn)
-            {
-                score = 50.0 + (raw - threshold.Warn) / (threshold.Critical - threshold.Warn) * 50.0;
-            }
-            else
-            {
-                score = 100.0;
-            }
-        }
-        else
-        {
-            if (raw >= threshold.Warn)
-            {
-                score = 0.0;
-            }
-            else if (raw >= threshold.Critical && threshold.Warn > threshold.Critical)
-            {
-                score = (threshold.Warn - raw) / (threshold.Warn - threshold.Critical) * 50.0;
-            }
-            else
-            {
-                score = threshold.Critical > 0 ? 50.0 + (threshold.Critical - raw) / threshold.Critical * 50.0 : 100.0;
-            }
-        }
-
+        double score = threshold.HigherIsBetter
+            ? NormalizeHigherIsBetter(raw, threshold.Warn, threshold.Critical)
+            : NormalizeLowerIsBetter(raw, threshold.Warn, threshold.Critical);
         return Math.Clamp(score, 0.0, 100.0);
+    }
+
+    private static double NormalizeLowerIsBetter(double raw, double warn, double critical)
+    {
+        if (raw <= 0 || warn <= 0)
+        {
+            return raw > 0 ? 100.0 : 0.0;
+        }
+
+        if (raw <= warn)
+        {
+            return raw / warn * 50.0;
+        }
+
+        return raw < critical && critical > warn ? 50.0 + (raw - warn) / (critical - warn) * 50.0 : 100.0;
+    }
+
+    private static double NormalizeHigherIsBetter(double raw, double warn, double critical)
+    {
+        if (raw <= critical)
+        {
+            return 100.0;
+        }
+
+        if (raw < warn)
+        {
+            return warn > critical ? 50.0 + (warn - raw) / (warn - critical) * 50.0 : 100.0;
+        }
+
+        return warn > 0 && raw < warn * 2 ? (warn * 2 - raw) / warn * 50.0 : 0.0;
     }
 
     /// <summary>
@@ -208,20 +328,16 @@ public sealed class ScoreCalculator : IScoreCalculator
         return shared;
     }
 
-    /// <summary>Stage 5: the score bands behind the rating labels.</summary>
+    /// <summary>Stage 5: the rating label of a grade, so the two never disagree.</summary>
     private static string RatingFor(double score)
     {
-        if (score < 30)
+        return GradeFor(score) switch
         {
-            return "Clean";
-        }
-
-        if (score < 55)
-        {
-            return "Okay";
-        }
-
-        return score < 75 ? "NeedsWork" : "AtRisk";
+            'A' or 'B' => "Clean",
+            'C' => "Okay",
+            'D' => "NeedsWork",
+            _ => "AtRisk",
+        };
     }
 
     private sealed record CategoryDefinition(string Name, string[] Metrics);

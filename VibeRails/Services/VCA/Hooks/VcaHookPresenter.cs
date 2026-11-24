@@ -341,7 +341,7 @@ public sealed class VcaConsoleHookPresenter : IVcaHookPresenter
                 $"{color}{_style.Bold}{tag}{_style.Reset} {_style.Dim}·{_style.Reset} " +
                 $"{(bold ? _style.Bold : "")}{finding.Rule}{_style.Reset}");
 
-            foreach (var line in WrapToIndent(finding.Reason, FindingIndent))
+            foreach (var line in ReasonLines(finding.Reason))
             {
                 await WriteOutputLineAsync(line);
             }
@@ -369,6 +369,17 @@ public sealed class VcaConsoleHookPresenter : IVcaHookPresenter
             }
         }
     }
+
+    /// <summary>
+    /// A finding's reason, wrapped. A reason may run to several lines: the Code quality rule lists
+    /// each file to fix and its problems. Each line wraps on its own and a list item keeps its indent.
+    /// </summary>
+    private IEnumerable<string> ReasonLines(string reason) =>
+        from paragraph in reason.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+        let text = paragraph.TrimStart(' ')
+        let nested = Math.Min(4, paragraph.Length - text.Length)
+        from line in WrapToIndent(text, FindingIndent + nested, hanging: text.StartsWith("- ", StringComparison.Ordinal) ? 2 : 0)
+        select line;
 
     /// <summary>
     /// Fallback for steps that report prose rather than findings (MintLint). Each line keeps its

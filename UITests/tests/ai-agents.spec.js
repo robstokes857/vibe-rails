@@ -1089,6 +1089,11 @@ test('lane picker offers a reused check once, through its built-in entry, and ne
     expect(posts).toBe(0);
 });
 
+// The one option list behind every Minimum passing grade field: the value leads, so a narrow select still shows it.
+const MINIMUM_GRADE_OPTIONS = [
+    ['', 'None: findings are feedback only'], ['A', 'A: the step fails below grade A'],
+    ['B', 'B: the step fails below grade B'], ['C', 'C: the step fails below grade C']];
+
 // VIBE-335: a new Code quality scan chooses here whether findings fail the step below a grade.
 test('lane picker sets a new Code quality scan’s minimum grade and reuses a scan only at the same grade', async ({ page }, testInfo) => {
     const state = await setup(page);
@@ -1096,18 +1101,20 @@ test('lane picker sets a new Code quality scan’s minimum grade and reuses a sc
     const lane = await routeLane(page);
     await mountLaneEditor(page);
     const picker = page.locator('[data-lane-add-choice]');
-    const findings = page.getByRole('combobox', { name: 'Findings', exact: true });
+    // VIBE-274: the field is named for what it sets. It used to read "Findings", and nobody found it.
+    await expect(page.getByRole('combobox', { name: 'Findings', exact: true })).toHaveCount(0);
+    const findings = page.getByRole('combobox', { name: 'Minimum passing grade', exact: true });
     const rows = page.locator('[data-lane-selection-list] strong');
     const posts = () => state.requests.filter(request => request.path === '/api/v1/actions' && request.method === 'POST').length;
     await picker.evaluate(node => node.tomselect.setValue('new:vca'));
     await expect(page.getByRole('combobox', { name: 'Check scope', exact: true })).toBeVisible();
     await expect(findings).toBeHidden();
     await picker.evaluate(node => node.tomselect.setValue('new:code-quality'));
+    await expect(page.locator('[data-lane-about-text]')).toContainText('unless you set a minimum passing grade');
     await expect(findings).toHaveValue('');
     await expect(findings).toHaveAccessibleDescription(/Code quality minimum/);
-    expect(await findings.locator('option').evaluateAll(options => options.map(option => [option.value, option.textContent]))).toEqual([
-        ['', 'Post as feedback only; never fail the step'], ['A', 'Fail the step below grade A'],
-        ['B', 'Fail the step below grade B'], ['C', 'Fail the step below grade C']]);
+    await expect(findings).toHaveAccessibleDescription(/Below the minimum the step fails and its report lists what to fix\./);
+    expect(await findings.locator('option').evaluateAll(options => options.map(option => [option.value, option.textContent]))).toEqual(MINIMUM_GRADE_OPTIONS);
     await findings.selectOption('B');
     await page.screenshot({ path: testInfo.outputPath('lane-picker-minimum-grade.png') });
     await page.locator('[data-lane-add]').click();
@@ -1130,6 +1137,180 @@ test('lane picker sets a new Code quality scan’s minimum grade and reuses a sc
     // Each Add saved the lane at once.
     expect(lane.writes).toHaveLength(3);
     expect(lane.writes.at(-1).selections.map(selection => selection.definitionId)).toEqual(['preset_1', 'gate_c', 'preset_2']);
+});
+
+// VIBE-274: a scan already in the run order sets its minimum passing grade on its own row.
+const rowGrade = (page, name) => page.getByRole('combobox', { name: `Minimum passing grade for ${name}`, exact: true });
+const laneScanFixture = state => {
+    state.presets.push({ id: 'p1', name: 'Review', cli: 'codex', initialPrompt: 'Review', enabled: true, revision: 1 });
+    state.actions.push(
+        { id: 'scan', name: 'Code quality scan · Linked commits', kind: 'code-quality', enabled: true, revision: 1, check: { scope: 'card' } },
+        { id: 'gate_c', name: 'Gate C', kind: 'code-quality', enabled: true, revision: 1, check: { scope: 'card', failGrade: 'C' } },
+        { id: 'pinned', name: 'Pinned scan', kind: 'code-quality', enabled: true, revision: 1, check: { scope: 'commit', headCommit: 'abc1234', failGrade: 'B' } },
+        { id: 'rules', name: 'Rules check · Linked commits', kind: 'vca', enabled: true, revision: 1, check: { scope: 'card' } });
+};
+
+test('a run order row changes its Code quality scan’s minimum passing grade in place (VIBE-274)', async ({ page }, testInfo) => {
+    const state = await setup(page);
+    laneScanFixture(state);
+    const lane = await routeLane(page, [
+        { definitionId: 'p1', definitionType: 'preset' },
+        { definitionId: 'scan', definitionType: 'action', gate: 'result' },
+        { definitionId: 'pinned', definitionType: 'action' },
+        { definitionId: 'rules', definitionType: 'action' }]);
+    await mountLaneEditor(page);
+    const rows = page.locator('[data-lane-selection-list] strong');
+    const status = page.locator('[data-lane-status]');
+    const posts = () => state.requests.filter(request => request.path === '/api/v1/actions' && request.method === 'POST').length;
+    const second = write => lane.writes[write].selections[1];
+    // Only a scan the lane picker can make has the field: not a pinned scan, a Rules check or an agent.
+    await expect(page.locator('[data-lane-row-grade]')).toHaveCount(1);
+    const scan = rowGrade(page, 'Code quality scan · Linked commits');
+    await expect(scan).toHaveValue('');
+    await expect(page.locator('.launch-lane-row-grade')).toHaveText(/^Minimum passing grade/);
+    expect(await scan.locator('option').evaluateAll(options => options.map(option => [option.value, option.textContent]))).toEqual(MINIMUM_GRADE_OPTIONS);
+    await page.screenshot({ path: testInfo.outputPath('lane-row-minimum-grade.png') });
+
+    // No scan has minimum B yet: one is created like Add creates it, and the row switches to it where it stands.
+    await scan.selectOption('B');
+    await expect(rows).toHaveText(['Review', 'Code quality scan · Linked commits, minimum B', 'Pinned scan', 'Rules check · Linked commits']);
+    await expect(status).toHaveText('Saved. Code quality scan · Linked commits, minimum B fails the step below grade B.');
+    expect(posts()).toBe(1);
+    expect(state.actions.at(-1)).toMatchObject({ id: 'preset_4', name: 'Code quality scan · Linked commits, minimum B', kind: 'code-quality',
+        enabled: true, expectedRevision: 0, check: { scope: 'card', failGrade: 'B' }, script: null });
+    expect(lane.writes).toEqual([{ revision: 1, selections: [
+        { definitionId: 'p1', definitionType: 'preset' },
+        { definitionId: 'preset_4', definitionType: 'action', gate: 'result' },
+        { definitionId: 'pinned', definitionType: 'action' },
+        { definitionId: 'rules', definitionType: 'action' }] }]);
+    const graded = rowGrade(page, 'Code quality scan · Linked commits, minimum B');
+    await expect(graded).toHaveValue('B');
+    await expect(graded).toBeFocused();
+    await expect(page.locator('.launch-lane-row-detail').nth(1)).toHaveText('Code quality scan · Scope: Linked commits, minimum B');
+
+    // Minimum C is already saved as “Gate C”: it is reused, never copied.
+    await graded.selectOption('C');
+    await expect(rows).toHaveText(['Review', 'Gate C', 'Pinned scan', 'Rules check · Linked commits']);
+    await expect(status).toHaveText('Saved. Gate C fails the step below grade C.');
+    expect(second(1)).toEqual({ definitionId: 'gate_c', definitionType: 'action', gate: 'result' });
+    expect(lane.writes[1].revision).toBe(2);
+    await expect(rowGrade(page, 'Gate C')).toBeFocused();
+
+    // None goes back to the feedback-only scan.
+    await rowGrade(page, 'Gate C').selectOption('');
+    await expect(rows).toHaveText(['Review', 'Code quality scan · Linked commits', 'Pinned scan', 'Rules check · Linked commits']);
+    await expect(status).toHaveText('Saved. Code quality scan · Linked commits: findings are feedback only.');
+    expect(second(2)).toEqual({ definitionId: 'scan', definitionType: 'action', gate: 'result' });
+    await expect(rowGrade(page, 'Code quality scan · Linked commits')).toHaveValue('');
+    await expect(rowGrade(page, 'Code quality scan · Linked commits')).toBeFocused();
+    expect(lane.writes).toHaveLength(3);
+    expect(posts()).toBe(1);
+    // The scans the row stopped using are exactly as they were: other lanes may run them.
+    expect(state.requests.filter(request => /^\/api\/v1\/actions\/./.test(request.path) && request.method !== 'GET')).toEqual([]);
+    expect(state.actions.slice(0, 2)).toEqual([
+        { id: 'scan', name: 'Code quality scan · Linked commits', kind: 'code-quality', enabled: true, revision: 1, check: { scope: 'card' } },
+        { id: 'gate_c', name: 'Gate C', kind: 'code-quality', enabled: true, revision: 1, check: { scope: 'card', failGrade: 'C' } }]);
+    expect(state.runs).toHaveLength(0);
+    // The built-in entry still stands in for every scan the row used, so none is offered twice.
+    await page.locator('.launch-lane-add .ts-control').click();
+    await expect(laneLabels(page)).toHaveText(['Rules check', 'Code quality scan']);
+});
+
+test('a row’s grade goes back when the lane already runs that scan or the save is refused (VIBE-274)', async ({ page }) => {
+    const state = await setup(page);
+    laneScanFixture(state);
+    const writes = [];
+    let refuse = false;
+    await page.route('**/api/v1/board/columns/lane/launches', route => {
+        if (route.request().method() === 'GET')
+            return route.fulfill({ json: { revision: 7, selections: [{ definitionId: 'scan', definitionType: 'action' }, { definitionId: 'gate_c', definitionType: 'action' }] } });
+        writes.push(route.request().postDataJSON());
+        return refuse
+            ? route.fulfill({ status: 409, json: { error: 'Lane changed elsewhere. Reload before saving.' } })
+            : route.fulfill({ json: { ...writes.at(-1), revision: 8 } });
+    });
+    await mountLaneEditor(page);
+    const rows = page.locator('[data-lane-selection-list] strong');
+    const failure = page.locator('[data-lane-error]');
+    const posts = () => state.requests.filter(request => request.path === '/api/v1/actions' && request.method === 'POST').length;
+    const scan = rowGrade(page, 'Code quality scan · Linked commits');
+    const gate = rowGrade(page, 'Gate C');
+    await expect(scan).toHaveValue('');
+    await expect(gate).toHaveValue('C');
+
+    // The lane already runs the minimum C scan in its other row: nothing is saved.
+    await scan.selectOption('C');
+    await expect(failure).toHaveText('This lane already runs “Gate C”.');
+    await expect(page.getByRole('button', { name: 'Reload latest', exact: true })).toHaveCount(0);
+    await expect(scan).toHaveValue('');
+    await expect(scan).toBeFocused();
+    await gate.selectOption('');
+    await expect(failure).toHaveText('This lane already runs “Code quality scan · Linked commits”.');
+    await expect(gate).toHaveValue('C');
+    expect(writes).toHaveLength(0);
+    expect(posts()).toBe(0);
+
+    // A refused lane save keeps the last saved order, and the field shows the grade that is still saved.
+    refuse = true;
+    await gate.selectOption('A');
+    await expect(failure).toHaveText('Lane changed elsewhere. Reload before saving.');
+    await expect(page.getByRole('button', { name: 'Reload latest', exact: true })).toBeVisible();
+    await expect(rows).toHaveText(['Code quality scan · Linked commits', 'Gate C']);
+    await expect(gate).toHaveValue('C');
+    await expect(gate).toBeEnabled();
+    await expect(gate).toBeFocused();
+    expect(writes).toEqual([{ revision: 7, selections: [{ definitionId: 'scan', definitionType: 'action' }, { definitionId: 'preset_4', definitionType: 'action' }] }]);
+    expect(posts()).toBe(1);
+
+    // Trying again reuses the minimum A scan the first try created.
+    refuse = false;
+    await gate.selectOption('A');
+    await expect(rows).toHaveText(['Code quality scan · Linked commits', 'Code quality scan · Linked commits, minimum A']);
+    await expect(page.locator('[data-lane-status]')).toHaveText('Saved. Code quality scan · Linked commits, minimum A fails the step below grade A.');
+    await expect(failure).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Reload latest', exact: true })).toHaveCount(0);
+    expect(posts()).toBe(1);
+    expect(writes).toHaveLength(2);
+});
+
+for (const width of [320, 375, 768, 1024]) test(`a run order row keeps its grade field and buttons tidy at ${width}px (VIBE-274)`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const state = await setup(page);
+    const name = 'Code quality scan · Working tree, minimum C';
+    state.presets.push({ id: 'p1', name: 'Review', cli: 'codex', initialPrompt: 'Review', enabled: true, revision: 1 });
+    state.actions.push({ id: 'scan', name, kind: 'code-quality', enabled: true, revision: 1, check: { scope: 'working-tree', failGrade: 'C' } });
+    const lane = await routeLane(page, [{ definitionId: 'p1', definitionType: 'preset' }, { definitionId: 'scan', definitionType: 'action' }]);
+    await mountLaneEditor(page);
+    const row = page.locator('.launch-lane-row').nth(1);
+    await expect(rowGrade(page, name)).toHaveValue('C');
+    await expect(row.locator('.launch-lane-row-grade')).toBeVisible();
+    const boxes = await row.evaluate(node => {
+        const box = element => { const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height }; };
+        return { row: box(node), detail: box(node.querySelector('.launch-lane-row-detail')), label: box(node.querySelector('.launch-lane-row-grade')),
+            select: box(node.querySelector('[data-lane-row-grade]')), buttons: [...node.querySelectorAll('.launch-run-actions button')].map(box) };
+    });
+    // The label and field sit under the row's text, above its buttons, inside the row.
+    expect(boxes.label.top).toBeGreaterThanOrEqual(boxes.detail.bottom);
+    expect(boxes.select.top).toBeGreaterThan(boxes.label.top);
+    expect(Math.abs(boxes.label.left - boxes.detail.left)).toBeLessThanOrEqual(1);
+    expect(boxes.select.left).toBeGreaterThanOrEqual(boxes.row.left);
+    expect(boxes.select.right).toBeLessThanOrEqual(boxes.row.right);
+    expect(boxes.select.width).toBeGreaterThanOrEqual(120);
+    expect(boxes.buttons).toHaveLength(3);
+    for (const button of boxes.buttons) {
+        expect(button.top).toBeGreaterThanOrEqual(boxes.select.bottom);
+        expect(button.left).toBeGreaterThanOrEqual(boxes.row.left);
+        expect(button.right).toBeLessThanOrEqual(boxes.row.right);
+        if (width <= 375) { expect(button.width).toBeGreaterThanOrEqual(44); expect(button.height).toBeGreaterThanOrEqual(44); }
+    }
+    if (width <= 375) expect(boxes.select.height).toBeGreaterThanOrEqual(44);
+    expect(await page.locator('.launch-lane-editor').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`lane-row-grade-${width}.png`) });
+    // The row's buttons still work beside the field, and the field moves with its row.
+    await page.getByRole('button', { name: `Move ${name} up`, exact: true }).click();
+    await expect(page.locator('[data-lane-selection-list] strong')).toHaveText([name, 'Review']);
+    await expect(page.locator('.launch-lane-row').first().locator('[data-lane-row-grade]')).toHaveValue('C');
+    expect(lane.writes).toEqual([{ revision: 1, selections: [{ definitionId: 'scan', definitionType: 'action' }, { definitionId: 'p1', definitionType: 'preset' }] }]);
 });
 
 // VIBE-337: say what each choice does, save with Add, and let the user hide entries from this picker.
@@ -1590,4 +1771,25 @@ test('code quality checks are offered again in the catalog, Quick actions and th
     const editor = page.locator('[data-launch-editor]');
     await expect(editor.locator('[data-launch-field="grade"]')).toHaveValue('B');
     await expect(editor.locator('[data-launch-field="grade"]')).toBeVisible();
+    // VIBE-274: the grade is chosen from the same options as the lane, never typed.
+    const grade = editor.getByRole('combobox', { name: 'Minimum passing grade', exact: true });
+    await expect(grade).toHaveValue('B');
+    expect(await grade.locator('option').evaluateAll(options => options.map(option => [option.value, option.textContent]))).toEqual(MINIMUM_GRADE_OPTIONS);
+    await expect(editor.getByText('Minimum grade (optional)')).toHaveCount(0);
+    await grade.selectOption('C');
+    await editor.locator('[data-launch-save]').click();
+    await expect.poll(() => state.actions[0].check).toMatchObject({ scope: 'card', failGrade: 'C' });
+    // None saves no grade.
+    await grade.selectOption('');
+    await editor.locator('[data-launch-save]').click();
+    await expect.poll(() => state.actions[0].check.failGrade).toBeNull();
+    await expect(editor.locator('[data-launch-save]')).toBeEnabled();
+    // A Rules check has no grade, so its editor never shows the field.
+    await editor.locator('[data-launch-cancel]').click();
+    await expect(editor).toHaveCount(0);
+    state.actions.push({ id: 'rules', name: 'Rules gate', kind: 'vca', enabled: true, revision: 1, check: { scope: 'card' } });
+    await page.locator('[data-agent-refresh]').click();
+    await checks.getByRole('button', { name: 'Edit Rules gate', exact: true }).click();
+    await expect(editor.getByRole('combobox', { name: 'Scope', exact: true })).toBeVisible();
+    await expect(grade).toBeHidden();
 });

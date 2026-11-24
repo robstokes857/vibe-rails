@@ -20094,6 +20094,8 @@ body.performance-mode .brand-text-sm {
 .launch-lane-row-text { display: grid; gap: 2px; min-width: 0; line-height: 24px; }
 .launch-lane-row-text strong { overflow-wrap: anywhere; }
 .launch-lane-row-detail { color: var(--color-text-muted); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+/* VIBE-274: a lane-made Code quality scan sets its minimum passing grade on its own row, under its text. */
+.launch-lane-editor .launch-lane-row-grade { max-width: 22rem; margin-top: var(--space-2); }
 .launch-lane-number { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border-radius: var(--radius-round); background: var(--tone-active-bg); color: var(--tone-active-fg); font-size: 12px; }
 .launch-lane-editor label { display: grid; gap: var(--space-2); min-width: 0; margin: 0; font-size: 14px; font-weight: 600; }
 .launch-lane-editor .launch-run-actions { margin: 0; }

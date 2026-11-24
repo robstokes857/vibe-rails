@@ -171,10 +171,11 @@ public sealed class MintLintSourceInputTests
             profile: profile);
 
         Assert.Equal(["alpha.cs", "zeta.cs"], result.Files.Select(file => file.File));
-        // The tightened profile saturates Complexity, but only that one category — the
-        // breadth-gated overall lands on the depth floor (0.3 × 100 = 30, "Okay").
-        Assert.All(result.Files, file => Assert.Equal("Okay", file.Overall.Rating));
-        Assert.All(result.Files, file => Assert.Equal(30.0, file.Overall.Score));
+        // The tightened profile puts Complexity at its critical limit (cyclomatic 2 of 1/2).
+        // One category at its critical limit scores the critical floor: 60, grade F.
+        Assert.All(result.Files, file => Assert.Equal("AtRisk", file.Overall.Rating));
+        Assert.All(result.Files, file => Assert.Equal(60.0, file.Overall.Score));
+        Assert.Equal(60.0, result.Overall.Score);
     }
 
     [Fact]

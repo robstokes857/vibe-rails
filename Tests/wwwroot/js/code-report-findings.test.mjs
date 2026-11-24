@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileFindings, fileMeasurements, atlasQuality } from '../../../VibeRails/wwwroot/js/modules/code-report/findings.js';
 
-// Limits mirror MintLint's ScoringProfile so the expectations read like the scan guide.
+// A report carries the limits it was judged against, so these only need to agree with themselves.
+// They are the ones reports carried before VIBE-274 recalibrated six of them.
 const LIMITS = {
     cyclomatic_complexity: [10, 20], cognitive_complexity: [15, 30], npath_complexity: [1000, 100000],
     nesting_depth: [4, 6], parameter_count: [4, 7], halstead_difficulty: [20, 40],
@@ -71,6 +72,54 @@ test('ranks problems worst first and names where each was measured', () => {
     assert.equal(findings.ratingLabel, 'Needs work');
     assert.equal(findings.tone, 'warning');
     assert.equal(findings.healthText, '38');
+    assert.equal(findings.grade, 'F', 'a report without a grade gets the letter for its health');
+});
+
+test('a report that lists its findings shows every declaration, in the report\'s order', () => {
+    // The categories keep only the worst value of each metric: one function. The report's own list
+    // names each function past a limit, so two functions that are too complex are both shown.
+    const findings = fileFindings(report([
+        { name: 'Complexity', weight: 1, metrics: [
+            metric('cyclomatic_complexity', 25, { source: 'ProcessBatch', line: 380, snippet: 'void ProcessBatch() {' }),
+            metric('nesting_depth', 5)
+        ] },
+        { name: 'Size', weight: 0.7, metrics: [metric('lines_of_code', 120), metric('parameter_count', 3, { source: 'Validate', line: 40 })] }
+    ], { grade: 'F', findings: [
+        { name: 'cyclomatic_complexity', level: 'critical', value: 25, warn: 10, critical: 20, higherIsBetter: false, scope: 'function', source: 'ProcessBatch', line: 380, endLine: 455, previous: 22 },
+        { name: 'cyclomatic_complexity', level: 'warning', value: 12, warn: 10, critical: 20, higherIsBetter: false, scope: 'function', source: 'Validate', line: 40, endLine: 80 },
+        { name: 'nesting_depth', level: 'warning', value: 5, warn: 4, critical: 6, higherIsBetter: false, scope: 'function' },
+        null, { name: 'fan_out', value: 'many' }
+    ] }));
+
+    assert.deepEqual(findings.problems.map(item => [item.label, item.valueText, item.where, item.limitText, item.level]), [
+        ['Cyclomatic complexity', '25', 'ProcessBatch, line 380', 'critical at 20 · was 22 before this change', 'critical'],
+        ['Cyclomatic complexity', '12', 'Validate, line 40', 'warning above 10', 'warning'],
+        ['Nesting depth', '5', 'Top-level code', 'warning above 4', 'warning']
+    ]);
+    const [worst, second] = findings.problems;
+    assert.equal(worst.snippet, 'void ProcessBatch() {', 'the captured excerpt belongs to the declaration the category measured');
+    assert.equal(second.snippet, null, 'another function has no saved excerpt');
+    assert.equal(worst.weight, 1);
+    assert.match(second.fix, /^Split it into smaller functions/);
+    assert.deepEqual(findings.within.map(item => item.name), ['parameter_count', 'lines_of_code'], 'nearest its limit first');
+    assert.deepEqual(findings.measurements, [...findings.problems, ...findings.within], 'rows are problems first, then what is within limits');
+    assert.equal(findings.headline, '3 problems, 1 critical');
+    assert.equal(findings.hotspot, null, 'one problem per declaration names no hotspot');
+    assert.equal(findings.grade, 'F');
+    // The map inspector summarises the same list.
+    assert.deepEqual(atlasQuality(report([{ name: 'Complexity', weight: 1, metrics: [metric('cyclomatic_complexity', 25)] }], { findings: [
+        { name: 'cyclomatic_complexity', level: 'critical', value: 25, warn: 10, critical: 20, scope: 'function', source: 'ProcessBatch', line: 380 }
+    ] })).findings, [{ level: 'critical', title: 'Cyclomatic complexity 25', detail: 'ProcessBatch, line 380 · critical at 20' }]);
+});
+
+test('a report with an empty findings list has no problems, whatever its categories say', () => {
+    // Test files are not graded on cohesion: the category may still carry a saved value from an older engine.
+    const findings = fileFindings(report([{ name: 'Complexity', weight: 1, metrics: [metric('cyclomatic_complexity', 9)] }],
+        { score: 13.5, rating: 'Clean', grade: 'B', findings: [] }));
+    assert.deepEqual(findings.problems, []);
+    assert.equal(findings.headline, 'No problems');
+    assert.equal(findings.grade, 'B');
+    assert.equal(fileFindings(report([], { score: null })).grade, '—');
 });
 
 test('a composite index lists after the concrete problems it depends on, whatever its level', () => {

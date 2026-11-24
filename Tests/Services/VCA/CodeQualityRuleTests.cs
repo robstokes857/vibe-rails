@@ -89,16 +89,54 @@ public sealed class CodeQualityRuleTests
     }
 
     [Fact]
-    public void GradesTheOverallScanRatherThanWorstFile()
+    public void GradesTheOverallScanWeightedByLines()
     {
-        var files = new[] { File("bad.cs", Messy) }
-            .Concat(Enumerable.Range(0, 20).Select(i => File($"good{i}.cs", $"public class Good{i} {{ public int Value => {i}; }}")))
-            .ToArray();
-        Assert.False(CodeQualityRule.Evaluate('C', files.Take(1), Ct).IsValid);
-        Assert.True(CodeQualityRule.Evaluate('C', files, Ct).IsValid);
-        var scan = MintLintScorer.Score(MintLintAnalyzer.AnalyzeSources(
-            files.Select(f => new SourceInput(f.RelativePath, f.AddedContent!)).ToList()));
-        Assert.Equal(CodeQualityRule.EvaluateScore('C', scan.Overall.Score), CodeQualityRule.Evaluate('C', files, Ct));
+        var bad = File("bad.cs", Messy);
+        Assert.False(CodeQualityRule.Evaluate('C', [bad], Ct).IsValid);
+
+        // Twenty one-line files are 20 of about 120 lines. As a plain mean they averaged the bad
+        // file up to a pass; weighted by lines they cannot.
+        var tiny = Enumerable.Range(0, 20).Select(i => File($"good{i}.cs", $"public class Good{i} {{ public int Value => {i}; }}"));
+        Assert.False(CodeQualityRule.Evaluate('C', [bad, .. tiny], Ct).IsValid);
+
+        // Clean code that really outweighs it does pass: twenty files of 27 lines against one of about 100.
+        GitStagedFileSnapshot[] files = [bad, .. Enumerable.Range(0, 20).Select(i => File($"clean{i}.cs", CleanClass(i)))];
+        var verdict = CodeQualityRule.Evaluate('C', files, Ct);
+        Assert.True(verdict.IsValid, verdict.Message);
+        var scan = MintLintScorer.Score(ChangeAnalyzer.Analyze(files.Select(ChangedCode.ToChange).ToList()).Files);
+        Assert.Equal(CodeQualityRule.EvaluateScore('C', scan.Overall.Score), verdict);
+    }
+
+    [Fact]
+    public void AFailureNamesTheFileTheFunctionAndTheFix()
+    {
+        var message = CodeQualityRule.Evaluate('C', [File("bad.cs", Messy)], Ct).Message!;
+
+        // The verdict, then what to change: the file with its grade, the function with its line and
+        // how far past its limit it is, and how to fix it. An agent can act on this without a report.
+        Assert.StartsWith("Overall Code quality grade F (health ", message);
+        Assert.Contains("is below minimum C (70/100). Fix these first:\nF bad.cs (health ", message);
+        Assert.Contains("\n  - Cyclomatic complexity 181 in Run, line 1 (critical at 20). Fix: Split it into smaller functions", message);
+        Assert.DoesNotContain("\r", message);
+    }
+
+    [Fact]
+    public void APassSaysOnlyTheGrade() =>
+        Assert.Matches(@"^Overall Code quality grade [AB] \(health [\d.]+/100\) meets minimum C \(70/100\)\.$",
+            CodeQualityRule.Evaluate('C', [File("clean.cs", CleanClass(1))], Ct).Message);
+
+    [Fact]
+    public void GradesAFunctionTheChangeMadeWorse_AndLeavesOneItOnlyTouchedAlone()
+    {
+        // One statement added inside Run, no new branch: Run is as complex as it was before the
+        // change, so it is not this change's to answer for.
+        var touched = CodeQualityRule.Evaluate('C', [Changed(Messy, "var note = a;")], Ct);
+        Assert.True(touched.IsValid, touched.Message);
+
+        // One more branch: the change made Run worse, so Run is graded whole, at its line, with what it was.
+        var worse = CodeQualityRule.Evaluate('C', [Changed(Messy, "if (a == 999) { a += b; }")], Ct);
+        Assert.False(worse.IsValid);
+        Assert.Contains("Cyclomatic complexity 182 in Run, line 1 (critical at 20; was 181 before this change)", worse.Message);
     }
 
     [Fact]
@@ -262,6 +300,21 @@ public sealed class CodeQualityRuleTests
         var snapshot = Snapshot(rule.RuleText, File("bad.cs", Messy));
         var context = new ValidationContext(AdditionalData: new() { [CodeQualityValidator.SnapshotKey] = snapshot });
         Assert.False((await validator.ValidateAsync("good.cs", rule, source, Root, context, Ct)).IsValid);
+    }
+
+    /// <summary>Six small methods on unique lines, so nothing in it repeats: 27 lines that grade A.</summary>
+    private static string CleanClass(int seed) => $"public class Clean{seed}\n{{\n"
+        + string.Concat(Enumerable.Range(0, 6).Select(method =>
+            $"    public int Step{seed}x{method}(int value)\n    {{\n        return value + {seed * 10 + method};\n    }}\n"))
+        + "}\n";
+
+    /// <summary>A staged edit that adds one line inside Run, just before its last line, as Git reports it.</summary>
+    private static GitStagedFileSnapshot Changed(string before, string addedLine)
+    {
+        var lines = before.Split('\n').ToList();
+        lines.Insert(lines.Count - 1, addedLine);
+        return new("bad.cs", Path.GetFullPath("bad.cs", Root), GitStagedChangeKind.Modified, true, false, 1, string.Join('\n', lines),
+            PreviousContent: before, AddedContent: addedLine, AddedLineNumbers: [lines.Count - 1]);
     }
 
     private static GitStagedFileSnapshot File(string path, string content) =>

@@ -1744,7 +1744,7 @@ for (const width of [1440, 390]) {
         await viewReport.click();
         const report = page.getByRole('dialog', { name: 'Code quality report' });
         await expect(report).toBeVisible();
-        await expect(report).toContainText('No file needs work. 1 file was checked.');
+        await expect(report).toContainText('No file grades below C. 1 file was checked.');
         await expect(report).toContainText('src/example.cs');
         await report.locator('summary', { hasText: 'Limitations' }).click();
         await expect(report).toContainText('Unsupported files were skipped');
@@ -2852,16 +2852,23 @@ for (const width of [390, 1280]) test(`a check comment opens its full report ove
     const atRisk = { file: 'src/minified.js', score: 80, rating: 'AtRisk', priority: 10, categories: [
         { name: 'Complexity', score: 100, weight: 1, weightedScore: 100,
             metrics: [metric('cyclomatic_complexity', 70, 10, 20, '_drawToCache', 1), metric('cognitive_complexity', 115, 15, 30, 'anonymous', 1)] },
-        { name: 'Testability', score: 100, weight: 1, weightedScore: 100, metrics: [metric('ambient_dependencies', 38, 3, 10)] }] };
-    const fine = { file: 'src/fine.js', score: 8.8, rating: 'Clean', categories: [] };
+        { name: 'Testability', score: 100, weight: 1, weightedScore: 100, metrics: [metric('ambient_dependencies', 38, 3, 10)] }],
+        // VIBE-274: the report lists every declaration past a limit itself, so a second function that is
+        // too complex is shown beside the worst one, with what it was before the change made it worse.
+        grade: 'F', findings: [
+            { name: 'ambient_dependencies', level: 'critical', value: 38, warn: 3, critical: 10, higherIsBetter: false, scope: 'file' },
+            { name: 'cognitive_complexity', level: 'critical', value: 115, warn: 15, critical: 30, higherIsBetter: false, scope: 'function', source: 'anonymous', line: 1, endLine: 1 },
+            { name: 'cyclomatic_complexity', level: 'critical', value: 70, warn: 10, critical: 20, higherIsBetter: false, scope: 'function', source: '_drawToCache', line: 1, endLine: 1 },
+            { name: 'cyclomatic_complexity', level: 'critical', value: 24, warn: 10, critical: 20, higherIsBetter: false, scope: 'function', source: 'render', line: 40, endLine: 90, previous: 19 }] };
+    const fine = { file: 'src/fine.js', score: 8.8, rating: 'Clean', grade: 'A', findings: [], categories: [] };
     const check = { id: checkId, tool: 'Code quality', status: 'Findings', scope: 'card', startedUtc: '2026-11-19T23:21:58Z', endedUtc: '2026-11-19T23:22:00Z',
         analyzedCount: 2, findingCount: 1, skippedCount: 1, limitations: ['Code quality is advisory.'], toolVersion: '1.0.0.0',
         notReviewed: [{ path: 'docs/readme.md', reason: 'Not a supported source language.' }], notReviewedOmitted: 0,
         resultJson: JSON.stringify({ details: { report: JSON.stringify({ score: 44.4, rating: 'Okay', analyzedFileCount: 2, skippedFileCount: 1, files: [fine, atRisk] }) } }) };
     await openBoard(page, { onCard: card => {
         card.comments.push({ id: 'comment_check', author: { kind: 'system', label: 'Code quality check' }, createdAt: '2026-11-19T23:22:00Z',
-            body: `**Findings** · feedback only · [Open the full report](check:${checkId})\n\n**1 file needs work** (2 checked)\n`
-                + '`src/minified.js` · At risk, health 20/100\n- Ambient dependencies **38** in the whole file (critical at 10)\n'
+            body: `**Findings** · feedback only · [Open the full report](check:${checkId})\n\n**1 file grades below C** (2 checked)\n`
+                + '`src/minified.js` · **F** · health 20/100\n- Ambient dependencies **38** in the whole file (critical at 10)\n'
                 + '- Cognitive complexity **115** in `anonymous`, line 1 (critical at 30)\n- Cyclomatic complexity **70** in `_drawToCache`, line 1 (critical at 20)\n\n'
                 + "Not checked: 1 file (1 not a supported language). Scope: the card's linked commits." });
     } });
@@ -2877,7 +2884,7 @@ for (const width of [390, 1280]) test(`a check comment opens its full report ove
     const editor = page.locator('[data-board-card-editor]');
     await editor.locator('#board-card-title').fill('Unsaved title while reading the report');
     const comment = editor.locator('.board-comment', { hasText: 'Code quality check' });
-    await expect(comment).toContainText('1 file needs work');
+    await expect(comment).toContainText('1 file grades below C');
     await expect(comment.locator('code', { hasText: 'src/minified.js' })).toBeVisible();
     await expect(comment).not.toContainText('check:');
     await comment.scrollIntoViewIfNeeded();
@@ -2885,14 +2892,17 @@ for (const width of [390, 1280]) test(`a check comment opens its full report ove
     const open = comment.getByRole('button', { name: 'Open the full report' });
     await open.click();
     const report = page.getByRole('dialog', { name: 'Code quality report' });
-    await expect(report).toContainText('1 file needs work, of 2 checked.');
+    await expect(report).toContainText('1 file grades below C, of 2 checked.');
     await expect(report).toContainText('Feedback only: findings do not fail the step.');
     const file = report.locator('.board-check-file');
     await expect(file).toHaveCount(1);
     await expect(file).toContainText('src/minified.js');
     await expect(file).toContainText('At risk');
-    await expect(file.locator('.board-check-problems li')).toHaveText([/Ambient dependencies 38/, /Cognitive complexity 115/, /Cyclomatic complexity 70/]);
+    await expect(file).toContainText('Grade F · health 20 / 100');
+    await expect(file.locator('.board-check-problems li')).toHaveText([/Ambient dependencies 38/, /Cognitive complexity 115/, /Cyclomatic complexity 70/,
+        /Cyclomatic complexity 24.*render, line 40 · critical at 20 · was 19 before this change/]);
     await expect(report.locator('.board-check-others')).toContainText('src/fine.js');
+    await expect(report.locator('.board-check-others')).toContainText('Grade A · health 91.2 / 100');
     await expect(report).toContainText('Not checked');
     expect(await report.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`check-report-${width}.png`) });

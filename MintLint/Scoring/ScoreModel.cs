@@ -5,8 +5,15 @@ namespace MintLint;
 
 /// <summary>A headline score (0 = clean, 100 = alarming) with a human-readable rating.</summary>
 /// <param name="Score">Concern score from 0 (no concern) to 100 (severe).</param>
-/// <param name="Rating">Qualitative label for the score band.</param>
-public sealed record OverallScore(double Score, string Rating);
+/// <param name="Rating">Qualitative label for the grade: Clean (A or B), Okay (C), NeedsWork (D) or AtRisk (F).</param>
+public sealed record OverallScore(double Score, string Rating)
+{
+    /// <summary>Health from 0 to 100: 100 minus the concern score. This is the number a grade is read from.</summary>
+    public double Health => 100 - Math.Clamp(Score, 0, 100);
+
+    /// <summary>The letter grade for <see cref="Health"/>: A from 90, B from 80, C from 70, D from 55, otherwise F.</summary>
+    public char Grade => ScoreCalculator.GradeFor(Score);
+}
 
 /// <summary>
 /// Which way a RAW measured value reads, so a UI can say "higher is better" next to
@@ -81,14 +88,54 @@ public sealed record CategoryScore(
 /// <param name="File">Forward-slash relative path of the file.</param>
 /// <param name="Metrics">Raw measured values keyed by snake_case name (e.g. <c>cyclomatic_complexity</c>).</param>
 /// <param name="Categories">Interpreted per-category scores.</param>
-/// <param name="Overall">Weighted roll-up across categories.</param>
+/// <param name="Overall">Roll-up across categories: the worst category's severity floor, or the breadth term when more categories are hot.</param>
 public sealed record FileScore(
     string File,
     IReadOnlyDictionary<string, double> Metrics,
     IReadOnlyList<CategoryScore> Categories,
-    OverallScore Overall);
+    OverallScore Overall)
+{
+    /// <summary>
+    /// Every function, type and file-level measurement past its warning limit, worst first. The
+    /// categories carry only the worst value of each metric; this list names each declaration
+    /// that needs work, so a fix can be made in one pass.
+    /// </summary>
+    public IReadOnlyList<MetricFinding> Findings { get; init; } = [];
+}
+
+/// <summary>
+/// One measurement past its warning or critical limit, pinned to the declaration it was measured in.
+/// </summary>
+/// <param name="Name">snake_case metric name (e.g. <c>cyclomatic_complexity</c>).</param>
+/// <param name="Value">The raw measured value.</param>
+/// <param name="Warn">The metric's warning limit.</param>
+/// <param name="Critical">The metric's critical limit.</param>
+/// <param name="HigherIsBetter">True when larger raw values are healthier.</param>
+/// <param name="Level"><see cref="CriticalLevel"/> at or past the critical limit, otherwise <see cref="WarningLevel"/>.</param>
+/// <param name="Scope">What was measured: <c>function</c>, <c>class</c> or <c>file</c>.</param>
+/// <param name="Source">The function or type name; null for a file-level measurement and for code outside any function.</param>
+/// <param name="Line">1-based line where <paramref name="Source"/> is declared; null when unattributed.</param>
+/// <param name="EndLine">1-based last line of a function; null otherwise.</param>
+public sealed record MetricFinding(
+    string Name,
+    double Value,
+    double Warn,
+    double Critical,
+    bool HigherIsBetter,
+    string Level,
+    string Scope,
+    string? Source = null,
+    int? Line = null,
+    int? EndLine = null)
+{
+    /// <summary>The <see cref="Level"/> of a value at or past its critical limit.</summary>
+    public const string CriticalLevel = "critical";
+
+    /// <summary>The <see cref="Level"/> of a value past its warning limit and short of critical.</summary>
+    public const string WarningLevel = "warning";
+}
 
 /// <summary>The result of scoring a set of files, plus an overall roll-up across them.</summary>
 /// <param name="Files">Per-file scores, ordered by descending overall concern (worst first).</param>
-/// <param name="Overall">Mean overall concern across all files.</param>
+/// <param name="Overall">Overall concern across all files: the mean of the file scores, weighted by each file's lines of code.</param>
 public sealed record ScanResult(IReadOnlyList<FileScore> Files, OverallScore Overall);

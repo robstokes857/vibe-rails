@@ -25,7 +25,7 @@ public static class MintLintReportFactory
         IReadOnlyDictionary<string, string>? contentByFile = null,
         IReadOnlyDictionary<string, int>? referencedByFile = null,
         IReadOnlyDictionary<string, double>? baselineScoreByFile = null,
-        IReadOnlyDictionary<string, IReadOnlyList<int>>? sourceLineNumbersByFile = null)
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, FunctionMetrics>>? functionBaselines = null)
     {
         List<MintLintFileReportResponse> files = [];
         Dictionary<string, (MintLintWorstMetricResponse Entry, double Score, double Value)> worst =
@@ -46,10 +46,9 @@ public static class MintLintReportFactory
                 List<MintLintMetricResponse> metrics = [];
                 foreach (var metric in category.Metrics)
                 {
-                    var sourceLine = MapSourceLine(
-                        sourceLineNumbersByFile,
-                        file.File,
-                        metric.Line);
+                    // Lines are lines of the current file: the change analysis places each
+                    // declaration before it is scored (VIBE-274), so nothing is mapped here.
+                    var sourceLine = metric.Line;
                     metrics.Add(new MintLintMetricResponse(
                         metric.Name,
                         metric.Value,
@@ -110,7 +109,9 @@ public static class MintLintReportFactory
                 referencedBy,
                 ComputePriority(EffectiveConcern(file.Overall.Score, baseline), referencedBy),
                 baseline,
-                baseline is null ? null : Math.Round(file.Overall.Score - baseline.Value, 1)));
+                baseline is null ? null : Math.Round(file.Overall.Score - baseline.Value, 1),
+                file.Overall.Grade.ToString(),
+                BuildFindings(file, functionBaselines?.GetValueOrDefault(file.File))));
         }
 
         // Highest-priority files first: bad code that the rest of the codebase leans on
@@ -142,7 +143,56 @@ public static class MintLintReportFactory
             files,
             worstMetrics,
             BuildOverview(scan),
-            BuildScorecard(worst, totals));
+            BuildScorecard(worst, totals),
+            scan.Overall.Grade.ToString());
+    }
+
+    /// <summary>
+    /// Every declaration past a limit, worst first, and for a function that existed before the
+    /// change, the value it had then.
+    /// </summary>
+    private static List<MintLintFindingResponse> BuildFindings(
+        FileScore file,
+        IReadOnlyDictionary<string, FunctionMetrics>? baselines)
+    {
+        List<MintLintFindingResponse> findings = new(file.Findings.Count);
+        foreach (var finding in file.Findings)
+        {
+            findings.Add(new MintLintFindingResponse(
+                finding.Name,
+                finding.Level,
+                finding.Value,
+                finding.Warn,
+                finding.Critical,
+                finding.HigherIsBetter,
+                finding.Scope,
+                finding.Source,
+                finding.Line,
+                finding.EndLine,
+                finding.Scope == "function" ? PreviousValue(finding, baselines) : null));
+        }
+
+        return findings;
+    }
+
+    private static double? PreviousValue(MetricFinding finding, IReadOnlyDictionary<string, FunctionMetrics>? baselines)
+    {
+        // Top-level code is measured on the added lines alone, so it has no "before".
+        if (baselines is null || finding.Source is null || !baselines.TryGetValue(finding.Source, out var before))
+        {
+            return null;
+        }
+
+        return finding.Name switch
+        {
+            "cyclomatic_complexity" => before.Cyclomatic,
+            "cognitive_complexity" => before.Cognitive,
+            "npath_complexity" => before.NPath,
+            "nesting_depth" => before.NestingDepth,
+            "parameter_count" => before.ParameterCount,
+            "halstead_difficulty" => before.HalsteadDifficulty,
+            _ => null,
+        };
     }
 
     /// <summary>
@@ -306,24 +356,6 @@ public static class MintLintReportFactory
     private static bool WorseValue(MetricScore metric, double currentValue)
     {
         return metric.HigherIsBetter ? metric.Value < currentValue : metric.Value > currentValue;
-    }
-
-    private static int? MapSourceLine(
-        IReadOnlyDictionary<string, IReadOnlyList<int>>? sourceLineNumbersByFile,
-        string file,
-        int? fragmentLine)
-    {
-        if (fragmentLine is not > 0
-            || sourceLineNumbersByFile is null
-            || !sourceLineNumbersByFile.TryGetValue(file, out var sourceLines))
-        {
-            return fragmentLine;
-        }
-
-        var index = fragmentLine.Value - 1;
-        return index >= 0 && index < sourceLines.Count
-            ? sourceLines[index]
-            : fragmentLine;
     }
 
     /// <summary>

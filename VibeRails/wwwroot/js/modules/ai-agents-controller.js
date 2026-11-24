@@ -33,13 +33,15 @@ import { QUEUED_POLLS, followLaunchTerminal, openLaunchTerminal, waitForNativeLa
 import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
 import { promptVariableHelp, bindPromptVariableHelp } from './prompt-variable-help.js';
 import { bindPromptReferenceHighlights } from './prompt-reference-highlights.js';
+import { checkMinimumOptions, CHECK_MINIMUM_LABEL } from './job-checks.js';
 
 const field = (label, name, value = '', type = 'text') =>
     `<label class="launch-field">${label}<input class="form-control" type="${type}" data-launch-field="${name}" value="${escapeHtml(value)}"></label>`;
 const area = (label, name, value = '') =>
     `<label class="launch-field">${label}<textarea class="form-control" rows="3" data-launch-field="${name}">${escapeHtml(value)}</textarea></label>`;
+/** `values` is [value, text] pairs, or ready-made option markup from a shared source such as `checkMinimumOptions`. */
 const select = (label, name, values, value) =>
-    `<label class="launch-field">${label}<select class="form-select" aria-label="${escapeHtml(label)}" data-launch-field="${name}">${values.map(([key, text]) => `<option value="${key}"${String(key) === String(value) ? ' selected' : ''}>${text}</option>`).join('')}</select></label>`;
+    `<label class="launch-field">${label}<select class="form-select" aria-label="${escapeHtml(label)}" data-launch-field="${name}">${Array.isArray(values) ? values.map(([key, text]) => `<option value="${key}"${String(key) === String(value) ? ' selected' : ''}>${text}</option>`).join('') : values}</select></label>`;
 const lines = (value) =>
     String(value || '')
         .split('\n')
@@ -971,7 +973,7 @@ export class AiAgentsController {
                 ['range', 'Commit range']
             ],
             saved?.check?.scope || 'working-tree'
-        )}${field('Minimum grade (optional)', 'grade', saved?.check?.failGrade)}${field('Base commit (optional)', 'base', saved?.check?.baseCommit)}${field('Head commit (optional)', 'head', saved?.check?.headCommit)}</div>`;
+        )}${select(CHECK_MINIMUM_LABEL, 'grade', checkMinimumOptions(saved?.check?.failGrade || ''))}${field('Base commit (optional)', 'base', saved?.check?.baseCommit)}${field('Head commit (optional)', 'head', saved?.check?.headCommit)}</div>`;
     }
     readAction(get) {
         const kind = get('kind').value;

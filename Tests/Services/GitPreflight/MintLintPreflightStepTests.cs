@@ -36,7 +36,13 @@ public sealed class MintLintPreflightStepTests
         Assert.NotEqual(GitPreflightStepStatus.Skipped, result.Status);
         Assert.Equal("1", result.Details!["supportedFileCount"]);
         Assert.Equal("2", result.Details["skippedFileCount"]);
-        Assert.Contains(messages, message => message.Contains("src/demo.cs", StringComparison.Ordinal));
+        // A clean scan says its grade and that nothing needs fixing; it lists no file.
+        Assert.Equal("A", result.Details["overallGrade"]);
+        Assert.Contains(messages, message => message.StartsWith("Overall grade A · health ", StringComparison.Ordinal));
+        Assert.Contains("No file grades below C.", messages);
+        Assert.Equal(3, messages.Count);
+        // Readers of a result without a report still get the older one-line-per-file form.
+        Assert.StartsWith("src/demo.cs: ", result.Details["worstFiles"]);
     }
 
     [Fact]
@@ -133,37 +139,43 @@ public sealed class MintLintPreflightStepTests
             hook.Result.Details);
     }
 
-    [Fact]
-    public async Task ExecuteAsync_ScoresOnlyAddedContent_ForModifiedFiles()
-    {
-        var messy = """
-            public class Demo
+    // Run has fifteen decision points: the first `if` holds one `if`, three `&&` and four `||`, then six
+    // more `if` statements, plus one. That is past the warning limit of 10.
+    private static readonly string MessyRun = """
+        public class Demo
+        {
+            public int Run(int a, int b)
             {
-                public int Run(int a, int b)
-                {
-                    if (a > 0 && b > 0 || a == 1 && b == 2 || a == 3 && b == 4 || a == 5 || a == 6) { return 1; }
-                    if (a == 7) { return 2; }
-                    if (a == 8) { return 3; }
-                    if (a == 9) { return 4; }
-                    if (a == 10) { return 5; }
-                    if (a == 11) { return 6; }
-                    if (a == 12) { return 7; }
-                    return 0;
-                }
+                if (a > 0 && b > 0 || a == 1 && b == 2 || a == 3 && b == 4 || a == 5 || a == 6) { return 1; }
+                if (a == 7) { return 2; }
+                if (a == 8) { return 3; }
+                if (a == 9) { return 4; }
+                if (a == 10) { return 5; }
+                if (a == 11) { return 6; }
+                if (a == 12) { return 7; }
+                return 0;
             }
-            """;
-        var snapshot = new GitStagedSnapshot(
-            Directory.GetCurrentDirectory(),
-            [
-                new GitStagedFileSnapshot(
-                    "src/demo.cs", "src/demo.cs", GitStagedChangeKind.Modified, true, false, 1,
-                    Content: messy,
-                    PreviousRelativePath: null,
-                    PreviousContent: "public class Demo { public void Run() { } }",
-                    AddedContent: "return 0;",
-                    AddedLineNumbers: [13])
-            ],
-            []);
+        }
+        """.ReplaceLineEndings("\n");
+
+    private static GitStagedSnapshot ReturnAdded(string previousContent) => new(
+        Directory.GetCurrentDirectory(),
+        [
+            new GitStagedFileSnapshot(
+                "src/demo.cs", "src/demo.cs", GitStagedChangeKind.Modified, true, false, 1,
+                Content: MessyRun,
+                PreviousRelativePath: null,
+                PreviousContent: previousContent,
+                AddedContent: "        return 0;",
+                AddedLineNumbers: [12])
+        ],
+        []);
+
+    [Fact]
+    public async Task ExecuteAsync_DoesNotGradeAFunctionTheChangeOnlyTouched()
+    {
+        // Run was just as complex before: the change added its last statement and no branch.
+        var snapshot = ReturnAdded(MessyRun.Replace("        return 0;\n", ""));
 
         var result = await new MintLintPreflightStep().ExecuteAsync(
             new GitPreflightStepContext("run", Request(), snapshot, (_, _, _) => ValueTask.CompletedTask),
@@ -173,10 +185,49 @@ public sealed class MintLintPreflightStepTests
         Assert.NotNull(report);
         var file = Assert.Single(report.Files);
         var wholeFileScore = MintLintAnalyzer.ScanSources(
-            [new SourceInput("src/demo.cs", messy)]).Overall.Score;
+            [new SourceInput("src/demo.cs", MessyRun)]).Overall.Score;
         Assert.True(file.Score < wholeFileScore);
+        Assert.Equal("A", file.Grade);
+        Assert.Empty(file.Findings!);
         Assert.Null(file.BaselineScore);
         Assert.Null(file.IntroducedScore);
+        Assert.Equal(GitPreflightStepStatus.Passed, result.Status);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_GradesAFunctionTheChangeMadeWorse_AtItsRealLine()
+    {
+        // Run existed and was trivial. The staged lines are one statement of what it became, so the
+        // added line alone says nothing; the function it belongs to is what the change produced.
+        var snapshot = ReturnAdded("public class Demo { public int Run(int a, int b) { return 0; } }");
+        var messages = new List<string>();
+
+        var result = await new MintLintPreflightStep().ExecuteAsync(
+            new GitPreflightStepContext("run", Request(), snapshot, (message, _, _) =>
+            {
+                messages.Add(message);
+                return ValueTask.CompletedTask;
+            }),
+            TestContext.Current.CancellationToken);
+
+        var report = MintLintReportFactory.FromJson(result.Details![MintLintReportFactory.DetailsKey]);
+        Assert.NotNull(report);
+        var file = Assert.Single(report.Files);
+        var cyclomatic = Assert.Single(file.Findings!, finding => finding.Name == "cyclomatic_complexity");
+        Assert.Equal(("warning", 15.0, "function", "Run", (int?)3, (int?)13, (double?)1.0),
+            (cyclomatic.Level, cyclomatic.Value, cyclomatic.Scope, cyclomatic.Source, cyclomatic.Line, cyclomatic.EndLine, cyclomatic.Previous));
+        // The category's worst value points at the same real line, with the code that starts there.
+        var worst = Assert.Single(report.WorstMetrics!, metric => metric.Name == "cyclomatic_complexity");
+        Assert.Equal((15.0, "Run", (int?)3), (worst.Value, worst.Source, worst.Line));
+        Assert.StartsWith("    public int Run(int a, int b)", worst.Snippet);
+
+        // 15 of 10/20 → Complexity 75 → 15 + 25 / 50 × 45 = 37.5 at least: a D or worse, so it is named.
+        Assert.True(file.Score >= 37.5, $"Expected at least 37.5 but got {file.Score}.");
+        Assert.Equal(GitPreflightStepStatus.Warning, result.Status);
+        Assert.Contains("1 file(s) grade below C. Fix these, worst first:", messages);
+        Assert.Contains(messages, message => message.StartsWith($"{file.Grade} src/demo.cs (health ", StringComparison.Ordinal));
+        Assert.Contains(messages, message => message.Contains("Cyclomatic complexity 15 in Run, line 3 (warning above 10; was 1 before this change). Fix: Split it into smaller functions", StringComparison.Ordinal));
+        Assert.Contains("need work. The commit remains allowed.", result.Summary);
     }
 
     [Fact]

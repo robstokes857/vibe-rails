@@ -725,8 +725,12 @@ decisions through the same verification, publishing `review_request_updated`. Th
 ### Code report inspection
 
 VCA offers `Code quality minimum A`, `B`, and `C` rules. `CodeQualityRule` uses MintLint's
-existing overall score for added code under the declaring rule file; individual file grades do
-not decide the result. The cutoffs are health 90/80/70, with C the lowest selectable minimum.
+overall score, weighted by added lines, for the code added under the declaring rule file;
+individual file grades do not decide the result. The cutoffs are health 90/80/70, with C the
+lowest selectable minimum. A failure names the files that hold the grade down and, for each, the
+functions past a limit with their lines and how to fix them (`CodeQualityFindings`, shared with
+Git Guard's output and lane checks). What a change is graded on is in
+[MintLint's README](../MintLint/README.md#change-scoped-grading).
 Git Guard and MCP validate the staged snapshot, while Rules-page validation captures working-tree
 additions once per request. Failures use standard WARN/COMMIT/STOP enforcement. Report-only ignore
 preferences do not exempt code from the rule. Explicit file exemptions created through the Board

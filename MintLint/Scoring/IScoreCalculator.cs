@@ -20,10 +20,12 @@ public sealed record MetricOrigin(string Source, int Line);
 /// <param name="File">Forward-slash relative path of the file.</param>
 /// <param name="Metrics">Raw values keyed by snake_case metric name (e.g. <c>cyclomatic_complexity</c>).</param>
 /// <param name="Origins">Declaration attribution for function/class-scoped metrics; file-level metrics have no entry.</param>
+/// <param name="IsTest">True for test code, which is not scored on <see cref="ScoringProfile.NotScoredInTests"/>.</param>
 public sealed record MeasuredFile(
     string File,
     IReadOnlyDictionary<string, double> Metrics,
-    IReadOnlyDictionary<string, MetricOrigin> Origins);
+    IReadOnlyDictionary<string, MetricOrigin> Origins,
+    bool IsTest = false);
 
 /// <summary>
 /// The grading algorithm behind every MintLint score. There is exactly one production
@@ -34,12 +36,12 @@ public sealed record MeasuredFile(
 /// </summary>
 public interface IScoreCalculator
 {
-    /// <summary>Grades one measured file: normalize → categories → breadth-gated overall → rating.</summary>
+    /// <summary>Grades one measured file: normalize → categories → overall (severity floor or breadth) → rating.</summary>
     /// <param name="file">The file's extracted raw metric values.</param>
     /// <param name="profile">Threshold/weight/roll-up knob values to grade against.</param>
     FileScore ScoreFile(MeasuredFile file, ScoringProfile profile);
 
-    /// <summary>Combines already-graded files into the scan-level overall score and rating.</summary>
+    /// <summary>Combines already-graded files into the scan-level overall score and rating, weighted by lines of code.</summary>
     /// <param name="files">The graded files; order does not matter.</param>
     OverallScore ScoreScan(IReadOnlyList<FileScore> files);
 }

@@ -49,7 +49,7 @@ export function openFileDetailsModal({ app, file, capturedUtc, preferredName, so
             <aside class="quality-file-sidebar" aria-label="Findings and actions">
                 <div class="quality-file-findings">
                     <div class="file-verdict" data-tone="${findings.tone}"><span class="verdict-rating">${esc(findings.ratingLabel)}</span>
-                        <span class="verdict-summary"><strong>${esc(findings.headline)}</strong><span>Health ${esc(findings.healthText)} / 100</span></span></div>
+                        <span class="verdict-summary"><strong>${esc(findings.headline)}</strong><span>Grade ${esc(findings.grade)} · health ${esc(findings.healthText)} / 100</span></span></div>
                     ${findings.hotspot ? `<p class="verdict-hotspot">${esc(findings.hotspot)}</p>` : ''}
                     ${findings.problems.length ? `<h3 class="findings-heading">What to fix first</h3><div class="finding-list">${findings.problems.map(row).join('')}</div>`
                         : `<p class="detail-note">${items.length ? 'Every measurement is within its limits.' : 'No measurements were saved for this file.'}</p>`}

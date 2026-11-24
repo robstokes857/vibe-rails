@@ -105,21 +105,43 @@ test('Rules retains its actions and Quality retains the log and coverage menu', 
 // The guide beneath the Quality header is static markup, so it is pinned to the MintLint
 // sources it describes: a threshold, weight, category wiring, rating band or language that
 // changes there must change here too, or the page tells the user the wrong thing.
-test('Quality explains what the scan checks, in step with MintLint scoring and its languages', () => {
+/** The knob values the guide quotes, read from ScoringProfile. */
+function readScoringProfile() {
     const profile = readFileSync(path.resolve('MintLint/Scoring/ScoringProfile.cs'), 'utf8');
+    const number = pattern => Number(profile.match(pattern)[1]);
+    // No braces in these patterns: MintLint's JavaScript parser reads a brace inside a regex literal as code.
+    const notScored = profile.match(/NotScoredInTests [^=]*= new HashSet<string>\(StringComparer\.Ordinal\)([^;]+);/)[1];
+    return {
+        thresholds: Object.fromEntries([...profile.matchAll(/\["([a-z_]+)"\] = new\(([\d.]+), ([\d.]+)(, HigherIsBetter: true)?\)/g)]
+            .map(([, name, warn, critical, higher]) => [name, { warn: Number(warn), critical: Number(critical), higherIsBetter: Boolean(higher) }])),
+        weights: Object.fromEntries([...profile.matchAll(/\["([A-Za-z]+)"\] = ([\d.]+),/g)].map(([, name, weight]) => [name, Number(weight)])),
+        breadthRank: number(/public int BreadthRank [^=]*= (\d+);/),
+        depthFloor: number(/public double DepthFloor [^=]*= ([\d.]+);/),
+        criticalFloor: number(/public double CriticalFloor [^=]*= ([\d.]+);/),
+        notScoredInTests: [...notScored.matchAll(/"([a-z_]+)"/g)].map(m => m[1])
+    };
+}
+
+/** The category wiring, grade table and rating names the guide quotes, read from ScoreCalculator. */
+function readScoreCalculator() {
     const calculator = readFileSync(path.resolve('MintLint/Scoring/ScoreCalculator.cs'), 'utf8');
+    return {
+        calculator,
+        categories: [...calculator.matchAll(/new\("([A-Za-z]+)", \[([^\]]+)\]\)/g)]
+            .map(([, name, metrics]) => ({ name, metrics: [...metrics.matchAll(/"([a-z_]+)"/g)].map(m => m[1]) })),
+        // GradeFor reads the letter from health; RatingFor names the letters, so the two never disagree.
+        grades: calculator.match(/health >= (\d+)\)[^;]*return 'A';[\s\S]*?health >= (\d+)\)[^;]*return 'B';[\s\S]*?health >= (\d+)\)[^;]*return 'C';[\s\S]*?return health >= (\d+) \? 'D' : 'F';/),
+        ratings: calculator.match(/'A' or 'B' => "Clean",\s*'C' => "Okay",\s*'D' => "NeedsWork",\s*_ => "AtRisk",/)
+    };
+}
+
+test('Quality explains what the scan checks, in step with MintLint scoring and its languages', () => {
+    const { thresholds, weights, breadthRank, depthFloor, criticalFloor, notScoredInTests } = readScoringProfile();
+    const { calculator, categories, grades, ratings } = readScoreCalculator();
     const registry = readFileSync(path.resolve('MintLint/Languages/LanguageRegistry.cs'), 'utf8');
-    const thresholds = Object.fromEntries([...profile.matchAll(/\["([a-z_]+)"\] = new\(([\d.]+), ([\d.]+)(, HigherIsBetter: true)?\)/g)]
-        .map(([, name, warn, critical, higher]) => [name, { warn: Number(warn), critical: Number(critical), higherIsBetter: Boolean(higher) }]));
-    const weights = Object.fromEntries([...profile.matchAll(/\["([A-Za-z]+)"\] = ([\d.]+),/g)].map(([, name, weight]) => [name, Number(weight)]));
-    const breadthRank = Number(profile.match(/public int BreadthRank \{ get; init; \} = (\d+);/)[1]);
-    const depthFloor = Number(profile.match(/public double DepthFloor \{ get; init; \} = ([\d.]+);/)[1]);
-    const categories = [...calculator.matchAll(/new\("([A-Za-z]+)", \[([^\]]+)\]\)/g)]
-        .map(([, name, metrics]) => ({ name, metrics: [...metrics.matchAll(/"([a-z_]+)"/g)].map(m => m[1]) }));
-    const bands = calculator.match(/if \(score < (\d+)\)\s*\{\s*return "Clean";[\s\S]*?if \(score < (\d+)\)\s*\{\s*return "Okay";[\s\S]*?return score < (\d+) \? "NeedsWork" : "AtRisk";/);
     const parsers = [...registry.matchAll(/new ([A-Za-z]+)LanguageParser\(\)/g)].map(m => m[1]);
     assert.equal(categories.length, 7);
-    assert.ok(bands && parsers.length > 0);
+    assert.ok(grades && ratings && parsers.length > 0);
 
     const quality = indexHtml.match(/<template id="code-quality-template">([\s\S]*?)<\/template>/)[1];
     assert.match(quality, /data-action="toggle-scan-guide"\s+aria-expanded="false"[\s\S]*<\/header>\s*(<!--[\s\S]*?-->\s*)?<section class="project-health-scan-guide" data-code-analyzer-guide hidden[^>]*>[\s\S]*data-code-analyzer-log hidden>/,
@@ -147,9 +169,15 @@ test('Quality explains what the scan checks, in step with MintLint scoring and i
     }
     for (const metric of Object.keys(thresholds)) assert.ok(measured.has(metric), `${metric} is wired into a category`);
 
-    const ordinal = { 1: 'worst', 2: 'second-worst', 3: 'third-worst', 4: 'fourth-worst', 5: 'fifth-worst' }[breadthRank];
-    assert.match(guide, new RegExp(`its ${ordinal} weighted category, floored at ${Math.round(depthFloor * 100)}% of its single worst`));
-    assert.match(guide, new RegExp(`<b>Clean</b> under ${bands[1]}, <b>Okay</b> under ${bands[2]}, <b>Needs work</b> under ${bands[3]}, <b>At risk</b> from ${bands[3]}`));
+    const count = { 1: 'one', 2: 'two', 3: 'three', 4: 'four', 5: 'five' }[breadthRank];
+    assert.match(guide, new RegExp(`Inside its warning limit a category counts for ${Math.round(depthFloor * 100)}% of its weighted score, so a file with nothing past a limit grades A or B`));
+    assert.match(guide, new RegExp(`climbs to ${criticalFloor} at its critical limit, which fails the file on its own, and each further category at its critical limit adds a step, up to 100 at ${count}`));
+    assert.match(guide, new RegExp(`<b>A</b> from ${grades[1]}, <b>B</b> from ${grades[2]}, <b>C</b> from ${grades[3]}, <b>D</b> from ${grades[4]}, otherwise <b>F</b>`));
+    assert.match(guide, /<b>Clean<\/b> for A and B, <b>Okay<\/b> for C, <b>Needs work<\/b> for D, <b>At risk<\/b> for F/);
+    assert.deepEqual(guide.match(/data-not-scored-in-tests="([^"]+)"/)[1].split(' '), notScoredInTests, 'the guide names what test files skip');
+    assert.match(calculator, /double weight = file\.Metrics\.TryGetValue\("lines_of_code"/, 'the scan mean is weighted by lines');
+    assert.match(guide, /The scan's grade is the mean of its files, weighted by lines of code\./);
+    assert.match(guide, /each function it created or made more complex, measured whole/);
     const names = { CSharp: 'C#', Cpp: 'C++', Php: 'PHP' };
     const shown = parsers.map(parser => names[parser] || parser);
     assert.match(guide, new RegExp(`${shown.slice(0, -1).join(', ')} and ${shown.at(-1)}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'the languages are the registered parsers, in order');

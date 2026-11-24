@@ -1,7 +1,7 @@
 import { escapeHtml } from './utils.js';
 import { agentPurposeOptions } from './agent-purpose.js';
 import { selectedLaneJobIds } from './board-lane-agent-list.js';
-import { checkMinimumOptions, joinCheckArguments, CHECK_MINIMUM_GRADES, CHECK_MINIMUM_HELP } from './job-checks.js';
+import { checkMinimumOptions, joinCheckArguments, CHECK_MINIMUM_GRADES, CHECK_MINIMUM_HELP, CHECK_MINIMUM_LABEL } from './job-checks.js';
 
 /** Preserve argv boundaries; the server validates containment, runtime and approval. */
 export function laneScriptAction(path, argumentsText = '') {
@@ -73,7 +73,7 @@ export function laneAgentAddMarkup(draft, settings, jobs, environments, scripts)
                 <small>Saved on the agent “${escapeHtml(worker.name)}” wherever it is used. Future agent comments can be filtered by this purpose.</small>` : ''}` : ''}
         ${draft.kind === 'check:3' ? '<p class="board-lane-check-summary">Checks working changes, including staged and unstaged edits. Committed code is covered by Git Guard.</p>' : ''}
         ${draft.kind === 'check:2' ? `<p class="board-lane-check-summary">Checks the code in the card’s linked commits.</p>
-            <label for="board-lane-check-minimum">Findings</label>
+            <label for="board-lane-check-minimum">${CHECK_MINIMUM_LABEL}</label>
             <select id="board-lane-check-minimum" class="form-select" data-lane-draft="minimum" aria-describedby="board-lane-check-minimum-help">${checkMinimumOptions(laneCheckMinimum(draft))}</select>
             <small id="board-lane-check-minimum-help">${CHECK_MINIMUM_HELP} With no linked code, the step fails either way.</small>` : ''}
         ${draft.kind === 'script' ? `<label for="board-lane-script-search">Find script</label>

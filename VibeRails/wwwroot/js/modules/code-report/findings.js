@@ -1,10 +1,15 @@
-import { formatNumber, healthFromConcern, isNumber } from './vendor/quality/report-model.js';
+import { formatNumber, gradeFromHealth, healthFromConcern, isNumber } from './vendor/quality/report-model.js';
 
 // What a saved MintLint file report says is wrong with the file. Every measurement is judged
 // against its own warning and critical limits (never the 0–100 concern, which reads differently
 // for higher-is-better metrics), ranked worst first, and paired with where it was measured, what it
 // means and what to change. Plain data in, plain text out: the details panel and the map inspector
 // format it, and nothing here touches the DOM.
+//
+// A report lists its problems itself (`file.findings`, VIBE-274): every function and type past a
+// limit, worst first, not only the worst value of each metric. Those are used as they are, so the
+// page, a check's comment and the text an agent reads name the same problems in the same order.
+// A report saved before that has only the categories, and its problems are derived from them here.
 
 /** Labels follow the scan guide; `scope` says what a Source/Line pair names. */
 const GUIDE = {
@@ -143,6 +148,61 @@ function measurement(metric, category) {
 }
 
 /**
+ * One declaration the report lists as past a limit. The category's measurement of the same metric
+ * supplies its weight and, when it is the same declaration, the captured excerpt.
+ */
+function declared(finding, known) {
+    const guide = GUIDE[finding.name] || {};
+    const item = {
+        name: finding.name,
+        label: guide.label || fallbackLabel(finding.name),
+        value: finding.value,
+        warn: numberOrNull(finding.warn),
+        critical: numberOrNull(finding.critical),
+        higherIsBetter: finding.higherIsBetter === true,
+        concern: null,
+        // Code outside any function is measured too; it has no name.
+        source: text(finding.source),
+        line: lineOf(finding.line),
+        endLine: lineOf(finding.endLine),
+        categories: [...(known?.categories ?? [])],
+        weight: known?.weight ?? 1,
+        composite: guide.composite === true,
+        meaning: guide.meaning || null,
+        fix: guide.fix || null,
+        previous: numberOrNull(finding.previous)
+    };
+    item.snippet = known?.source === item.source && known?.line === item.line ? known.snippet : null;
+    item.level = levelOf(item);
+    return describeDeclared(item, guide, finding.scope);
+}
+
+/** The display text of a listed declaration: where it is, its limit and what it was before the change. */
+function describeDeclared(item, guide, scope) {
+    const texts = limitTexts(item, guide);
+    // "was 22" says the change made an existing function worse, which is why it is listed.
+    const madeWorse = item.previous !== null && item.previous !== item.value;
+    const was = madeWorse ? ` · was ${formatMeasure(item.previous, guide, item.name)} before this change` : '';
+    return Object.assign(item, texts, {
+        limitText: `${texts.limitText}${was}`,
+        levelLabel: LEVEL_LABELS[item.level],
+        overshoot: overshoot(item),
+        valueText: formatMeasure(item.value, guide, item.name),
+        where: locate(item, scope === 'function' ? { ...guide, scope } : guide)
+    });
+}
+
+/** The report's own list of problems, in its order; null for a report that has none to give. */
+function declaredProblems(file, measurements) {
+    if (!Array.isArray(file?.findings)) return null;
+    const byName = new Map(measurements.map(item => [item.name, item]));
+    return file.findings
+        .filter(finding => finding && typeof finding.name === 'string' && isNumber(finding.value))
+        .map(finding => declared(finding, byName.get(finding.name)))
+        .filter(item => item.level !== 'ok');
+}
+
+/**
  * Problems first, the actionable ones before a composite that only improves when they do; then
  * critical before warning, worst first. The measurements within their limits follow, nearest first.
  */
@@ -196,19 +256,24 @@ function hotspotOf(problems) {
  */
 export function fileFindings(file) {
     if (!file || typeof file !== 'object') return null;
-    const measurements = fileMeasurements(file);
-    const problems = measurements.filter(item => item.level !== 'ok');
+    const measured = fileMeasurements(file);
+    const within = measured.filter(item => item.level === 'ok');
+    const problems = declaredProblems(file, measured) ?? measured.filter(item => item.level !== 'ok');
     const critical = problems.filter(item => item.level === 'critical').length;
     const rating = text(file.rating);
     const health = healthFromConcern(file.score);
+    // Rows are numbered problems first, then what is within limits.
+    const measurements = [...problems, ...within];
     return {
         rating,
         ratingLabel: RATING_LABELS[rating] || rating || 'Not rated',
         tone: RATING_TONES[rating] || 'neutral',
+        // The letter a minimum grade is set in: A from 90, B from 80, C from 70, D from 55.
+        grade: text(file.grade) || gradeFromHealth(health),
         health,
         healthText: formatNumber(health, 1),
         problems,
-        within: measurements.filter(item => item.level === 'ok'),
+        within,
         measurements,
         critical,
         headline: measurements.length ? headline(problems.length, critical) : 'No measurements saved',

@@ -122,8 +122,27 @@ ordinary protected content.
 **overall** MintLint grade of added code in supported source files under the declaring rule file.
 They never require each file to pass separately. A requires health ≥90, B ≥80, and C ≥70;
 C is the lowest configurable minimum. D/F are still possible results, but are not thresholds.
-Health is 100 minus the existing scan's overall concern score. Hooks and MCP use the staged
-snapshot; Rules-page validation uses working-tree additions. Deletions, unchanged renames,
+Health is 100 minus the scan's overall concern score, which is the mean of the file scores
+**weighted by added lines** (VIBE-274): twenty one-line files no longer average one large failing
+file up to a pass, and clean code that really outweighs it still does. The letters come from
+MintLint (`ScoreCalculator.GradeFor` / `HealthFor`), the table the Quality page uses.
+
+**A failure says what to fix.** Below the minimum, the message continues after the verdict with
+`Fix these first:` and up to five files, worst for the grade first, each with its letter and up to
+three problems: the measurement, the function or type and its line, the limit it is past, what it
+was before the change when the function already existed, and a fix.
+`F src/Orders.cs (health 40/100)` / `- Cyclomatic complexity 25 in ProcessBatch, line 380 (critical
+at 20; was 22 before this change). Fix: Split it into smaller functions…`. The text is
+`CodeQualityFixList.FixLines`, shared with Git Guard's Code quality step and lane checks, so all
+three name the same problems. The console presenter prints each line of a multi-line reason on its
+own. `EvaluateSnapshot` (lane checks) returns the verdict alone; the check lists the files itself.
+
+**What is graded** is the change, as `MintLint.ChangeAnalyzer` defines it (see
+[MintLint's README](../../../MintLint/README.md#change-scoped-grading)): the added lines, each
+function the change created (whole), and what it made worse in a function that existed. Adding a
+branch to a function already past its critical limit therefore fails on that function; putting
+the branch in a new helper does not. Hooks and MCP use the staged snapshot; Rules-page validation
+uses working-tree additions. Deletions, unchanged renames,
 binary files and unsupported file types contribute no added code. An empty scan is explicitly
 skipped. Missing content or an invalid score must not silently pass. Report ignore preferences
 are presentation settings and do not exempt code from this repository rule. Explicit file

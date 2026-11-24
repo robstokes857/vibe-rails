@@ -65,51 +65,14 @@ namespace VibeRails.Services.VCA
             return CodeExtensions.Contains(ext);
         }
 
-        private static readonly string[] TestStemSuffixes = ["Test", "Tests", "Spec", "Specs"];
-
-        public bool IsTestFile(string filePath)
-        {
-            var stem = Path.GetFileNameWithoutExtension(filePath);
-            var lowerName = Path.GetFileName(filePath).ToLowerInvariant();
-            var lowerStem = stem.ToLowerInvariant();
-
-            // A test is named by a convention with a boundary, never by merely containing the
-            // letters: Contest.cs, Testimony.cs, LatestReport.cs and Inspector.cs are production
-            // code, and treating them as tests silently exempts them from the coverage gate.
-            //   capitalized suffix   MyTest.cs, OrderTests.cs, ParserSpec.scala, ABTest.cs
-            //   separator suffix     parser_test.go, user_spec.rb, calc-test.js
-            //   dotted segment       my.test.js, calc.spec.ts
-            //   prefix               test_math.py, TestOrders.java
-            //   whole stem           test.py, tests.cs, spec.rb
-            if (TestStemSuffixes.Any(suffix => HasCapitalizedSuffix(stem, suffix)) ||
-                TestStemSuffixes.Any(suffix => HasSeparatedSuffix(lowerStem, suffix.ToLowerInvariant())) ||
-                TestStemSuffixes.Any(suffix => lowerStem == suffix.ToLowerInvariant()) ||
-                lowerName.Contains(".test.") || lowerName.Contains(".spec.") ||
-                lowerStem.StartsWith("test_") || lowerStem.StartsWith("tests_") ||
-                (stem.StartsWith("Test", StringComparison.Ordinal)
-                    && stem.Length > 4
-                    && char.IsUpper(stem[4])))
-                return true;
-
-            // Test directories anywhere on the path, whichever separator the caller used. The
-            // leading slash lets a repository-relative path that starts with the directory
-            // (tests/helpers.py, spec/models/user.rb) match too.
-            var normalized = "/" + filePath.Replace('\\', '/');
-            return normalized.Contains("/test/", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.Contains("/tests/", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.Contains("/__tests__/", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.Contains("/spec/", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.Contains("/specs/", StringComparison.OrdinalIgnoreCase);
-        }
-
-        // "MyTest" and "ABTest" end in a capitalized word; "Contest" and "Protest" do not.
-        private static bool HasCapitalizedSuffix(string stem, string suffix) =>
-            stem.Length > suffix.Length && stem.EndsWith(suffix, StringComparison.Ordinal);
-
-        // "parser_test", "user_spec", "calc-test": the word is set off by a separator.
-        private static bool HasSeparatedSuffix(string lowerStem, string lowerSuffix) =>
-            lowerStem.EndsWith("_" + lowerSuffix, StringComparison.Ordinal)
-            || lowerStem.EndsWith("-" + lowerSuffix, StringComparison.Ordinal);
+        /// <summary>
+        /// A test is named by a convention with a boundary (MyTest.cs, parser_test.go, calc.spec.ts,
+        /// test_math.py, a tests directory), never by merely containing the letters: treating
+        /// Contest.cs or LatestReport.cs as tests silently exempts them from the coverage gate.
+        /// The convention lives in MintLint, which also uses it to leave test files out of the
+        /// measurements that do not apply to tests.
+        /// </summary>
+        public bool IsTestFile(string filePath) => MintLint.TestFileConvention.IsTestFile(filePath);
 
         public bool IsPackageFile(string filePath)
         {

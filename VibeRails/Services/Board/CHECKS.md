@@ -27,10 +27,15 @@ Existing explicitly configured scopes are retained; edit an existing Automation 
 **Linked commits on the card**. The lane picker (`launch-lane-editor.js`) asks for the scope of a
 new VCA or Code quality check: linked commits (the default for both, VIBE-271), unpushed, working
 tree or repository. Card work is committed before it reaches a later lane, so a working-tree check
-there sees only other sessions' edits. A new Code quality scan also asks for **Findings**: feedback
-only (the default) or fail the step below grade A, B or C, sent as `check.failGrade` and named in
-the check, e.g. `Code quality scan · Linked commits, minimum B` (VIBE-335; see
-[minimum grade](#minimum-grade-vibe-278)). A pinned commit or range is set in the AI Agents editor.
+there sees only other sessions' edits. A new Code quality scan also asks for its **Minimum passing
+grade**: None (findings are feedback only, the default) or A, B or C, below which the step fails. It
+is sent as `check.failGrade` and named in the check, e.g. `Code quality scan · Linked commits,
+minimum B` (VIBE-335; see [minimum grade](#minimum-grade-vibe-278)). A scan already in the run
+order carries the same select on its row (VIBE-274): changing it switches the row to the check with
+that grade, found or created like Add, and saves at once; the check the row stops using is never
+edited or deleted, because another lane may run it. The control was labelled **Findings** and
+existed only while adding, so the owner could not find it. A pinned commit or range is set in the
+AI Agents editor.
 The picker reuses an existing check with the same kind, scope and minimum grade (and no pinned
 commits) instead of saving a copy, and leaves that check out of its menu so it is not offered
 beside the built-in entry; the catalog's `check` field carries each Action's scope and
@@ -150,18 +155,21 @@ Workers retain the explicit worker verdict; mixed script/check Automations retai
 
 ### Minimum grade (VIBE-278)
 
-A Code quality action chooses, when it is added to a lane (the lane picker's **Findings**) or
-edited in AI Agents (**Minimum grade**), whether findings only post feedback (the default) or
-**fail the step below grade A, B or C**.
+A Code quality action chooses, when it is added to a lane, on its run order row or in AI Agents
+(**Minimum passing grade** in all three, one option list: `checkMinimumOptions`), whether findings
+only post feedback (the default) or **fail the step below grade A, B or C**.
 The choice ends the action's argument vector: `["card", "minimum", "C"]`. `JobCheckScope.Parse`
 strips it; only Code quality may carry it, and `JobService` rejects it on VCA. No schema changes.
 An older binary rejects the longer vector, so the check shows **Failed to run** there: it fails
 closed instead of silently passing.
 
 The grade is `CodeQualityRule.EvaluateSnapshot`, the code behind Git Guard's
-`Code quality minimum A|B|C` rule: the same health thresholds (A ≥90, B ≥80, C ≥70) over the
-overall grade of all added code in scope. Explicit exemptions apply; dashboard ignore preferences
-do not, as in the rule. A file the report hides through an ignore still counts toward the grade,
+`Code quality minimum A|B|C` rule: the same health thresholds (A ≥90, B ≥80, C ≥70, MintLint's
+`ScoreCalculator.HealthFor`) over the overall grade of all added code in scope, weighted by added
+lines (VIBE-274). What "added code" covers is MintLint's change analysis: the added lines, each
+function the change created, and what it made worse in a function that existed
+([MintLint README](../../../MintLint/README.md#change-scoped-grading)). Explicit exemptions apply;
+dashboard ignore preferences do not, as in the rule. A file the report hides through an ignore still counts toward the grade,
 and the limitations say how many files were hidden that way. `MinimumGradeResult` is **Met**,
 **Not met** or **Not checked**; `GradeSummary` carries the reason. Below the minimum the check
 outcome is **Findings** and `JobRunner` fails the action with that sentence as the error. The run
@@ -193,8 +201,9 @@ it with `get_board_reviews` and in `get_board_card`'s Code reviews. Its id is
 Findings, No findings reported, or Incomplete (failed to run, cancelled, no code attached, or a
 minimum grade that could not be checked). Its
 process status is Failed when the action failed. The findings name the outcome and the minimum
-grade, then each file that needs work (rated Needs work or At risk) with its problems worst first,
-the other files checked with their rating and health, the commits that are not linked
+grade, then each file below the bar with its letter grade and its problems, worst first, each with
+where it is and how to fix it, then the other files checked with their grade and health, the
+commits that are not linked
 (**Unlinked commits**) and every scope file the engine did not analyse with the reason
 (**Not checked**: deleted, binary or over the text limit, unreadable, not a supported language,
 exempted with the exemption's author and reason, hidden by a local ignore, no added lines), and
@@ -203,19 +212,34 @@ of those files (`NotReviewed`) and counts the rest (`NotReviewedOmitted`); `read
 file="*"` lists the whole scope. Both live in the check's existing summary JSON, so no schema
 change.
 
-**Problems** (VIBE-362) come from `CodeQualityFindings`, which judges each saved measurement
-against its own warning and critical limits and ranks them by the rules of the Quality page's
-`code-report/findings.js` (critical before warning, overshoot capped at twice the
-warning-to-critical span, then category weight; the maintainability index last), with the same
-labels; `CodeQualityFindingsTests` pins the labels to that file. A problem reads "Cognitive
-complexity 115 in `Parse`, line 1 (critical at 30)". Health is 100 minus the concern score.
+**The bar** is the check's minimum grade, or C when findings are feedback only: below C a file
+is graded D or F, rated Needs work or At risk. Files below the bar are listed in the order that
+raises the line-weighted overall grade fastest (`CodeQualityFixList.ToFix`: how far below the bar
+times the file's lines), so a step that fails on its grade always names what to change. A file
+below a minimum of A or B can have nothing past a limit (nothing past a limit means A or B); it
+still gets a line, naming the measurement nearest its limit.
+
+**Problems** (VIBE-362, VIBE-274) come from `Services/GitPreflight`, shared with Git Guard's Code
+quality step and the `Code quality minimum` rule: `CodeQualityFindings` reads a report into files
+and problems (`QualityFile`, `QualityProblem`), `CodeQualityFixList` puts them into words and
+`CodeQualityGuide` holds the labels and fixes. The engine's report lists
+every function, type and file-level measurement past its warning limit, one per declaration, worst
+first (critical before warning, overshoot capped at twice the warning-to-critical span, then
+category weight; the maintainability index last), so two functions that are both too complex are
+both named. A problem reads "Cyclomatic complexity 25 in `ProcessBatch`, line 380 (critical at 20;
+was 22 before this change)": "was" appears when the function already existed and the change made
+it worse. The report an agent reads adds the fix the first time each metric appears
+(`CodeQualityFixList.FixLines`). Labels and fixes are the Quality page's `code-report/findings.js`,
+pinned by `CodeQualityFindingsTests`. A report saved before VIBE-274 has no such list; its problems
+are the worst value of each metric, derived from its categories (`QualityReportMetrics`). Health is
+100 minus the concern score.
 
 The discussion receipt is written for people (VIBE-338, VIBE-362). Its first line is the outcome,
 whether the step failed, and `[Open the full report](check:<check id>)`, which the card editor
 renders as a button (`board-text.js`; only a 32-hex id, anywhere else the words alone) and whose
-id is what `read_board_check` takes. Then what to do (the failure reason or the grade met), the
-files that need work (up to three, each with its three worst problems and how many more), one line
-counting what was not checked by reason, and the scope. VibeRails comments
+id is what `read_board_check` takes. Then what to do (the failure reason or the grade met), how
+many files grade below the bar and the first three of them (each with its letter, health, three
+worst problems and how many more), one line counting what was not checked by reason, and the scope. VibeRails comments
 show the VibeRails logo. It has no reviewer session or review run, so it
 can never satisfy a reviewer's own pass, and its freshness is the check's: verifying it reports
 unknown and points to the card's Checks. It is saved once, with a discussion receipt from VibeRails
@@ -275,7 +299,8 @@ Records include start/end times, engine version, actual scope file manifest, che
 SHA-256 input and rule fingerprints, coverage/finding counts and explicit limitations. VCA keeps
 WARN/COMMIT/STOP and deferred findings. No applicable rules, unsupported/ignored files, missing
 sources and deferred analysis cannot become an unqualified green result. Counts for VCA refer to
-rules; Code quality counts files, with findings counting files at NeedsWork/AtRisk.
+rules; Code quality counts files, with findings counting files graded D or F (rated NeedsWork or
+AtRisk).
 
 `GET /api/v1/board/cards/{card}/checks` reads summaries, current waiting/running actions and eligible
 Automations. `GET .../checks/{id}` loads full evidence immediately; **Compare inputs** adds
@@ -289,8 +314,9 @@ scope/tool/repository is unknown. The snapshot never claims that other scopes we
 so the card and its drafts stay as they are. Three places open it, all through the editor's
 `data-board-ref-check` handler: the receipt's **Open the full report** button, **View report** on a
 check's row under **Code reviews**, and **View report** under Advanced > Checks. It leads with the
-outcome and whether the step failed, then **What needs work**: each file rated Needs work or At
-risk with its rating, health and five worst problems (`findings.js`), and **Open details**, the
+outcome and whether the step failed, then **What needs work**: each file below the bar (the
+check's minimum grade, else C; `reportFiles`) with its rating, letter grade, health and five worst
+problems (`findings.js`, from the report's own list), and **Open details**, the
 Quality page's file reader (`file-details-modal.js`) with what each problem means, how to fix it
 and the captured excerpt; a saved report has no live source, fix, ignore or map action there. The
 other files checked follow, then folded sections: **Not checked** with each file's reason,
@@ -318,6 +344,8 @@ recipes and their check actions remain unchanged. VIBE-25 owns
 hosted recipe/evidence distribution. Evidence is not added to the hosted Board UI sync contract;
 the independent owner-bound Board data backup retains it.
 
-Validation lives in `BoardChecksTests`, `CodeQualityFindingsTests` (receipt and report text),
-Board route/tool tests, existing preflight regressions, `jobs-controller.test.mjs`, the check link
-case in `board-text.test.mjs`, and the card Checks and check-comment cases in `board-ux.spec.js`.
+Validation lives in `BoardChecksTests`, `CodeQualityFindingsTests` (receipt and report text, the
+fix list, its order and the failed-minimum case), Board route/tool tests, existing preflight
+regressions, `jobs-controller.test.mjs`, `launch-lane-checks.test.mjs` and the lane picker cases in
+`ai-agents.spec.js` (the row's grade select), `board-check-report.test.mjs` (the bar), the check
+link case in `board-text.test.mjs`, and the card Checks and check-comment cases in `board-ux.spec.js`.

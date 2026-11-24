@@ -26,12 +26,19 @@ export function validCheckScope(args, kind = 2) {
         || (scope.length === 3 && scope[0] === 'range' && scope.slice(1).every(sha => /^[a-f0-9]{40}$/i.test(sha)));
 }
 
-/** The choice between feedback only and failing the step below a grade, for both editors. */
+/** The field's label wherever a Code quality minimum is chosen (VIBE-274): it used to read “Findings”. */
+export const CHECK_MINIMUM_LABEL = 'Minimum passing grade';
+
+/**
+ * The choice between feedback only and failing the step below a grade: the one source of these
+ * options for the lane picker, a run order row, the AI Agents editor and the older check fields.
+ * Each option leads with its value, so a narrow closed select still shows the chosen grade.
+ */
 export function checkMinimumOptions(minimum) {
-    return [['', 'Post as feedback only; never fail the step'], ...CHECK_MINIMUM_GRADES.map(grade => [grade, `Fail the step below grade ${grade}`])]
+    return [['', 'None: findings are feedback only'], ...CHECK_MINIMUM_GRADES.map(grade => [grade, `${grade}: the step fails below grade ${grade}`])]
         .map(([value, label]) => `<option value="${value}"${minimum === value ? ' selected' : ''}>${label}</option>`).join('');
 }
-export const CHECK_MINIMUM_HELP = 'The grade is the overall Code quality grade of the added code, the same one Git Guard’s “Code quality minimum” rule checks. Explicit file exemptions apply. Either way, the result is saved on the card as a review.';
+export const CHECK_MINIMUM_HELP = 'The grade is the overall Code quality grade of the code the change added, weighted by lines: the same grade Git Guard’s “Code quality minimum” rule checks. Below the minimum the step fails and its report lists what to fix. Explicit file exemptions apply. Either way, the result is saved on the card as a review.';
 
 export function checkFields(action, actionId = '') {
     const quality = Number(action.kind) === 2;
@@ -52,10 +59,10 @@ export function checkFields(action, actionId = '') {
         ${args[0] === 'range' ? `<label class="form-label">Base commit SHA<input class="form-control" data-action-field="checkBase" value="${esc(args[1] || '')}" maxlength="40"></label>
             <label class="form-label">Head commit SHA<input class="form-control" data-action-field="checkHead" value="${esc(args[2] || '')}" maxlength="40"></label>
             <p class="form-text">Both SHAs must be full length and the base must be an ancestor. Use One commit to check a commit without entering its parent.</p>` : ''}
-        ${quality ? `<label class="form-label">Findings
+        ${quality ? `<label class="form-label">${CHECK_MINIMUM_LABEL}
             <select class="form-select" data-action-field="checkMinimum" aria-describedby="${helpId}">${checkMinimumOptions(minimum)}</select>
         </label>
         <p class="form-text" id="${helpId}">${CHECK_MINIMUM_HELP} With no linked code, the step fails either way.</p>` : ''}
-        <p class="form-text">Run inexpensive checks before the review Worker. Results never move a card. ${quality ? 'Findings stay feedback for the reviewer unless you set a minimum grade.' : 'VCA results are feedback for the reviewer.'} Empty or unsupported analysis is marked skipped.</p>
+        <p class="form-text">Run inexpensive checks before the review Worker. Results never move a card. ${quality ? 'Findings stay feedback for the reviewer unless you set a minimum passing grade.' : 'VCA results are feedback for the reviewer.'} Empty or unsupported analysis is marked skipped.</p>
     </div>`;
 }
