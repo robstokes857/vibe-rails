@@ -1032,9 +1032,10 @@ Configuration cleaning and search detection are not substitutes for outbound tra
 Send to sends far more than a recap: the text xterm.js renders from the session's **whole**
 recording, which the browser builds from the session-replay API and posts to
 `POST /api/v1/chatHistory/{sessionId}/handoff` (session and tab credentials, an existing session).
-The route redacts it with `RedactTranscript` (and the user's own key) and sends it only to fixed
-`https://viberails.ai/api/v1/summary/handoff`, under the same Remote Access, saved API key,
-`X-Api-Key`-only, no-redirect and no-cookie rules as summaries. viberails.ai forwards it to OpenAI.
+The route redacts it with `RedactTranscript` (and the user's own key) and sends it, with the
+source session's id, only to fixed `https://viberails.ai/api/v1/summary/handoff`, under the same
+Remote Access, saved API key, `X-Api-Key`-only, no-redirect and no-cookie rules as summaries.
+viberails.ai forwards the text to OpenAI.
 Up to about 800,000 estimated tokens are sent; both sides refuse more before any upload. The
 answer is an event stream (keep-alive comments, then one result line) read with a 25-minute
 deadline; error text shown to the user is fixed local text, never the remote body. Nothing is

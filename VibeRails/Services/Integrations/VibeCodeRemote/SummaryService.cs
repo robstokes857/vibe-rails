@@ -13,9 +13,10 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote
         /// <summary>
         /// Send to (VIBE-363): redacts the text xterm.js rendered from a whole recording and asks
         /// viberails.ai (gpt-6.1-terra, high reasoning) for a handoff of at most
-        /// <paramref name="maxChars"/> characters. Failures are <see cref="RemoteSummaryException"/>s.
+        /// <paramref name="maxChars"/> characters. <paramref name="sessionId"/> names the recorded
+        /// session the text came from. Failures are <see cref="RemoteSummaryException"/>s.
         /// </summary>
-        Task<string> GetHandoffAsync(string renderedSession, int maxChars, CancellationToken cancellationToken);
+        Task<string> GetHandoffAsync(string sessionId, string renderedSession, int maxChars, CancellationToken cancellationToken);
     }
 
     /// <summary>
@@ -102,8 +103,9 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote
                 }, cancellationToken);
         }
 
-        public async Task<string> GetHandoffAsync(string renderedSession, int maxChars, CancellationToken cancellationToken)
+        public async Task<string> GetHandoffAsync(string sessionId, string renderedSession, int maxChars, CancellationToken cancellationToken)
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
             ArgumentNullException.ThrowIfNullOrWhiteSpace(renderedSession);
             var apiKey = RequireRemoteSummaries();
 
@@ -111,7 +113,7 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote
             using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/summary/handoff")
             {
                 Content = JsonContent.Create(
-                    new HandoffPostDto { SessionText = redacted, MaxChars = maxChars },
+                    new HandoffPostDto { SessionId = sessionId, SessionText = redacted, MaxChars = maxChars },
                     AppJsonSerializerContext.Default.HandoffPostDto)
             };
             request.Headers.Add("X-Api-Key", apiKey);

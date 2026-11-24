@@ -117,7 +117,7 @@ public class ChatHistoryService(
 
         // No transcript or summary cache: every Send to renders the recording as it is now,
         // so a still-running session and a second attempt both get current content.
-        var summary = await summaryService.GetHandoffAsync(renderedSession, SessionResumeService.MaxResumeSummaryChars, cancellationToken);
+        var summary = await summaryService.GetHandoffAsync(sessionId, renderedSession, SessionResumeService.MaxResumeSummaryChars, cancellationToken);
         return new SessionHandoffResponse(summary, SessionResumeService.MaxResumeSummaryChars, cards);
     }
 }
