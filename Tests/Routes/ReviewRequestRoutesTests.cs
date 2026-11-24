@@ -69,6 +69,9 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
             StagedIdentity: new GitStagedSnapshotIdentity(new string('c', 40), new string('d', 40), Tree)));
         var sessions = new Mock<ISessionStore>(MockBehavior.Strict);
         var started = new DateTime(2026, 10, 24, 12, 0, 0, DateTimeKind.Utc);
+        // Keep the clock aligned with the hosted fixture so its one-month expiry never
+        // changes the cancellation/deletion behavior as the real calendar advances.
+        var clock = new ReviewRequestTestSupport.Clock(started);
         sessions.Setup(s => s.GetSessionByIdAsync(ToolSession, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionResponse(ToolSession, "codex", null, _project, started, null, null));
         sessions.Setup(s => s.GetSessionDisplayInfoAsync(ToolSession)).ReturnsAsync(("codex", "Tool session"));
@@ -92,7 +95,7 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
         builder.Services.AddSingleton(terminal.Object);
         var store = new ReviewRequestStore(connection);
         // Slice E: the commit-approvals route resolves commit trees through this fake instead of git.
-        var reviews = new ReviewRequestService(store, snapshots.Object, _verifier, commitTrees: (_, shas, _) =>
+        var reviews = new ReviewRequestService(store, snapshots.Object, _verifier, clock, commitTrees: (_, shas, _) =>
             Task.FromResult<IReadOnlyDictionary<string, string>>(shas
                 .Where(sha => ApprovedCommit.StartsWith(sha, StringComparison.Ordinal))
                 .ToDictionary(sha => sha, _ => Tree, StringComparer.Ordinal)));
@@ -106,7 +109,7 @@ public sealed class ReviewRequestRoutesTests : IAsyncLifetime
             var requestId = body.RootElement.GetProperty("requestId").GetString()!;
             return Task.FromResult(ReviewRequestTestSupport.Json(HttpStatusCode.Created, ReviewRequestTestSupport.Hosted(requestId, Tree)));
         });
-        builder.Services.AddSingleton(new ReviewRequestSender(store, reviews, transport, _archives.Object, _events, new ReviewRequestPollState(), () => "routes-fixture-key"));
+        builder.Services.AddSingleton(new ReviewRequestSender(store, reviews, transport, _archives.Object, _events, new ReviewRequestPollState(), () => "routes-fixture-key", clock));
         builder.Services.ConfigureHttpJsonOptions(options =>
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default));
         _app = builder.Build();
