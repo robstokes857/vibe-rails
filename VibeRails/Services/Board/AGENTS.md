@@ -259,9 +259,9 @@ auto-attach a session, and explicit session attachments remain within the curren
 
 Lane settings' **Newly created cards land here** switch (`#board-lane-default`, the shared
 `card-editor-switch`, first in the dialog since VIBE-334) saves with **Save lane** (or
-**Create lane**). The dialog's **Save lane settings** action also saves its name, colour and
-default destination before saving the run order; a failed lane write keeps the draft and
-stops the run-order write. One lane per local board can be selected; choosing another replaces it.
+**Create lane**), which also saves the name and colour. The run order below saves on its own:
+each Add, Remove or move writes it at once, and **Save lane** never touches it.
+One lane per local board can be selected; choosing another replaces it.
 The card editor and card creation through the service/MCP use that lane when no lane is
 explicitly chosen, even when it is collapsed. Existing cards and explicit lane choices stay
 where directed. Clearing the choice or deleting its lane restores the first-lane fallback.

@@ -2316,7 +2316,7 @@ for (const width of [1440, 390]) {
         await expect(page.locator('#board-card-lane')).toHaveValue('col_ready');
     });
 
-    test(`Save lane settings retains the default location at ${width}px`, async ({ page }) => {
+    test(`the lane dialog's run order saves on its own, apart from Save lane, at ${width}px`, async ({ page }) => {
         await page.setViewportSize({ width, height: 950 });
         const columns = [
             { id: 'col_ready', name: 'Ready', position: 0, color: '#3b82f6', boardId: 'brd_main' },
@@ -2324,47 +2324,34 @@ for (const width of [1440, 390]) {
         ];
         await openBoard(page, { columns });
         const launches = await installLaunchFixture(page);
-        let rejectSave = false;
         const writes = [];
         await page.route('**/api/v1/board/columns/col_refine', route => {
             const body = route.request().postDataJSON();
             writes.push(body);
-            if (rejectSave) return route.fulfill({ status: 400, json: { error: 'Try saving the lane again.' } });
             Object.assign(columns[1], body);
             return route.fulfill({ json: columns[1] });
         });
         const editor = page.locator('[data-board-lane-editor]');
-        const checkbox = editor.getByRole('switch', { name: 'Newly created cards land here' });
-        const save = editor.getByRole('button', { name: 'Save lane settings', exact: true });
         await page.getByRole('button', { name: 'Settings for Needs refinement', exact: true }).click();
-        await checkbox.check();
-        await save.click();
-        await expect.poll(() => writes.length).toBe(1);
-        expect(writes[0].isDefaultForNewCards).toBe(true);
+        await expect(editor.getByRole('button', { name: 'Save lane settings', exact: true })).toHaveCount(0);
+        // A move saves the run order at once and leaves the lane's own fields alone.
+        await editor.getByRole('button', { name: 'Move Check up', exact: true }).click();
         await expect.poll(() => launches.writes.length).toBe(1);
-        await expect(save).toBeEnabled();
-        await page.keyboard.press('Escape');
-        await page.goto('/?view=board', { waitUntil: 'domcontentloaded' });
-        await page.getByRole('button', { name: 'Settings for Needs refinement', exact: true }).click();
-        await expect(checkbox).toBeChecked();
-
-        // A failed lane write must keep the draft and must not save the run order.
-        rejectSave = true;
-        await checkbox.uncheck();
-        await save.click();
-        await expect(page.getByText('Try saving the lane again.', { exact: true })).toBeVisible();
-        await expect(checkbox).not.toBeChecked();
+        expect(launches.writes[0].selections.map(selection => selection.definitionId)).toEqual(['action_check', 'preset_review']);
+        await expect(editor.locator('[data-lane-status]')).toHaveText('Saved. Check is now 1 of 2.');
+        expect(writes).toHaveLength(0);
+        // Save lane saves the name, colour and default destination, never the run order.
+        await editor.getByRole('switch', { name: 'Newly created cards land here' }).check();
+        await Promise.all([
+            page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/board/columns/col_refine'),
+            editor.getByRole('button', { name: 'Save lane', exact: true }).click()
+        ]);
+        expect(writes).toHaveLength(1);
+        expect(writes[0].isDefaultForNewCards).toBe(true);
         expect(launches.writes).toHaveLength(1);
-        rejectSave = false;
-        await save.click();
-        await expect.poll(() => launches.writes.length).toBe(2);
-        await expect(save).toBeEnabled();
-        await page.keyboard.press('Escape');
-        await page.getByRole('button', { name: 'Settings for Needs refinement', exact: true }).click();
-        await expect(checkbox).not.toBeChecked();
-        await page.keyboard.press('Escape');
+        await expect(editor).toHaveCount(0);
         await page.locator('[data-board-action="new-card"]').click();
-        await expect(page.locator('#board-card-lane')).toHaveValue('col_ready');
+        await expect(page.locator('#board-card-lane')).toHaveValue('col_refine');
     });
 
     test(`lane colours save custom selections and stay in sync with presets at ${width}px`, async ({ page }, testInfo) => {
@@ -4870,8 +4857,9 @@ for (const width of [320,375,768,1024]) test(`unified lane order persists withou
     await expect(panel.locator('[data-lane-gate]')).toHaveCount(0);
     await expect(panel).toContainText('Each waits for the previous run to finish, regardless of its result.');
     const up=panel.getByRole('button',{name:'Move Check up',exact:true});await up.focus();await up.press('Enter');
-    await panel.getByRole('button',{name:'Save lane settings',exact:true}).click();
+    // The move saves at once; there is no separate Save button.
     await expect.poll(()=>state.writes.length).toBe(1);
+    await expect(panel.getByRole('button',{name:'Save lane settings',exact:true})).toHaveCount(0);
     expect(state.writes[0]).toMatchObject({revision:3,selections:[{definitionId:'action_check',gate:'result'},{definitionId:'preset_review',gate:'review'}]});
     expect(await panel.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
     await page.screenshot({path:testInfo.outputPath(`unified-lane-${width}.png`)});
@@ -4879,25 +4867,27 @@ for (const width of [320,375,768,1024]) test(`unified lane order persists withou
     await expect(panel.locator('[data-lane-selection-list] strong')).toHaveText(['Check','Review']);
 });
 
-test('unified lane conflicts preserve edits and retired selections remain explicit',async({page})=>{
+test('unified lane conflicts keep the saved order and retired selections remain explicit',async({page})=>{
     await openBoard(page);const state=await installLaunchFixture(page,{conflict:true});
     state.selections.push({definitionId:'retired',definitionType:'preset',gate:'process'});
     await page.getByRole('button',{name:'Agents and Actions on entry to Ready',exact:true}).click();
     const panel=page.locator('.board-lane-agents-panel');
+    const rows=panel.locator('[data-lane-selection-list] strong');
     await expect(panel).toContainText('Unavailable / retired selection');
     await panel.getByRole('button',{name:'Move Check up',exact:true}).click();
-    await panel.getByRole('button',{name:'Save lane settings',exact:true}).click();
     await expect(panel.locator('[data-lane-error]')).toContainText('Lane changed elsewhere');
-    await expect(panel.locator('[data-lane-selection-list] strong')).toHaveText(['Check','Review','Unavailable / retired selection']);
-    expect(state.writes[0].revision).toBe(3);
-    await panel.getByRole('button',{name:'Close lane panel'}).click();
-    await page.getByRole('button',{name:'Cancel',exact:true}).click();
-    await expect(panel).toBeVisible();
-    await expect(panel.locator('[data-lane-selection-list] strong')).toHaveText(['Check','Review','Unavailable / retired selection']);
+    // The refused move leaves the last saved order showing; nothing is left unsaved to discard.
+    await expect(rows).toHaveText(['Review','Check','Unavailable / retired selection']);
+    expect(state.writes[0]).toMatchObject({revision:3,selections:[{definitionId:'action_check'},{definitionId:'preset_review'},{definitionId:'retired',gate:'process'}]});
     state.conflict=false;
     await panel.getByRole('button',{name:'Reload latest',exact:true}).click();
-    await page.getByRole('button',{name:'Discard',exact:true}).click();
-    await expect(panel.locator('[data-lane-selection-list] strong')).toHaveText(['Review','Check','Unavailable / retired selection']);
+    await expect(panel.locator('[data-lane-error]')).toBeHidden();
+    await panel.getByRole('button',{name:'Move Check up',exact:true}).click();
+    await expect.poll(()=>state.writes.length).toBe(2);
+    await expect(rows).toHaveText(['Check','Review','Unavailable / retired selection']);
+    expect(state.writes[1].selections).toContainEqual({definitionId:'retired',definitionType:'preset',gate:'process'});
+    await panel.getByRole('button',{name:'Close lane panel'}).click();
+    await expect(panel).toHaveCount(0);
 });
 
 for (const width of [320, 1024]) test(`lane Tom Select shows icons with search, selection, Escape and cleanup at ${width}px`, async ({ page }, testInfo) => {
@@ -5003,7 +4993,7 @@ for (const width of [320, 375, 768, 1024]) test(`lane picker explains choices an
     expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     const outside = await panel.evaluate(el => {
         const outer = el.getBoundingClientRect();
-        return [...el.querySelectorAll('[data-lane-about], .launch-lane-manage-row, .launch-lane-add-heading, .launch-lane-stage, .launch-lane-footer')]
+        return [...el.querySelectorAll('[data-lane-about], .launch-lane-manage-row, .launch-lane-add-heading, .launch-lane-stage')]
             .filter(node => { const box = node.getBoundingClientRect(); return box.left < outer.left - 1 || box.right > outer.right + 1; })
             .map(node => node.className);
     });

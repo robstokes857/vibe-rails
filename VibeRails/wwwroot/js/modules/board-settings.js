@@ -625,6 +625,6 @@ export function mountContextEditor(app, root) {
 }
 
 // Automatic account sync status and an immediate retry.
-export function mountLaneAutomation(app, element, columnId, onSaved, options) {
-    return element ? mountLaunchLane(app, element, columnId, onSaved, options) : () => {};
+export function mountLaneAutomation(app, element, columnId, onSaved) {
+    return element ? mountLaunchLane(app, element, columnId, onSaved) : () => {};
 }

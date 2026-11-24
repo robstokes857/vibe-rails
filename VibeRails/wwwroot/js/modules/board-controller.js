@@ -3643,9 +3643,9 @@ export class BoardController {
         const editor = container?.querySelector('[data-board-lane-editor]');
         if (!editor) return;
         editor._boardDefaultLaneBaseline = column?.isDefaultForNewCards === true;
+        // The run order saves on each change; Save lane covers the name, colour and default destination.
         if (column) this.boardSettingsDispose = mountLaneAutomation(this.app, editor.querySelector('[data-lane-automation]'), column.id,
-            settings => this.laneAgents.updateColumnCount(column.id, settings),
-            { beforeSave: () => this.saveLane(editor, { close: false }), saveRoot: editor });
+            settings => this.laneAgents.updateColumnCount(column.id, settings));
 
         const colorInput = editor.querySelector('#board-lane-color');
         const selectColor = color => {
@@ -3670,7 +3670,7 @@ export class BoardController {
         editor.querySelector('#board-lane-name')?.focus();
     }
 
-    async saveLane(editor, { close = true } = {}) {
+    async saveLane(editor) {
         const name = editor.querySelector('#board-lane-name')?.value.trim();
         if (!name) {
             this.app.showToast('Board', 'A lane needs a name.', 'warning');
@@ -3686,15 +3686,13 @@ export class BoardController {
         try {
             if (this.state.editingColumnId) {
                 await BoardApi.updateBoardColumnAsync(this.state.editingColumnId, changes);
-                if (close) this.app.showToast('Board', 'Lane saved.', 'success');
+                this.app.showToast('Board', 'Lane saved.', 'success');
             } else {
                 await BoardApi.createBoardColumnAsync({ ...changes, boardId: this.state.boardId });
                 this.app.showToast('Board', 'Lane added.', 'success');
             }
-            // A run-order save keeps the dialog open, including when its later write fails.
-            // Retain the accepted baseline so a retry or a subsequent uncheck saves correctly.
             editor._boardDefaultLaneBaseline = isDefaultForNewCards;
-            if (close) this.app.closeModal();
+            this.app.closeModal();
             await this.refresh();
             return true;
         } catch (error) {

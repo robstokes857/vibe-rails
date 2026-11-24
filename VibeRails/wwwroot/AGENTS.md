@@ -136,16 +136,26 @@ new selections omit it. Run activity still shows process outcomes and reports.
 Its add picker uses the shared Tom Select helper, including search, viewport positioning,
 Escape and disposal. Menu options and the selected value reuse provider logos for agents,
 the code icon for scripts and the VibeRails mark for saved/new VCA and code-quality checks.
-VCA and code-quality checks can be created from this picker; creating
-a definition does not save the lane order or run it. The lane save remains revision-checked.
+VCA and code-quality checks can be created from this picker; creating a definition never runs it.
+The run order saves on every change: **Add to run order**, **Remove** and Up/Down each `PUT` the
+whole order with its revision at once (`saveOrder`). There is no Save button, no unsaved state and
+no discard prompt; only a write in flight holds a close (`beforeClose`). A refused write, a conflict
+included, keeps the last saved order and shows the error with **Reload latest**. After a save only
+the rows (and, after Add or Remove, the picker) re-render, so the `role="status"` line below the run
+order announces it. After Add the picker keeps focus with its menu closed (`focusTomSelectClosed`
+in `utils.js`): Tom Select opens on focus, which looked like a prompt to add a second entry.
 The **Create an agent in AI Agents** link below the picker opens the AI Agents page
-through guarded app navigation, preserving the unsaved-lane confirmation and cleanup.
+through guarded app navigation and cleanup.
 A new VCA or code-quality check asks for its scope below the picker (VIBE-271): linked commits
 (default for both), unpushed, working tree or repository. A new Code quality scan also asks for
 **Findings** (VIBE-335): `checkMinimumOptions` / `CHECK_MINIMUM_HELP` from `job-checks.js`, sent as
 `check.failGrade` only when a grade is chosen, and named with it (`laneCheckName`). An existing
 check with the same kind, scope and grade is reused rather than copied (`findLaneCheck`), and
 existing checks are labelled with their scope and grade from the catalog's `check` field.
+The picker and Manage list leave out the saved check that `findLaneCheck` would reuse for its own
+settings (`laneCheckReused`): choosing the built-in entry adds it, so it is never offered twice
+under two names (a saved "Code quality check · Linked commits" beside **Code quality scan**).
+Pinned commits or ranges, settings the built-in entry cannot make and later copies keep entries.
 VIBE-337: the picker says what each choice does. Menu options render a muted second line from
 `laneChoiceDetail` (an agent's description or "Starts <CLI> with its saved prompt", a script's
 path and interpreter from the catalog's `script` field, or `LANE_CHECKS[kind].about`); the selected
@@ -153,8 +163,8 @@ value stays one line. The check kinds read as **Rules check** (`vca`) and **Code
 here and in `launch-presentation.js`; checks saved under the older names keep them, and
 `laneChoiceLabel` does not repeat the kind after them. After a choice, **What this does** shows
 the full text, a guarded link to the Rules (`dashboard`) or Quality page for checks, and the scope
-field; **Add to run order** carries the staging note, and an unsaved-changes status sits beside
-**Save lane settings**. Run order rows show `laneRowDetail` (kind, then what it runs or its scope).
+field; **Add to run order** carries the note that adding saves the lane. Run order rows show
+`laneRowDetail` (kind, then what it runs or its scope).
 **Manage list** is an inline panel, not a dialog: the Board lane panel closes on outside pointer
 events. Its switches save `PUT /api/v1/lane-picker/preferences { key, hidden }` at once; keys are
 `laneChoiceKey` (`preset:<id>`, `action:<id>`, `check:vca`, `check:code-quality`). Hidden entries
@@ -840,7 +850,7 @@ is separate from the existing-Automation picker. VCA and Code quality additions 
 scope in `launch-lane-editor.js` (above). Each row has **Move up** / **Move down** buttons; each move immediately saves
 the full ordered selection with its revision. Reordering preserves paused/unavailable selections,
 never rewrites Jobs, and cancels pending entries like any lane-settings save. A failed move keeps
-the displayed order and offers Reload for conflicts. Restore focus to the moved row's controls.
+the last saved order and offers Reload latest for conflicts. Restore focus to the moved row's controls.
 The pencil opens the shared Agent or Automation editor over the Board through
 `JobController.openFromBoard`, without mounting another page or changing navigation history.
 New Agent and New Automation use that same flow. Closing returns focus to the lane button;

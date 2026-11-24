@@ -20100,7 +20100,7 @@ body.performance-mode .brand-text-sm {
 .launch-lane-empty { margin: 0; padding: var(--space-4); border: 1px dashed var(--control-border); border-radius: var(--radius-control); color: var(--color-text-muted); text-align: center; }
 .launch-lane-add { display: grid; gap: var(--space-2); min-width: 0; }
 .launch-lane-add .ts-wrapper { width: 100%; min-width: 0; font-weight: 400; }
-/* VIBE-337: label row with Manage list, what the choice does, then Add with its staging note. */
+/* VIBE-337: label row with Manage list, what the choice does, then Add with its save note. */
 .launch-lane-add-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; }
 .launch-lane-editor .launch-lane-add-heading label { display: block; }
 .launch-lane-add-heading .btn-link { flex: 0 0 auto; padding-inline: 0; }
@@ -20140,9 +20140,10 @@ body.performance-mode .brand-text-sm {
 .launch-lane-dropdown .launch-lane-choice { align-items: flex-start; }
 .launch-lane-dropdown .launch-lane-choice-icon { margin-top: 3px; }
 .launch-lane-dropdown .option.active .launch-lane-choice-detail { color: var(--color-text); }
-.launch-lane-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2) var(--space-3); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
-.launch-lane-unsaved { margin: 0 auto 0 0; color: var(--color-text-muted); font-size: 13px; }
-.launch-lane-unsaved:empty { display: none; }
+/* Each run order change saves at once; this line confirms it, and an error offers Reload latest. */
+.launch-lane-status { margin: 0; color: var(--color-text-muted); font-size: 13px; line-height: 1.5; }
+.launch-lane-status:empty { display: none; }
+.launch-lane-editor [data-lane-reload] { justify-self: start; }
 .launch-lane-editor [data-lane-error] { margin: 0; color: var(--feedback-error-fg); }
 .launch-lane-editor [data-lane-error]:empty { display: none; }
 

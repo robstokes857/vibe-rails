@@ -596,11 +596,30 @@ export function enhanceSelectWithTomSelect(selectEl, options = {}) {
     return ts;
 }
 
+/**
+ * Focuses a Tom Select's visible control with its menu closed. Tom Select opens on focus, and
+ * with dropdown_input its public focus() targets the hidden search input, so focus the visible
+ * node under Tom Select's guard and then mark the instance focused. Uses the PRIVATE state
+ * described in the note below.
+ */
+export function focusTomSelectClosed(ts) {
+    const node = ts?.focus_node || ts?.control;
+    if (!node) return;
+    ts.ignoreFocus = true;
+    ts.close();
+    node.focus({ preventScroll: true });
+    ts.ignoreFocus = false;
+    ts.isFocused = true;
+    ts.refreshState?.();
+}
+
 // NOTE: the footer's focus hand-off below writes Tom Select PRIVATE state (ts.isFocused;
-// llm-picker-controller's focus restore additionally uses ts.ignoreFocus). Verified against
-// the vendored Tom Select v2.4.3 bundle (wwwroot/assets/tom-select/). When bumping that
-// bundle, re-run UITests/tests/llm-picker-preferences.spec.js — the footer Tab hand-off and
-// modal focus-restore tests fail fast if these internals moved.
+// llm-picker-controller's focus restore and focusTomSelectClosed above additionally use
+// ts.ignoreFocus). Verified against the vendored Tom Select v2.4.3 bundle
+// (wwwroot/assets/tom-select/). When bumping that bundle, re-run
+// UITests/tests/llm-picker-preferences.spec.js and the lane picker cases in
+// UITests/tests/ai-agents.spec.js — the footer Tab hand-off, modal focus-restore and
+// lane Add focus tests fail fast if these internals moved.
 function mountLlmPickerFooter(ts, selectEl, onCustomize, label) {
     if (!ts?.dropdown) return;
 

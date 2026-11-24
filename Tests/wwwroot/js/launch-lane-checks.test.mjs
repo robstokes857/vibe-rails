@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
     LANE_CHECK_SCOPES, DEFAULT_LANE_CHECK_SCOPE, LANE_BUILT_IN_CHECKS, LANE_CHECKS, LANE_PICKER_PREFERENCES,
     findLaneCheck, laneCheckName, laneCheckGrade, laneChoiceLabel, laneCheckScopeName, laneChoiceKey, laneChoiceDetail,
-    laneRowDetail, laneChoices, laneManageGroups
+    laneRowDetail, laneChoices, laneManageGroups, laneCheckReused
 } from '../../../VibeRails/wwwroot/js/modules/launch-lane-editor.js';
 
 const source = readFileSync(new URL('../../../VibeRails/wwwroot/js/modules/launch-lane-editor.js', import.meta.url), 'utf8');
@@ -125,7 +125,8 @@ test('hidden entries leave the picker but stay in Manage list; lane order and ot
         { id: 'p2', definitionType: 'preset', kind: 'agent', canRunAutomatically: true },
         { id: 'quick', definitionType: 'preset', kind: 'quick-launch', canRunAutomatically: false },
         { id: 's1', definitionType: 'action', kind: 'script', canRunAutomatically: true },
-        { id: 'c1', definitionType: 'action', kind: 'vca', canRunAutomatically: true, check: { scope: 'card' } },
+        // Pinned, so no built-in entry stands in for it (a reused check is covered below).
+        { id: 'c1', definitionType: 'action', kind: 'vca', canRunAutomatically: true, check: { scope: 'commit', headCommit: 'abc1234' } },
         { id: 'f1', definitionType: 'action', kind: 'future', canRunAutomatically: true }
     ];
     const selections = [{ definitionId: 'p2', definitionType: 'preset' }];
@@ -143,4 +144,36 @@ test('hidden entries leave the picker but stay in Manage list; lane order and ot
     const everything = new Set([...items.map(laneChoiceKey), ...LANE_BUILT_IN_CHECKS.map(laneChoiceKey)]);
     assert.deepEqual(laneChoices(items, [], everything), []);
     assert.equal(LANE_PICKER_PREFERENCES, 'lane-picker/preferences');
+});
+
+test('a saved check the built-in entry reuses is offered once, through that entry; one it cannot make keeps its own', () => {
+    const items = [
+        // What the lane saved before VIBE-337 renamed the scan: the user saw it beside Code quality scan.
+        { id: 'legacy', definitionType: 'action', kind: 'code-quality', name: 'Code quality check · Linked commits', canRunAutomatically: true, check: { scope: 'card' } },
+        { id: 'copy', definitionType: 'action', kind: 'code-quality', name: 'Second copy', canRunAutomatically: true, check: { scope: 'card' } },
+        { id: 'graded', definitionType: 'action', kind: 'code-quality', name: 'Gate C', canRunAutomatically: true, check: { scope: 'card', failGrade: 'C' } },
+        { id: 'rules', definitionType: 'action', kind: 'vca', name: 'VCA check', canRunAutomatically: true, check: { scope: 'working-tree' } },
+        { id: 'rules-graded', definitionType: 'action', kind: 'vca', name: 'Odd', canRunAutomatically: true, check: { scope: 'card', failGrade: 'B' } },
+        { id: 'pinned', definitionType: 'action', kind: 'vca', name: 'Pinned', canRunAutomatically: true, check: { scope: 'range', baseCommit: 'a', headCommit: 'b' } },
+        { id: 'unscoped', definitionType: 'action', kind: 'vca', name: 'Check', canRunAutomatically: true },
+        { id: 'retired', definitionType: 'action', kind: 'vca', name: 'Retired', canRunAutomatically: false, check: { scope: 'repository' } },
+        { id: 'script', definitionType: 'action', kind: 'script', name: 'Release', canRunAutomatically: true, check: null }
+    ];
+    const ids = list => list.map(item => item.id);
+    assert.deepEqual(ids(items.filter(item => laneCheckReused(items, item))), ['legacy', 'graded', 'rules']);
+    // Choosing the built-in entry with those settings adds each one, so none is out of reach.
+    assert.equal(findLaneCheck(items, 'code-quality', 'card')?.id, 'legacy');
+    assert.equal(findLaneCheck(items, 'code-quality', 'card', 'C')?.id, 'graded');
+    assert.equal(findLaneCheck(items, 'vca', 'working-tree')?.id, 'rules');
+    assert.deepEqual(ids(laneChoices(items, [])), ['copy', 'rules-graded', 'pinned', 'unscoped', 'script', 'new:vca', 'new:code-quality']);
+    assert.deepEqual(laneManageGroups(items).map(([name, entries]) => [name, ids(entries)]), [
+        ['Scripts', ['script']], ['Checks', ['copy', 'rules-graded', 'pinned', 'unscoped', 'new:vca', 'new:code-quality']]
+    ]);
+});
+
+test('the run order saves on every change: no Save button, unsaved state or discard prompt', () => {
+    assert.doesNotMatch(source, /Save lane settings|data-lane-save|data-lane-unsaved|Discard lane changes|confirmDialog/);
+    assert.match(source, /Adding saves the lane\. Nothing runs now/);
+    // Tom Select opens on focus; reopening the menu after Add read as a prompt to add a second entry.
+    assert.match(source, /focusTomSelectClosed\(picker\)/);
 });

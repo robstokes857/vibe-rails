@@ -1,5 +1,5 @@
 import { BoardApi } from './board-api.js';
-import { escapeHtml, isConfirmDialogOpen } from './utils.js';
+import { escapeHtml, isConfirmDialogOpen, focusTomSelectClosed } from './utils.js';
 import { mountLaneAgentBody } from './board-lane-agent-body.js';
 import { selectedLaneJobIds as selectedIds } from './board-lane-agent-list.js';
 export { laneScriptAction, findCheckAutomation } from './board-lane-agent-add.js';
@@ -126,12 +126,7 @@ export class BoardLaneAgents {
                 event.stopImmediatePropagation();
                 // dropdown_input moves its input into the menu. Focus the visible
                 // control without scheduling an open-on-focus pass (Tom Select 2.4.3).
-                picker.ignoreFocus = true;
-                picker.close();
-                (picker.focus_node || picker.control).focus({ preventScroll: true });
-                picker.ignoreFocus = false;
-                picker.isFocused = true;
-                picker.refreshState();
+                focusTomSelectClosed(picker);
                 return;
             }
             event.preventDefault();

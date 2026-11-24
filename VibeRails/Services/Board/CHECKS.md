@@ -32,7 +32,8 @@ only (the default) or fail the step below grade A, B or C, sent as `check.failGr
 the check, e.g. `Code quality scan · Linked commits, minimum B` (VIBE-335; see
 [minimum grade](#minimum-grade-vibe-278)). A pinned commit or range is set in the AI Agents editor.
 The picker reuses an existing check with the same kind, scope and minimum grade (and no pinned
-commits) instead of saving a copy; the catalog's `check` field carries each Action's scope and
+commits) instead of saving a copy, and leaves that check out of its menu so it is not offered
+beside the built-in entry; the catalog's `check` field carries each Action's scope and
 grade for that and for labelling. A card with no linked commits gets
 **Needs review**, with “no code attached to this card”; a Research spike is **Skipped/not applicable**.
 A Code quality check **fails its step** on Needs review, with or without a minimum grade (owner

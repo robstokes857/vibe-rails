@@ -1,4 +1,4 @@
-import { escapeHtml, confirmDialog, enhanceSelectWithTomSelect, getCliBrand } from './utils.js';
+import { escapeHtml, enhanceSelectWithTomSelect, focusTomSelectClosed, getCliBrand } from './utils.js';
 import { LaunchApi } from './launch-api.js';
 import { launchPresentation } from './launch-presentation.js';
 import { boardBrandLogo } from './board-brand.js';
@@ -78,6 +78,16 @@ export const findLaneCheck = (items, kind, scope, failGrade = '') => items.find(
     && item.kind === kind && item.canRunAutomatically && item.check?.scope === scope
     && (item.check.failGrade || '') === laneCheckGrade(kind, failGrade) && !item.check.baseCommit && !item.check.headCommit);
 
+/**
+ * True for the saved check that Rules check or Code quality scan reuses for its scope and grade. The
+ * picker leaves it out, so the same check is never offered twice under two names; choosing the built-in
+ * entry with those settings adds it. A pinned commit or range, or settings the entry cannot make, keep
+ * their own entry, as does any later copy of a reused check.
+ */
+export const laneCheckReused = (items, item) => Boolean(LANE_CHECKS[item.kind])
+    && LANE_CHECK_SCOPES.some(([scope]) => scope === item.check?.scope)
+    && findLaneCheck(items, item.kind, item.check.scope, item.check.failGrade || '') === item;
+
 /** The stable Manage list key: a saved definition's type and id, or check:<kind> for a built-in new check. */
 export const laneChoiceKey = item => item.key || `${item.definitionType}:${item.id}`;
 
@@ -107,17 +117,20 @@ export function laneRowDetail(item) {
     return `${kind} · ${laneChoiceDetail(item)}`;
 }
 
+/** Saved definitions the picker can offer: runnable, minus checks a built-in entry stands in for. */
+const offeredDefinitions = items => items.filter(item => item.canRunAutomatically && !laneCheckReused(items, item));
+
 /** What the picker offers: runnable definitions not in this lane yet, then the built-in checks, minus hidden ones. */
 export function laneChoices(items, selections, hidden = new Set()) {
     return [
-        ...items.filter(item => item.canRunAutomatically && !selections.some(selection => selection.definitionId === item.id)),
+        ...offeredDefinitions(items).filter(item => !selections.some(selection => selection.definitionId === item.id)),
         ...LANE_BUILT_IN_CHECKS
     ].filter(item => !hidden.has(laneChoiceKey(item)));
 }
 
 /** Every entry the picker can offer, hidden or not and whatever this lane runs, in Manage list groups. */
 export function laneManageGroups(items) {
-    const offered = [...items.filter(item => item.canRunAutomatically), ...LANE_BUILT_IN_CHECKS];
+    const offered = [...offeredDefinitions(items), ...LANE_BUILT_IN_CHECKS];
     const action = item => item.definitionType === 'action' && !LANE_CHECKS[item.kind];
     return [
         ['Agents', offered.filter(item => item.definitionType === 'preset')],
@@ -129,16 +142,17 @@ export function laneManageGroups(items) {
 
 const choiceLogo = item => LANE_CHECKS[item.kind] ? boardBrandLogo(null, '') : launchPresentation(item).logoHtml;
 
-/** Ordered definitions, shared by lane settings and the lane popup. */
-export function mountLaunchLane(app, host, columnId, onSaved = () => {}, { beforeSave, saveRoot = host } = {}) {
+/**
+ * Ordered definitions, shared by lane settings and the lane popup. Add, Remove and each move save the
+ * run order at once: there is no Save button and nothing left unsaved to discard.
+ */
+export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
     const api = new LaunchApi(app),
         abort = new AbortController();
     let selections = [],
         revision = 0,
         items = [],
         busy = false;
-    let dirty = false,
-        confirming = false;
     let picker = null,
         choiceItems = new Map();
     // Manage list (VIBE-337): what this user hides from the picker. Never the lane, never a definition.
@@ -150,43 +164,19 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}, { befor
         minimumHelpId = `launch-lane-check-minimum-help-${id}`,
         pickerId = `launch-lane-choice-${id}`,
         manageId = `launch-lane-manage-${id}`,
-        stagingId = `launch-lane-staging-${id}`;
+        addHelpId = `launch-lane-add-help-${id}`;
     const scopeHelp = scope => `${LANE_CHECK_SCOPES.find(([value]) => value === scope)?.[2] || ''} A pinned commit or range can be set on the check in AI Agents.`;
     const current = () => !abort.signal.aborted && host.isConnected;
-    const beforeClose = (retry) => {
-        if (busy) {
-            app.showToast(
-                'Board',
-                'Wait for lane settings to finish saving.',
-                'info'
-            );
-            return false;
-        }
-        if (!dirty) return true;
-        if (!confirming) {
-            confirming = true;
-            void confirmDialog({
-                title: 'Discard lane changes?',
-                message: 'Your unsaved lane changes will be lost.',
-                confirmLabel: 'Discard',
-                danger: true
-            }).then((ok) => {
-                confirming = false;
-                if (ok && current()) {
-                    dirty = false;
-                    retry?.();
-                }
-            });
-        }
+    // Every change saves at once, so only a write in flight holds the panel, dialog or page open.
+    const beforeClose = () => {
+        if (!busy) return true;
+        app.showToast('Board', 'Wait for the run order to finish saving.', 'info');
         return false;
     };
+    const definition = selection => items.find(item => item.id === selection?.definitionId && item.definitionType === selection?.definitionType);
     const rows = () => selections
         .map((selection, index) => {
-            const item = items.find(
-                (item) =>
-                    item.id === selection.definitionId &&
-                    item.definitionType === selection.definitionType
-            );
+            const item = definition(selection);
             const name = escapeHtml(item?.name || 'Unavailable / retired selection');
             const detail = item ? `<span class="launch-lane-row-detail">${escapeHtml(laneRowDetail(item))}</span>` : '';
             return `<div class="launch-lane-row" data-lane-index="${index}"><div class="launch-lane-title"><span class="launch-lane-number" aria-hidden="true">${index + 1}</span><span class="launch-lane-row-text"><strong>${name}</strong>${detail}</span></div>${!item?.canRunAutomatically ? '<p class="text-warning">Unavailable for automatic runs. Remove or replace this selection.</p>' : ''}<div class="launch-run-actions"><button class="btn btn-sm btn-secondary" data-lane-move="-1"${index === 0 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} up"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Up</button><button class="btn btn-sm btn-secondary" data-lane-move="1"${index === selections.length - 1 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} down"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Down</button><button class="btn btn-sm btn-outline-danger" data-lane-remove>Remove</button></div></div>`;
@@ -197,6 +187,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}, { befor
         picker = null;
         host.classList.add('launch-lane-editor');
         host.innerHTML = `<h3>Run order</h3><div class="launch-lane-list" data-lane-selection-list>${rows()}</div>
+            <p class="launch-lane-status" data-lane-status role="status"></p><p data-lane-error role="alert"></p>
             <div class="launch-lane-add">
                 <div class="launch-lane-add-heading"><label for="${pickerId}">Add to this lane</label><button type="button" class="btn btn-link btn-sm" data-lane-manage aria-expanded="false" aria-controls="${manageId}">Manage list</button></div>
                 <section class="launch-lane-manage" id="${manageId}" data-lane-manage-list aria-label="Manage list" hidden></section>
@@ -208,11 +199,14 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}, { befor
         .join('')}</select></label><p class="form-text" id="${scopeHelpId}" data-lane-check-help>${escapeHtml(scopeHelp(DEFAULT_LANE_CHECK_SCOPE))}</p>
                         <div class="launch-lane-check" data-lane-check-minimum-options hidden><label>Findings<select class="form-select" data-lane-check-minimum aria-describedby="${minimumHelpId}">${checkMinimumOptions('')}</select></label><p class="form-text" id="${minimumHelpId}">${escapeHtml(CHECK_MINIMUM_HELP)}</p></div></div>
                 </div>
-                <div class="launch-lane-stage"><button type="button" class="btn btn-secondary" data-lane-add disabled aria-describedby="${stagingId}">Add to run order</button><p class="form-text" id="${stagingId}">Add puts it in the run order above. Nothing runs until you save lane settings, and then only when a card enters this lane.</p></div>
-            </div><div><button type="button" class="btn btn-link btn-sm px-0" data-lane-manage-agents>Create an agent in AI Agents</button></div><div class="launch-lane-footer"><p class="launch-lane-unsaved" data-lane-unsaved role="status"></p><button class="btn btn-primary" data-lane-save>Save lane settings</button></div><p data-lane-error role="alert"></p>`;
+                <div class="launch-lane-stage"><button type="button" class="btn btn-secondary" data-lane-add disabled aria-describedby="${addHelpId}">Add to run order</button><p class="form-text" id="${addHelpId}">Adding saves the lane. Nothing runs now: the run order starts when a card enters this lane.</p></div>
+            </div><div><button type="button" class="btn btn-link btn-sm px-0" data-lane-manage-agents>Create an agent in AI Agents</button></div>`;
         renderPicker();
         if (manageOpen) setManage(true, false);
-        syncDirty();
+    };
+    /** The run order rows alone, so the status line keeps announcing and an error keeps its Reload button. */
+    const renderRows = () => {
+        host.querySelector('[data-lane-selection-list]').innerHTML = rows();
     };
     /** The searchable picker alone, so a Manage list switch never resets the run order or its own focus. */
     const renderPicker = (keep = '') => {
@@ -266,9 +260,36 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}, { befor
         // Only Code quality can fail its step below a grade; a Rules check is always feedback (VIBE-335).
         host.querySelector('[data-lane-check-minimum-options]').hidden = builtIn?.kind !== 'code-quality';
     };
-    const syncDirty = () => {
-        const note = host.querySelector('[data-lane-unsaved]');
-        if (note) note.textContent = dirty ? 'Unsaved changes. Save lane settings to apply them.' : '';
+    /** A new check's scope and Findings start over after each Add. */
+    const resetCheckOptions = () => {
+        host.querySelector('[data-lane-check-scope]').value = DEFAULT_LANE_CHECK_SCOPE;
+        host.querySelector('[data-lane-check-help]').textContent = scopeHelp(DEFAULT_LANE_CHECK_SCOPE);
+        host.querySelector('[data-lane-check-minimum]').value = '';
+    };
+    /** Focus returns to the picker with its menu closed: reopening it after Add read as a request to add another. */
+    const focusPicker = () => {
+        if (picker) focusTomSelectClosed(picker);
+        else (host.querySelector('[data-lane-manage-show]') || host.querySelector('[data-lane-manage]'))?.focus();
+    };
+    /** Confirms a save below the run order and clears any earlier failure. */
+    const say = (text) => {
+        host.querySelector('[data-lane-status]').textContent = text;
+        host.querySelector('[data-lane-error]').textContent = '';
+        host.querySelector('[data-lane-reload]')?.remove();
+    };
+    const error = (failure, { reload = true } = {}) => {
+        if (!current()) return;
+        host.querySelector('[data-lane-status]').textContent = '';
+        const alert = host.querySelector('[data-lane-error]');
+        alert.textContent = failure.message;
+        if (reload && !host.querySelector('[data-lane-reload]')) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn btn-outline-secondary';
+            button.textContent = 'Reload latest';
+            button.setAttribute('data-lane-reload', '');
+            alert.after(button);
+        }
     };
     const renderManage = () => {
         const panel = host.querySelector('[data-lane-manage-list]');
@@ -321,16 +342,83 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}, { befor
             if (focused && input.isConnected) input.focus({ preventScroll: true });
         }
     };
-    const error = (failure) => {
-        if (!current()) return;
-        host.querySelector('[data-lane-error]').textContent = failure.message;
-        if (!host.querySelector('[data-lane-reload]')) {
-            const reload = document.createElement('button');
-            reload.className = 'btn btn-outline-secondary';
-            reload.textContent = 'Reload latest';
-            reload.setAttribute('data-lane-reload', '');
-            host.append(reload);
+    /** Saves a run order. A refused write (a conflict included) leaves the last saved order showing. */
+    const saveOrder = async (next) => {
+        const unlock = lock();
+        try {
+            const saved = await api.call(
+                `board/columns/${encodeURIComponent(columnId)}/launches`,
+                'PUT',
+                { selections: next, revision }
+            );
+            selections = next;
+            revision = saved.revision;
+            onSaved(saved);
+            return current();
+        } catch (failure) {
+            error(failure);
+            return false;
+        } finally {
+            unlock();
         }
+    };
+    const add = async () => {
+        const value = host.querySelector('[data-lane-add-choice]')?.value || '';
+        const check = LANE_BUILT_IN_CHECKS.find(check => check.id === value);
+        const scope = check && host.querySelector('[data-lane-check-scope]').value;
+        const failGrade = check ? laneCheckGrade(check.kind, host.querySelector('[data-lane-check-minimum]').value) : '';
+        // Reuse an identical check, minimum grade included, instead of adding another copy to the catalog.
+        let item = check ? findLaneCheck(items, check.kind, scope, failGrade) : items.find(item => item.id === value);
+        if (item && selections.some(selection => selection.definitionId === item.id)) {
+            error({ message: `This lane already runs “${item.name}”.` }, { reload: false });
+            return;
+        }
+        if (check && !item) {
+            const unlock = lock();
+            try {
+                const saved = await api.save('action', null, {
+                    name: laneCheckName(check.kind, scope, failGrade), kind: check.kind, enabled: true, expectedRevision: 0,
+                    check: failGrade ? { scope, failGrade } : { scope }, script: null
+                });
+                if (!current()) return;
+                item = { ...saved, definitionType: 'action', canRunAutomatically: true };
+                items.push(item);
+            } catch (failure) {
+                error(failure);
+                return;
+            } finally {
+                unlock();
+            }
+        }
+        if (!item) return;
+        if (!await saveOrder([...selections, { definitionId: item.id, definitionType: item.definitionType }])) return;
+        renderRows();
+        renderPicker();
+        resetCheckOptions();
+        say(`Saved. ${item.name} runs when a card enters this lane.`);
+        focusPicker();
+    };
+    /** Up, Down or Remove on one row, saved at once; focus stays with that entry's controls. */
+    const change = async (button, index) => {
+        const removing = button.hasAttribute('data-lane-remove');
+        const target = removing ? index : index + Number(button.dataset.laneMove);
+        const next = [...selections];
+        if (removing) next.splice(index, 1);
+        else [next[index], next[target]] = [next[target], next[index]];
+        const name = definition(selections[index])?.name || 'Unavailable / retired selection';
+        if (!await saveOrder(next)) {
+            if (button.isConnected) button.focus();
+            return;
+        }
+        renderRows();
+        // A removed entry can be added again; keep whatever the picker was showing.
+        if (removing) renderPicker(host.querySelector('[data-lane-add-choice]')?.value || '');
+        say(removing ? `Saved. ${name} no longer runs in this lane.` : `Saved. ${name} is now ${target + 1} of ${next.length}.`);
+        const row = host.querySelector(`[data-lane-index="${Math.min(target, selections.length - 1)}"]`);
+        const focus = row?.querySelector(`button[data-lane-move="${button.dataset.laneMove}"]:not(:disabled)`)
+            || row?.querySelector('button:not(:disabled)');
+        if (focus) focus.focus();
+        else focusPicker();
     };
     const load = async () => {
         try {
@@ -351,7 +439,6 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}, { befor
             items = catalog.items;
             hidden = new Set(Array.isArray(preferences?.hiddenKeys) ? preferences.hiddenKeys : []);
             preferencesFailed = !preferences;
-            dirty = false;
             render();
         } catch (failure) {
             if (current()) {
@@ -379,7 +466,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}, { befor
     );
     host.addEventListener(
         'click',
-        async (event) => {
+        (event) => {
             if (event.target.closest('[data-lane-manage-agents]')) {
                 event.preventDefault();
                 app.navigate('ai-agents');
@@ -387,7 +474,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}, { befor
             }
             const pageLink = event.target.closest('[data-lane-open-view]');
             if (pageLink) {
-                // Guarded navigation: unsaved lane changes still ask before leaving.
+                // Guarded navigation: a run order save in flight still holds the page.
                 event.preventDefault();
                 const view = pageLink.dataset.laneOpenView;
                 app.navigate(view, {}, { resetStack: view === 'dashboard' });
@@ -408,113 +495,19 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}, { befor
                 return;
             }
             if (button.hasAttribute('data-lane-reload')) {
-                if (beforeClose(() => void load())) void load();
+                void load();
                 return;
             }
             if (button.hasAttribute('data-lane-add')) {
-                const value = host.querySelector('[data-lane-add-choice]')?.value || '';
-                let item = items.find(item => item.id === value);
-                const check = LANE_BUILT_IN_CHECKS.find(check => check.id === value);
-                const scope = check && host.querySelector('[data-lane-check-scope]').value;
-                const failGrade = check ? laneCheckGrade(check.kind, host.querySelector('[data-lane-check-minimum]').value) : '';
-                // Reuse an identical check, minimum grade included, instead of adding another copy to the catalog.
-                if (check) item = findLaneCheck(items, check.kind, scope, failGrade);
-                if (check && item && selections.some(selection => selection.definitionId === item.id)) {
-                    host.querySelector('[data-lane-error]').textContent = `This lane already runs “${item.name}”.`;
-                    return;
-                }
-                if (check && !item) {
-                    const unlock = lock();
-                    try {
-                        const saved = await api.save('action', null, {
-                            name: laneCheckName(check.kind, scope, failGrade), kind: check.kind, enabled: true, expectedRevision: 0,
-                            check: failGrade ? { scope, failGrade } : { scope }, script: null
-                        });
-                        if (!current()) return;
-                        item = { ...saved, definitionType: 'action', canRunAutomatically: true };
-                        items.push(item);
-                    } catch (failure) {
-                        error(failure);
-                        return;
-                    } finally {
-                        unlock();
-                    }
-                }
-                if (item) {
-                    selections.push({
-                        definitionId: item.id,
-                        definitionType: item.definitionType
-                    });
-                    dirty = true;
-                }
-                render();
-                (picker || host.querySelector('[data-lane-manage-show]'))?.focus();
+                void add();
                 return;
             }
             const row = button.closest('[data-lane-index]');
-            if (row) {
-                dirty = true;
-                const index = Number(row.dataset.laneIndex);
-                let focusIndex = index;
-                if (button.hasAttribute('data-lane-remove'))
-                    selections.splice(index, 1);
-                else {
-                    focusIndex = index + Number(button.dataset.laneMove);
-                    [selections[index], selections[focusIndex]] = [
-                        selections[focusIndex],
-                        selections[index]
-                    ];
-                }
-                render();
-                const target = host.querySelector(
-                    `[data-lane-index="${Math.min(focusIndex, selections.length - 1)}"]`
-                );
-                (
-                    target?.querySelector(
-                        `button[data-lane-move="${button.dataset.laneMove}"]:not(:disabled)`
-                    ) ||
-                    target?.querySelector('button:not(:disabled)') ||
-                    picker?.control || host.querySelector('[data-lane-manage]')
-                )?.focus();
-                return;
-            }
-            if (button.hasAttribute('data-lane-save')) {
-                const unlock = lock(saveRoot);
-                try {
-                    // The full lane dialog also owns the name, colour and default destination.
-                    // Save those before reporting success from this shared settings action.
-                    if (await beforeSave?.() === false) return;
-                    const saved = await api.call(
-                        `board/columns/${encodeURIComponent(columnId)}/launches`,
-                        'PUT',
-                        { selections, revision }
-                    );
-                    if (current()) {
-                        revision = saved.revision;
-                        dirty = false;
-                        syncDirty();
-                        host.querySelector('[data-lane-error]').textContent =
-                            '';
-                        host.querySelector('[data-lane-reload]')?.remove();
-                        onSaved(saved);
-                        app.showToast(
-                            'Board',
-                            'Lane settings saved.',
-                            'success'
-                        );
-                    }
-                } catch (failure) {
-                    error(failure);
-                } finally {
-                    unlock();
-                }
-            }
+            if (row) void change(button, Number(row.dataset.laneIndex));
         },
         { signal: abort.signal }
     );
-    const removeGuard = app.registerNavigationGuard?.(({ retry }) =>
-        beforeClose(retry)
-    );
+    const removeGuard = app.registerNavigationGuard?.(() => beforeClose());
     const dispose = () => {
         abort.abort();
         picker?.destroy();
@@ -524,9 +517,9 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}, { befor
     void load();
     return dispose;
 
-    function lock(root = host) {
+    function lock() {
         busy = true;
-        const controls = [...root.querySelectorAll('input,select,button')].map(node => [node, node.disabled]);
+        const controls = [...host.querySelectorAll('input,select,button')].map(node => [node, node.disabled]);
         controls.forEach(([node]) => { node.disabled = true; });
         picker?.disable();
         return () => {

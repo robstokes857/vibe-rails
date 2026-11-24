@@ -829,13 +829,22 @@ line, at most two lines in the menu: an agent's saved description (else "Starts
 Codex with its saved prompt"), a script's path and interpreter, or what a check
 does. The selected value stays one line. Name the built-in checks for what they do:
 **Rules check** (this repository's `vc.rules.md` rules; the description mentions
-the older "VCA check" name) and **Code quality scan**. After a choice, a **What this
-does** line with the full text appears below the picker; a check adds a teal link
-to the Rules or Quality page, then its **Check scope** field and help. **Add to run
-order** follows, with one help sentence: Add only stages the entry, nothing runs
-until **Save lane settings**, and then only when a card enters the lane. While the
-lane has unsaved changes, a muted status sentence beside **Save lane settings**
-says so.
+the older "VCA check" name) and **Code quality scan**. Never offer the same check
+twice: leave out the saved check that a built-in entry reuses for its scope and
+grade, so choosing the built-in entry adds it. A saved check that a built-in entry
+cannot make, such as one pinned to a commit or range, keeps its own entry. After a
+choice, a **What this does** line with the full text appears below the picker; a
+check adds a teal link to the Rules or Quality page, then its **Check scope** field
+and help. **Add to run order** follows, with one help sentence: adding saves the
+lane, and nothing runs until a card enters it.
+
+The run order saves on every change: **Add to run order**, **Remove** and the
+Up/Down moves each save at once. There is no **Save lane settings** button and no
+unsaved state to discard. A 13px muted status sentence below the run order
+confirms each save; a failed save keeps the last saved order and shows the error
+there with **Reload latest**. After Add, the picker resets and keeps focus with
+its menu closed, so it never looks as if a second entry is being added. The full
+lane dialog's **Save lane** covers only the name, colour and default destination.
 
 A compact `btn-link` **Manage list** sits on the **Add to this lane** label row. It
 toggles (`aria-expanded`, `aria-controls`) an inline panel inside lane settings,

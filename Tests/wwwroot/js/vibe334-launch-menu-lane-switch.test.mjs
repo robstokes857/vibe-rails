@@ -214,21 +214,19 @@ test('Save lane sends the switch only when it changed', async () => {
     assert.deepEqual(calls.at(-1).payload, { name: 'New lane', color: '#3b82f6', isDefaultForNewCards: true, boardId: 'brd_main' });
 });
 
-test('saving lane fields without closing retains the baseline for retry and unchecking', async () => {
+test('Save lane saves only the lane fields and closes; the run order saves on its own', async () => {
     const { controller, calls } = laneController([{ id: 'col_ready', name: 'Ready', color: '#3b82f6' }]);
     controller.state.editingColumnId = 'col_ready';
     controller.state.editingColumnColor = '#3b82f6';
-    let closed = false;
-    controller.app.closeModal = () => { closed = true; };
+    let closed = 0;
+    controller.app.closeModal = () => { closed++; };
     const editor = laneEditor({ checked: true, baseline: false });
 
-    assert.equal(await controller.saveLane(editor, { close: false }), true);
-    assert.equal(closed, false);
+    assert.equal(await controller.saveLane(editor), true);
+    assert.equal(closed, 1);
+    // One column write: Save lane never writes the run order, which saves on each Add, Remove or move.
+    assert.deepEqual(calls.map(call => [call.method, call.url.replace(/^.*\/board/, '')]), [['PUT', '/columns/col_ready']]);
     assert.equal(calls[0].payload.isDefaultForNewCards, true);
-    // The later run-order request can fail. Retrying must not reapply an accepted default.
-    await controller.saveLane(editor, { close: false });
-    assert.equal(Object.hasOwn(calls[1].payload, 'isDefaultForNewCards'), false);
-    editor.querySelector('#board-lane-default').checked = false;
-    await controller.saveLane(editor, { close: false });
-    assert.equal(calls[2].payload.isDefaultForNewCards, false);
+    // A save that keeps the dialog open no longer exists: the run order cannot fail after it.
+    assert.equal(controller.saveLane.length, 1);
 });
