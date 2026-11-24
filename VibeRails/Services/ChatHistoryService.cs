@@ -103,8 +103,8 @@ public class ChatHistoryService(
 
     public async Task<SessionHandoffResponse> GetHandoffAsync(string sessionId, string renderedSession, CancellationToken cancellationToken)
     {
-        if (await repository.GetSessionByIdAsync(sessionId, cancellationToken) is null)
-            throw new KeyNotFoundException($"Session not found: {sessionId}");
+        var session = await repository.GetSessionByIdAsync(sessionId, cancellationToken)
+            ?? throw new KeyNotFoundException($"Session not found: {sessionId}");
 
         // Checked here too, so an over-allowance session is never uploaded just to be refused.
         var estimatedTokens = SessionHandoffLimits.EstimateTokens(renderedSession);
@@ -117,7 +117,9 @@ public class ChatHistoryService(
 
         // No transcript or summary cache: every Send to renders the recording as it is now,
         // so a still-running session and a second attempt both get current content.
-        var summary = await summaryService.GetHandoffAsync(sessionId, renderedSession, SessionResumeService.MaxResumeSummaryChars, cancellationToken);
+        // The project's display name, as the history sidebar shows it; its path stays local.
+        var projectName = await repository.GetProjectDisplayNameAsync(session.WorkingDirectory, cancellationToken);
+        var summary = await summaryService.GetHandoffAsync(sessionId, projectName, renderedSession, SessionResumeService.MaxResumeSummaryChars, cancellationToken);
         return new SessionHandoffResponse(summary, SessionResumeService.MaxResumeSummaryChars, cards);
     }
 }

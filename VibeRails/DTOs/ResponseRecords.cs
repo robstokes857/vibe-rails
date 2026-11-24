@@ -1854,10 +1854,12 @@ namespace VibeRails.DTOs
     public class HandoffPostDto
     {
         /// <summary>
-        /// The desktop's id for the recorded session the handoff is written from. viberails.ai does
-        /// not read it yet; its request binding ignores fields it does not know.
+        /// The desktop's id for the recorded session the handoff is written from, and that session's
+        /// project display name (never its path). viberails.ai does not read either yet; its request
+        /// binding ignores fields it does not know.
         /// </summary>
         public string SessionId { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
         public string SessionText { get; set; } = string.Empty;
         public int MaxChars { get; set; }
     }

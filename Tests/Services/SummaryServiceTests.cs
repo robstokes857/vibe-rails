@@ -174,6 +174,7 @@ public sealed class SummaryServiceTests : IDisposable
 
         var result = await service.GetHandoffAsync(
             "4f0c3b2e-source-session",
+            "vibe-rails",
             "Keep the screen.\npassword=super_secret_value_here\nconfigured-api-key\n└─ done",
             SessionResumeServiceMaxChars, TestContext.Current.CancellationToken);
 
@@ -188,6 +189,7 @@ public sealed class SummaryServiceTests : IDisposable
         Assert.DoesNotContain("configured-api-key", sent, StringComparison.Ordinal);
         Assert.Equal(SessionResumeServiceMaxChars, payload.RootElement.GetProperty("maxChars").GetInt32());
         Assert.Equal("4f0c3b2e-source-session", payload.RootElement.GetProperty("sessionId").GetString());
+        Assert.Equal("vibe-rails", payload.RootElement.GetProperty("projectName").GetString());
     }
 
     [Theory]
@@ -204,7 +206,7 @@ public sealed class SummaryServiceTests : IDisposable
             $": started\n\ndata: {{\"type\":\"error\",\"status\":503,\"code\":\"{code}\",\"error\":\"remote text with configured-api-key\"}}\n\n")));
 
         var exception = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
-            service.GetHandoffAsync("source-session", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
+            service.GetHandoffAsync("source-session", "project", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
 
         Assert.Equal(local, exception.StatusCode);
         Assert.Contains(expected, exception.Message, StringComparison.Ordinal);
@@ -219,7 +221,7 @@ public sealed class SummaryServiceTests : IDisposable
         var service = CreateService(new StatusHandler(() => Stream(": started\n\n: working\n\n")));
 
         var exception = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
-            service.GetHandoffAsync("source-session", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
+            service.GetHandoffAsync("source-session", "project", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
 
         Assert.Equal(502, exception.StatusCode);
         Assert.Contains("without a result", exception.Message, StringComparison.Ordinal);
@@ -242,7 +244,7 @@ public sealed class SummaryServiceTests : IDisposable
         }));
 
         var exception = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
-            service.GetHandoffAsync("source-session", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
+            service.GetHandoffAsync("source-session", "project", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
 
         Assert.Equal(local, exception.StatusCode);
         Assert.Equal(upstream, exception.UpstreamStatus);
@@ -256,14 +258,14 @@ public sealed class SummaryServiceTests : IDisposable
         ParserConfigs.SetApiKey("configured-api-key");
         var handler = new CapturingHandler();
         var disabled = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
-            CreateService(handler).GetHandoffAsync("source-session", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
+            CreateService(handler).GetHandoffAsync("source-session", "project", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
         Assert.Equal(400, disabled.StatusCode);
         Assert.Equal(0, handler.RequestCount);
 
         ParserConfigs.SetRemoteAccess(true);
         var timedOut = await Assert.ThrowsAsync<RemoteSummaryException>(() =>
             CreateService(new StatusHandler(() => throw new TaskCanceledException("timeout")))
-                .GetHandoffAsync("source-session", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
+                .GetHandoffAsync("source-session", "project", "screen", SessionResumeServiceMaxChars, TestContext.Current.CancellationToken));
         Assert.Equal(504, timedOut.StatusCode);
         Assert.Contains("25 minutes", timedOut.Message, StringComparison.Ordinal);
     }

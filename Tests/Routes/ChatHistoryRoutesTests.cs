@@ -178,12 +178,14 @@ public sealed class ChatHistoryRoutesTests
             .ReturnsAsync(new SessionResponse("session", "codex", null, "C:/project", DateTime.UtcNow, null, null));
         repository.Setup(r => r.GetSessionByIdAsync("missing", It.IsAny<CancellationToken>()))
             .ReturnsAsync((SessionResponse?)null);
+        repository.Setup(r => r.GetProjectDisplayNameAsync("C:/project", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("Project Name");
         var board = new Mock<IBoardStore>(MockBehavior.Strict);
         board.Setup(s => s.GetSessionCardsAsync(It.Is<IReadOnlyList<string>>(ids => ids.Count == 1 && ids[0] == "session"), It.IsAny<CancellationToken>()))
             .ReturnsAsync([new("session", "card", "VB-M66G2-64", "Filters", "VIBE-7")]);
         var summaries = new Mock<ISummaryService>(MockBehavior.Strict);
         const string rendered = "PS> codex\n=== Full-screen view (at the end of the recording) ===\n› fix the tests\n=== End of full-screen view ===";
-        summaries.Setup(s => s.GetHandoffAsync("session", rendered, SessionResumeService.MaxResumeSummaryChars, It.IsAny<CancellationToken>()))
+        summaries.Setup(s => s.GetHandoffAsync("session", "Project Name", rendered, SessionResumeService.MaxResumeSummaryChars, It.IsAny<CancellationToken>()))
             .ReturnsAsync("Here's where we are.");
 
         var builder = WebApplication.CreateSlimBuilder();
@@ -249,7 +251,7 @@ public sealed class ChatHistoryRoutesTests
                 Assert.Contains("800,000", json.RootElement.GetProperty("error").GetString());
             }
 
-            summaries.Verify(s => s.GetHandoffAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
+            summaries.Verify(s => s.GetHandoffAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
         }
         finally { await app.StopAsync(CancellationToken.None); }
     }
