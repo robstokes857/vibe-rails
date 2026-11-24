@@ -18,6 +18,11 @@ internal static class TerminalControlProtocol
     public const string ReplayCommandFrame = CommandPrefix + ReplayCommandName;
     public const string EscapeCommandName = "escape";
     public const string EscapeCommandFrame = CommandPrefix + EscapeCommandName;
+    // Sent by a remote viewer that takes its grid from snapshots (VIBE-172): after a resize it
+    // did not ask for, send it the screen at the new size. No payload. It lasts until the next
+    // replay, unlock, viewer disconnect or relay reconnect; the viewer asks after every snapshot.
+    public const string ResizeSnapshotsCommandName = "resize-snapshots";
+    public const string ResizeSnapshotsCommandFrame = CommandPrefix + ResizeSnapshotsCommandName;
     public const string BrowserDisconnectedCommand = "__browser_disconnected__";
     public const string DisconnectBrowserCommand = "__disconnect_browser__";
     public const string ResizePrefix = "__resize__:";

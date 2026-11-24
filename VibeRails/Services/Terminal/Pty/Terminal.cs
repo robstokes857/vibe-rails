@@ -112,6 +112,12 @@ public sealed class Terminal : IAsyncDisposable
     /// </summary>
     public event EventHandler<int>? Exited;
 
+    /// <summary>
+    /// Raised after every resize of this PTY, with the surface that asked for it. The remote
+    /// viewer uses it to send a viewer that takes its grid from snapshots the new screen (VIBE-172).
+    /// </summary>
+    public event Action<TerminalIoSource>? Resized;
+
     internal Terminal(IPtyConnection pty, int cols, int rows, TimeSpan? exitDrainWindow = null)
     {
         _pty = pty;
@@ -372,27 +378,42 @@ public sealed class Terminal : IAsyncDisposable
     /// the snapshot. Any bytes dispatched after the snapshot arrive in-order
     /// via the consumer's normal channel.
     /// </summary>
-    public void PushSnapshotTo(ITerminalConsumer consumer)
+    /// <returns>The grid the snapshot paints.</returns>
+    public (int Cols, int Rows) PushSnapshotTo(ITerminalConsumer consumer) => PushSnapshotTo(consumer, includeScrollback: true);
+
+    /// <summary>
+    /// <see cref="PushSnapshotTo(ITerminalConsumer)"/> without the scrollback rows: the same reset
+    /// prologue, then the current screen. For a viewer that keeps no history and only has to
+    /// learn the screen at a new size (VIBE-172). It is a fraction of a full snapshot's size, but
+    /// the prologue still clears a viewer's scrollback, so send it only to a viewer that asked.
+    /// </summary>
+    /// <returns>The grid the snapshot paints.</returns>
+    public (int Cols, int Rows) PushScreenSnapshotTo(ITerminalConsumer consumer) => PushSnapshotTo(consumer, includeScrollback: false);
+
+    private (int Cols, int Rows) PushSnapshotTo(ITerminalConsumer consumer, bool includeScrollback)
     {
         lock (_subscriberLock)
         {
-            var snapshot = CaptureSnapshotLocked();
+            var snapshot = CaptureSnapshotLocked(includeScrollback, out var cols, out var rows);
             DeliverSnapshot(consumer, snapshot);
+            return (cols, rows);
         }
     }
 
     // Must be called with _subscriberLock held. Takes _emulatorLock internally
     // so the serializer sees a consistent emulator state.
-    private byte[] CaptureSnapshotLocked()
+    private byte[] CaptureSnapshotLocked() => CaptureSnapshotLocked(includeScrollback: true, out _, out _);
+
+    private byte[] CaptureSnapshotLocked(bool includeScrollback, out int cols, out int rows)
     {
         TerminalEmulator.TerminalCell[][] scrollback;
         TerminalEmulator.TerminalCell[,] snap;
-        int rows, cols, cursorRow, cursorCol, cursorShape;
+        int cursorRow, cursorCol, cursorShape;
         bool cursorVisible, isAlternateScreen, bracketedPaste;
         int[] inputReportingModes;
         lock (_emulatorLock)
         {
-            scrollback = _emulator.GetScrollback();
+            scrollback = includeScrollback ? _emulator.GetScrollback() : [];
             snap = _emulator.GetSnapshot();
             rows = _emulator.Rows;
             cols = _emulator.Cols;
@@ -717,7 +738,8 @@ public sealed class Terminal : IAsyncDisposable
     /// <summary>
     /// Resize the PTY dimensions. Also resizes the emulator to keep grid in sync.
     /// </summary>
-    public void Resize(int cols, int rows)
+    /// <param name="source">Who asked for it; passed on to <see cref="Resized"/>.</param>
+    public void Resize(int cols, int rows, TerminalIoSource source = TerminalIoSource.Unknown)
     {
         if (_queryResponder is not null)
         {
@@ -732,14 +754,17 @@ public sealed class Terminal : IAsyncDisposable
                 _rows = rows;
                 ResizeEmulatorWithoutRepaint(_emulator, _queryConsumer?.IsAtSequenceBoundary == true, cols, rows);
             }
-            return;
+        }
+        else
+        {
+            _pty.Resize(cols, rows);
+            _cols = cols;
+            _rows = rows;
+            lock (_emulatorLock)
+                _emulator.Resize(cols, rows);
         }
 
-        _pty.Resize(cols, rows);
-        _cols = cols;
-        _rows = rows;
-        lock (_emulatorLock)
-            _emulator.Resize(cols, rows);
+        Resized?.Invoke(source);
     }
 
     /// <summary>

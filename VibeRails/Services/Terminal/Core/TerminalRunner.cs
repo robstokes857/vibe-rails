@@ -48,6 +48,12 @@ public class TerminalRunner
     /// </summary>
     private static readonly TimeSpan GeometryPollInterval = TimeSpan.FromMilliseconds(50);
 
+    /// <summary>
+    /// How long resizes must stop before the remote viewer is sent the new screen (VIBE-172).
+    /// A slowly dragged window still arrives as a series of resizes; this waits until they stop.
+    /// </summary>
+    internal static readonly TimeSpan RemoteResizeSnapshotDelay = TimeSpan.FromMilliseconds(250);
+
     private readonly ITerminalStateService _stateService;
     private readonly ICommandService _commandService;
     private readonly ILocalToolApiContext _toolApiContext;
@@ -430,6 +436,24 @@ public class TerminalRunner
             canForward: () => System.Threading.Volatile.Read(ref remoteViewerAuthorized) == 1);
         terminal.Subscribe(remoteOutputConsumer);
 
+        // VIBE-172. A viewer that takes its grid from snapshots asks, after each one, for the
+        // screen whenever the PTY is resized by anyone but itself; without it that viewer keeps
+        // the old grid and wraps or clamps what is drawn for the new one. Only a viewer that asks
+        // gets it: the snapshot prologue clears a viewer's scrollback. remoteGrid is the grid of
+        // the last snapshot the viewer was sent, so a burst that ends where it began sends nothing.
+        // Both are read and written only under takeoverGate.
+        var resizeSnapshotsRequested = false;
+        (int Cols, int Rows) remoteGrid = default;
+        // Trailing debounce: re-armed by every resize, so a burst sends one screen once it settles.
+        var resizeSnapshotTimer = new Timer(_ => _ = PushResizeSnapshotAsync());
+        void ScheduleResizeSnapshot() => resizeSnapshotTimer.Change(RemoteResizeSnapshotDelay, Timeout.InfiniteTimeSpan);
+        terminal.Resized += source =>
+        {
+            // The remote viewer's own resize: that viewer keeps its own grid.
+            if (source != TerminalIoSource.RemoteWebUi)
+                ScheduleResizeSnapshot();
+        };
+
         async Task NotifyRemoteTakeoverAsync(string trigger)
         {
             if (remoteTakeoverNotified)
@@ -525,7 +549,8 @@ public class TerminalRunner
                                 // subscribed, so PushSnapshotTo hands it a fresh state dump
                                 // under the subscriber lock — no live bytes interleave, no
                                 // TUI poking required.
-                                terminal.PushSnapshotTo(remoteOutputConsumer);
+                                resizeSnapshotsRequested = false;
+                                remoteGrid = terminal.PushSnapshotTo(remoteOutputConsumer);
                                 return;
                             }
 
@@ -591,6 +616,9 @@ public class TerminalRunner
                 await takeoverGate.WaitAsync(CancellationToken.None);
                 try
                 {
+                    // A replay request is a new viewer (or an overflow resync of this one): it
+                    // asks for resize snapshots again once it has this snapshot, if it wants them.
+                    resizeSnapshotsRequested = false;
                     if (!IsRemoteViewerAuthorized(out _))
                     {
                         await SendLockedAsync();
@@ -603,7 +631,7 @@ public class TerminalRunner
                     // terminal's subscriber lock, so no live bytes can interleave. The
                     // snapshot begins with ED2 + ED3 + cursor home so whatever the remote
                     // had on screen is wiped and rebuilt from ground truth.
-                    terminal.PushSnapshotTo(remoteOutputConsumer);
+                    remoteGrid = terminal.PushSnapshotTo(remoteOutputConsumer);
                 }
                 finally
                 {
@@ -693,6 +721,19 @@ public class TerminalRunner
                         return;
                     }
 
+                    // Viewer protocol, not something the user did: not recorded as a command.
+                    if (string.Equals(command, TerminalControlProtocol.ResizeSnapshotsCommandName, StringComparison.Ordinal))
+                    {
+                        if (payload is not null)
+                            return;
+
+                        resizeSnapshotsRequested = true;
+                        // A resize between the viewer's last snapshot and this request was not sent.
+                        if (remoteGrid != (terminal.Cols, terminal.Rows))
+                            ScheduleResizeSnapshot();
+                        return;
+                    }
+
                     _stateService.RecordRemoteCommand(sessionId, command, payload, TerminalIoSource.RemoteWebUi);
                 }
                 finally
@@ -718,6 +759,7 @@ public class TerminalRunner
                         RemoteViewerLock.Initial);
                     remoteTakeoverNotified = false;
                     lockPromptSent = false;
+                    resizeSnapshotsRequested = false;
                     // failedPinAttempts is intentionally NOT reset here — the lockout
                     // must survive a disconnect/reconnect so it can't be brute-forced.
                 }
@@ -755,6 +797,7 @@ public class TerminalRunner
                         RemoteViewerLock.Initial);
                     remoteTakeoverNotified = false;
                     lockPromptSent = false;
+                    resizeSnapshotsRequested = false;
                     // failedPinAttempts is intentionally NOT reset here — the lockout
                     // must survive a reconnect so it can't be brute-forced by forcing
                     // the relay socket to drop and re-establish.
@@ -771,6 +814,44 @@ public class TerminalRunner
             catch (Exception ex)
             {
                 Log.Error(ex, "[Remote] Failed to handle reconnect");
+            }
+        }
+
+        // The screen only, without history: the asking viewer keeps none, and a full snapshot
+        // repeated after every resize would grow with the scrollback.
+        async Task PushResizeSnapshotAsync()
+        {
+            try
+            {
+                if (terminal.HasExited)
+                    return;
+
+                // A program repaints inside a synchronized-output frame after a resize; never
+                // send half of one. Waited for outside the gate, so input is not held up.
+                await TerminalResizeCoordinator.WaitForSyncOutputToEndAsync(terminal, CancellationToken.None);
+                await takeoverGate.WaitAsync(CancellationToken.None);
+                try
+                {
+                    // Re-checked under the gate: while the burst settled the viewer may have
+                    // been replaced, locked or sent a replay snapshot at the new size.
+                    if (terminal.HasExited || !resizeSnapshotsRequested || !IsRemoteViewerAuthorized(out _)
+                        || remoteGrid == (terminal.Cols, terminal.Rows))
+                        return;
+
+                    var previous = remoteGrid;
+                    remoteGrid = terminal.PushScreenSnapshotTo(remoteOutputConsumer);
+                    Log.Information(
+                        "[Remote] Sent the remote viewer the screen at {Cols}x{Rows} after a resize (it had {OldCols}x{OldRows}) for session {SessionId}",
+                        remoteGrid.Cols, remoteGrid.Rows, previous.Cols, previous.Rows, sessionId);
+                }
+                finally
+                {
+                    takeoverGate.Release();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[Remote] Failed to send the remote viewer the resized screen");
             }
         }
 

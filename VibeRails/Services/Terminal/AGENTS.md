@@ -327,6 +327,7 @@ Commands:
 - `__resize__:{cols},{rows}`
 - `__cmd__:{command}[:payload]` — structured command prefix framework (e.g. `__cmd__:replay`)
 - `__cmd__:escape` — physical, unmodified Escape key; no payload (including an empty payload) is accepted. Added 2026-09-14; see the semantic key route below.
+- `__cmd__:resize-snapshots` — sent by a remote viewer that takes its grid from snapshots, after each one it adopts; no payload. Until the next replay request, unlock, viewer disconnect or relay reconnect, every resize that did not come from that viewer is followed by a screen-only snapshot. It is viewer protocol and never recorded as a remote command (VIBE-172, `TerminalRunner.cs` below).
 - PIN challenge protocol (sent as plain text, not `__cmd__:`):
   - `__PIN__:{credential}` — password or legacy PIN challenge response from the viewer;
     the prefix remains unchanged for protocol compatibility, and the exact text is never PTY input
@@ -353,8 +354,10 @@ Authorization:
 - Spawns PTY (`pwsh.exe` on Windows, `/bin/zsh` on macOS, `bash` on Linux — resolved via `ShellDefaults`).
 - Feeds all output into a headless `TerminalEmulator` (20k-line scrollback) via an internal `TerminalEmulatorConsumer`.
 - Dispatches every PTY read chunk to current consumer snapshot.
-- Exposes `GetGridReplay()` (ANSI byte stream from emulator grid) and `Resize(cols, rows)`.
+- Exposes `GetGridReplay()` (ANSI byte stream from emulator grid) and `Resize(cols, rows, source)`.
+  Every resize raises `Resized` with the surface that asked for it (`TerminalResizeCoordinator` passes it).
 - `SubscribeWithSnapshot(...)` / `PushSnapshotTo(...)` provide atomic snapshot + live attach for reconnect.
+  `PushScreenSnapshotTo(...)` is the same push without the scrollback rows (VIBE-172); both return the grid they paint.
 - `CreateAsync(..., title)` sets PTY name; supports `app`/`argv` to spawn a specific program instead of an interactive shell.
 - Implements `IAsyncDisposable` and kills PTY on dispose.
 - Ends the session on the PTY process's **own exit**, not only on output-pipe EOF: `IPtyConnection.ProcessExited`
@@ -540,7 +543,28 @@ gate state); the Claude/Codex proxy URL/auth env vars are built inside `CommandS
    - wires remote input -> `TerminalIoRouter.RouteInputAsync(..., RemoteWebUi)`
    - wires remote resize -> PTY resize
    - wires remote replay request -> send replay buffer
+   - after any other resize, sends a viewer that asked (`__cmd__:resize-snapshots`) the screen at the new size (see below)
    - tracks remote connection in `TerminalStateService`
+
+**Remote viewer after a desktop resize (VIBE-172).** VibeRails-Front's HTML viewer takes its grid only
+from snapshots, so a resize made here (the local web viewer, the native console) used to reach it only
+at the next replay or unlock, and lines drawn for a wider grid wrapped there until then.
+`AttachRemoteViewer` now handles it with no change to the PTY stream:
+- `Terminal.Resized` from any source but `RemoteWebUi` re-arms a 250 ms trailing timer
+  (`RemoteResizeSnapshotDelay`), so a dragged window sends one screen once it settles.
+- When it fires, the push waits out a synchronized-output frame (`WaitForSyncOutputToEndAsync`, the
+  deferred resize's bounded wait), then takes `takeoverGate`. It sends only when the viewer asked, is
+  unlocked, and the PTY grid differs from the grid of the last snapshot it was sent. A deferred
+  resize raises `Resized` only once it is applied, so the push always follows it.
+- The push is `PushScreenSnapshotTo`: the usual prologue and the screen, no scrollback rows. A full
+  snapshot grows with the history and would be repeated on every settled resize.
+- The request is forgotten on every replay request (a new viewer or an overflow resync), unlock,
+  browser disconnect and relay reconnect. A request that arrives after a resize the viewer has
+  not seen schedules a push. A viewer that never asks (the hosted xterm viewer, which keeps its
+  own scrollback and size) is sent nothing new, because the prologue clears scrollback.
+- Tests: `RemoteViewerResizeSnapshotTests` (both console hosts, local web and native sources,
+  bursts, remote-origin resizes, no request, locked viewer, takeover/disconnect/reconnect,
+  deferred and in-progress synchronized frames).
 5. On macOS, managed CLI launches pass executable + argv to a login zsh wrapper at PTY
    creation; nothing types a startup command or Enter into the shell. The wrapper runs MCP
    setup, invokes `"$@"`, reports a nonzero CLI exit, and leaves an interactive shell after it.

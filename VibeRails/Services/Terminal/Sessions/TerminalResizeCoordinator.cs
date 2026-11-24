@@ -159,7 +159,7 @@ internal static class TerminalResizeCoordinator
 
         var oldCols = terminal.Cols;
         var oldRows = terminal.Rows;
-        terminal.Resize(cols, rows);
+        terminal.Resize(cols, rows, source);
         stateService.RecordResize(sessionId, cols, rows, source);
 
         // Every applied resize names its sender. The b92fb476 shred was only attributable
@@ -253,13 +253,7 @@ internal static class TerminalResizeCoordinator
         {
             try
             {
-                var startedUtc = DateTime.UtcNow;
-                while (!cts.Token.IsCancellationRequested
-                    && terminal.IsSyncOutputActive
-                    && (DateTime.UtcNow - startedUtc).TotalMilliseconds < MaxSyncResizeDeferralMs)
-                {
-                    await Task.Delay(SyncResizePollMs, cts.Token);
-                }
+                await WaitForSyncOutputToEndAsync(terminal, cts.Token);
 
                 if (cts.Token.IsCancellationRequested)
                     return;
@@ -295,6 +289,22 @@ internal static class TerminalResizeCoordinator
                 cts.Dispose();
             }
         });
+    }
+
+    /// <summary>
+    /// Waits while the program is inside a synchronized-output frame (DEC 2026), at most
+    /// <see cref="MaxSyncResizeDeferralMs"/>. A deferred resize waits here, and so does the screen
+    /// the remote viewer is sent after a resize: a program repaints in such a frame after a resize,
+    /// and a snapshot taken inside it would show half the frame (VIBE-172).
+    /// </summary>
+    internal static async Task WaitForSyncOutputToEndAsync(Terminal terminal, CancellationToken ct)
+    {
+        var startedUtc = DateTime.UtcNow;
+        while (terminal.IsSyncOutputActive
+            && (DateTime.UtcNow - startedUtc).TotalMilliseconds < MaxSyncResizeDeferralMs)
+        {
+            await Task.Delay(SyncResizePollMs, ct);
+        }
     }
 
     private static void CancelSyncResizeDeferral(string sessionId)
