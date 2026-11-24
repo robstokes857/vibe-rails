@@ -49,11 +49,31 @@ numbers, and the text before:
 3. **A function the change created** is measured whole, at its real line.
 4. **A function that existed** and that the change touched is measured whole for what the
    change made worse: a cyclomatic, cognitive or NPath complexity, nesting depth or
-   parameter count higher than the same-named function had. Everything it inherited or
-   improved reads 0, and a function the change made no worse is not graded. Overloads
-   and anonymous functions share a name, so they compare against the worst of them.
+   parameter count higher than that function had. Everything it inherited or improved
+   reads 0, and a function the change made no worse is not graded.
 5. **Added lines outside every function** (imports, fields, script statements) are
    measured on their own, as top-level code.
+
+**Which function a function was** is decided by the lines it kept, not by its name alone
+([FunctionHistory](FunctionHistory.cs)): methods of different types, overloads and anonymous
+functions share names, and comparing by name let a complex new `Run` pass because another
+type's `Run` was already worse.
+
+1. A function that kept lines of a function of its own name was that function. Only a line
+   whose text occurs once in the previous version counts, because only that line is certain
+   to be the same line.
+2. A function that kept lines only of a function whose name is gone from the file is that
+   function renamed, so a rename does not turn inherited complexity into a new finding.
+3. A function left over takes the first function of its name that nobody kept lines of, in
+   file order: first the ones that kept some line, then the ones the change wrote every line
+   of. This covers a rewrite and a file whose every line changed (re-indented, new line
+   endings).
+4. Any other function is new.
+
+Two cases are decided by rule, because nothing in the text tells them apart. A function
+deleted and another of the same name added in one change are compared with each other, which
+is lenient. A helper extracted in place (its body lines unchanged, under a new name, with the
+original still there) is new and graded whole, like a helper extracted anywhere else.
 
 Lines added inside an existing function are a fragment of it. Measured alone they have
 no name, no line and no meaning: until VIBE-274 several such fragments were graded as

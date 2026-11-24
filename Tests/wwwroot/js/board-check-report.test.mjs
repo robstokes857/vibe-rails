@@ -42,3 +42,10 @@ test('a report without scores falls back to its rating, and malformed reports li
     assert.deepEqual(reportFiles(null, 'C'), []);
     assert.deepEqual(reportFiles({ files: 'none' }), []);
 });
+
+test('the failure reason keeps its line breaks', async () => {
+    // A minimum failed by files the report hides names them in the reason, one file and problem per line.
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync(new URL('../../../VibeRails/wwwroot/assets/board/board-check-report.css', import.meta.url), 'utf8');
+    assert.match(css, /\.board-check-reason \{[^}]*white-space: pre-wrap;/);
+});

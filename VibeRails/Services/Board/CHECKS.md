@@ -171,7 +171,11 @@ function the change created, and what it made worse in a function that existed
 ([MintLint README](../../../MintLint/README.md#change-scoped-grading)). Explicit exemptions apply;
 dashboard ignore preferences do not, as in the rule. A file the report hides through an ignore still counts toward the grade,
 and the limitations say how many files were hidden that way. `MinimumGradeResult` is **Met**,
-**Not met** or **Not checked**; `GradeSummary` carries the reason. Below the minimum the check
+**Not met** or **Not checked**; `GradeSummary` carries the reason. When the minimum is not met,
+the reason also names the hidden files that are below it (`WithHiddenFilesToFix`, up to five, three
+problems each, with function, line and fix), because the report lists none of them: without that a
+step could fail on a file nothing shows. The reason is the step's error and is in the comment, the
+review report and the report dialog, which keeps its line breaks. Below the minimum the check
 outcome is **Findings** and `JobRunner` fails the action with that sentence as the error. The run
 then fails, so the lane step fails even when a review Worker in the same Automation reports a pass;
 later actions in the Automation (normally that Worker) still run, as for any failed check.

@@ -135,7 +135,8 @@ was before the change when the function already existed, and a fix.
 at 20; was 22 before this change). Fix: Split it into smaller functions…`. The text is
 `CodeQualityFixList.FixLines`, shared with Git Guard's Code quality step and lane checks, so all
 three name the same problems. The console presenter prints each line of a multi-line reason on its
-own. `EvaluateSnapshot` (lane checks) returns the verdict alone; the check lists the files itself.
+own. `EvaluateSnapshot` (lane checks) returns the verdict alone; the check lists the files itself,
+and adds to its reason the failing files that local ignore settings hide from its report.
 
 **What is graded** is the change, as `MintLint.ChangeAnalyzer` defines it (see
 [MintLint's README](../../../MintLint/README.md#change-scoped-grading)): the added lines, each

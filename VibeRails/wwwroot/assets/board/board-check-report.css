@@ -34,7 +34,8 @@
 .board-check-verdict > div { display: grid; gap: 4px; min-width: 0; }
 .code-report .board-check-headline { font-size: 16px; font-weight: 600; }
 .code-report .board-check-step { font-size: 13px; color: var(--color-text-muted); }
-.code-report .board-check-reason { font-size: 13px; overflow-wrap: anywhere; }
+/* A reason can run to several lines: a failed minimum lists the files its report hides (VIBE-274). */
+.code-report .board-check-reason { font-size: 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
 
 .board-check-section { display: grid; gap: 10px; min-width: 0; }
 .code-report .board-check-section h3 { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-family: var(--font-display); font-size: 15px; font-weight: 600; }

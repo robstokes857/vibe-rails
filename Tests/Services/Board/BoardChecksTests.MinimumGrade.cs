@@ -132,6 +132,19 @@ public sealed partial class BoardChecksTests
         Assert.Equal(0, ignored.AnalyzedCount);
         Assert.Equal(BoardCheckRecord.GradeNotMet, ignored.MinimumGradeResult);
         Assert.Contains(ignored.Limitations, line => line.StartsWith("1 files hidden from the report by local ignore settings still count", StringComparison.Ordinal));
+        // The only file that fails the minimum is hidden from the report, which therefore lists nothing.
+        // The reason names it instead: its grade, the function, the line, the limit and a fix.
+        Assert.StartsWith("Overall Code quality grade F", ignored.GradeSummary);
+        Assert.Contains("hidden from this report by local ignore settings", ignored.GradeSummary);
+        Assert.Contains("\nF example.cs (health 40/100)\n", ignored.GradeSummary);
+        Assert.Contains("in Run, line 1 (critical at ", ignored.GradeSummary);
+        Assert.Contains(". Fix: ", ignored.GradeSummary);
+        // It is the step's error, and what the comment and the review report say.
+        Assert.Equal(ignored.GradeSummary, ignored.FailureReason);
+        Assert.Contains("F example.cs (health 40/100)", BoardCheckService.CheckReceipt(ignored));
+        Assert.Contains("F example.cs (health 40/100)", BoardCheckService.CheckReport(ignored).Findings);
+        // The one-line summary stays one line.
+        Assert.DoesNotContain("example.cs", ignored.Summary);
 
         await store.SaveCodeQualityExemptionAsync(repo, card.Id, "example.cs", false, "Generated fixture", BoardAuthor.User(), Ct);
         var exempt = await engine.ExecuteAsync(repo, repo, card.Key, "exempt", "quality", JobActionKind.CodeQuality, ["working-tree", "minimum", "C"], Ct);

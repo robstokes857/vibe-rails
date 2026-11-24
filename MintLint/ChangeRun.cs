@@ -9,7 +9,8 @@ internal sealed class ChangeRun
     private readonly Dictionary<string, ChangedSource> _byPath;
     private readonly MintLintOptions _options;
     private readonly Dictionary<string, ChangePlacement> _placements = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, IReadOnlyDictionary<string, FunctionMetrics>> _baselines = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IReadOnlyDictionary<(string Name, int Line), FunctionMetrics>> _baselines = new(StringComparer.Ordinal);
+    private Dictionary<string, FileMetrics> _wholes = [];
     private Dictionary<string, FileMetrics> _topLevel = [];
     private Dictionary<string, FileMetrics> _previous = [];
 
@@ -22,8 +23,8 @@ internal sealed class ChangeRun
     public ChangeAnalysis Result()
     {
         IReadOnlyList<FileMetrics> fragments = Measure(static change => change.Fragment);
-        Dictionary<string, FileMetrics> wholes = ByFile(Measure(static change => change.AddedContent is null ? null : change.Content));
-        Place(fragments, wholes);
+        _wholes = ByFile(Measure(static change => change.AddedContent is null ? null : change.Content));
+        Place(fragments);
         // The added lines that sit inside no function are top-level code, measured on their own.
         _topLevel = ByFile(Measure(change => _placements.GetValueOrDefault(ChangeAnalyzer.DisplayPath(change.Path))?.TopLevelText));
         _previous = ByFile(Measure(static change => change.IsPlaceable ? change.PreviousContent : null));
@@ -34,19 +35,19 @@ internal sealed class ChangeRun
         {
             files.Add(Graded(fragment));
             // With no whole to compare with, everything in the file is new: the fragment is the file.
-            wholeFiles.Add(wholes.GetValueOrDefault(fragment.File, fragment));
+            wholeFiles.Add(_wholes.GetValueOrDefault(fragment.File, fragment));
         }
 
         return new ChangeAnalysis(files, wholeFiles, _baselines);
     }
 
     /// <summary>Which added lines sit inside a function, and which functions they touch, for each file whose lines can be placed.</summary>
-    private void Place(IReadOnlyList<FileMetrics> fragments, Dictionary<string, FileMetrics> wholes)
+    private void Place(IReadOnlyList<FileMetrics> fragments)
     {
         foreach (FileMetrics fragment in fragments)
         {
             ChangedSource change = _byPath[fragment.File];
-            if (change.IsPlaceable && wholes.TryGetValue(fragment.File, out FileMetrics? whole))
+            if (change.IsPlaceable && _wholes.TryGetValue(fragment.File, out FileMetrics? whole))
             {
                 _placements[fragment.File] = ChangePlacement.Of(whole, change.AddedContent!, change.AddedLineNumbers!);
             }
@@ -66,14 +67,34 @@ internal sealed class ChangeRun
             return fragment;
         }
 
-        Dictionary<string, FunctionMetrics>? before = _previous.TryGetValue(file, out FileMetrics? old) ? ChangedFunctions.WorstByName(old) : null;
-        if (before is not null)
+        ChangedSource change = _byPath[file];
+        Dictionary<FunctionMetrics, FunctionMetrics>? was = _previous.TryGetValue(file, out FileMetrics? old)
+            ? FunctionHistory.Of(_wholes[file], old, change)
+            : null;
+        if (was is not null)
         {
-            _baselines[file] = before;
+            _baselines[file] = Baseline(placement.Touched, was);
         }
 
-        List<FunctionMetrics> counted = ChangedFunctions.Counted(placement.Touched, before, _topLevel.GetValueOrDefault(file));
-        return ChangedFunctions.Replace(fragment, counted, _byPath[file].AddedLineNumbers!, _options);
+        List<FunctionMetrics> counted = ChangedFunctions.Counted(placement.Touched, was, _topLevel.GetValueOrDefault(file));
+        return ChangedFunctions.Replace(fragment, counted, change.AddedLineNumbers!, _options);
+    }
+
+    /// <summary>What each touched function that existed measured before, by its name and line in the current file.</summary>
+    private static Dictionary<(string Name, int Line), FunctionMetrics> Baseline(
+        IReadOnlyList<FunctionMetrics> touched,
+        Dictionary<FunctionMetrics, FunctionMetrics> was)
+    {
+        Dictionary<(string Name, int Line), FunctionMetrics> baseline = [];
+        foreach (FunctionMetrics function in touched)
+        {
+            if (was.TryGetValue(function, out FunctionMetrics? previous))
+            {
+                baseline.TryAdd((function.Name, function.Line), previous);
+            }
+        }
+
+        return baseline;
     }
 
     /// <summary>Measures one text of each change as a batch; a change whose text is null or blank is left out.</summary>

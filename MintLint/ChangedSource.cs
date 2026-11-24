@@ -33,11 +33,11 @@ public sealed record ChangedSource(
 /// <param name="Files">One entry per supported changed file with added code, ordered by path: the measurements to grade.</param>
 /// <param name="WholeFiles">The same files measured whole, in the same order, for callers that need every declared name.</param>
 /// <param name="Baselines">
-/// Per file, then per function name: the function as it measured before the change (the
-/// highest value of each measurement across same-named functions). Only functions that
+/// Per file, then per function the change touched, named by its name and line in the current
+/// file: the function it was before the change, as it measured then. Only functions that
 /// existed before appear, so a report can say what a measurement was.
 /// </param>
 public sealed record ChangeAnalysis(
     IReadOnlyList<FileMetrics> Files,
     IReadOnlyList<FileMetrics> WholeFiles,
-    IReadOnlyDictionary<string, IReadOnlyDictionary<string, FunctionMetrics>> Baselines);
+    IReadOnlyDictionary<string, IReadOnlyDictionary<(string Name, int Line), FunctionMetrics>> Baselines);

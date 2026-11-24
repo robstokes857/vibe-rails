@@ -13,6 +13,12 @@ internal sealed record ChangePlacement(IReadOnlyList<FunctionMetrics> Touched, s
 {
     internal const string TopLevelName = "global";
 
+    /// <summary>True for the engine's measurement of the code outside every function, which is not a function.</summary>
+    internal static bool IsTopLevel(FunctionMetrics function)
+    {
+        return function.Name == TopLevelName;
+    }
+
     public static ChangePlacement Of(FileMetrics whole, string addedContent, IReadOnlyList<int> addedLines)
     {
         int[] sorted = [.. addedLines];

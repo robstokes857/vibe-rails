@@ -47,20 +47,22 @@ public static class CodeQualityRule
         IEnumerable<GitStagedFileSnapshot> files,
         CancellationToken cancellationToken = default)
     {
-        var verdict = Grade(minimumGrade, files, cancellationToken, out var fixes);
+        var verdict = Grade(minimumGrade, files, cancellationToken, out var graded);
+        var fixes = CodeQualityFixList.FixLines(graded, minimumGrade, FixFiles, FixProblems);
         return verdict.IsValid || fixes.Count == 0
             ? verdict
             : verdict with { Message = $"{verdict.Message} Fix these first:\n{string.Join('\n', fixes)}" };
     }
 
-    /// <summary>The verdict in one sentence, with what to fix kept apart for callers that list it themselves.</summary>
+    /// <summary>The verdict in one sentence. Below the minimum, <paramref name="graded"/> is every file the
+    /// grade counted, for callers that say what to fix; otherwise it is empty.</summary>
     private static RuleValidationResult Grade(
         char minimumGrade,
         IEnumerable<GitStagedFileSnapshot> files,
         CancellationToken cancellationToken,
-        out IReadOnlyList<string> fixes)
+        out IReadOnlyList<QualityFile> graded)
     {
-        fixes = [];
+        graded = [];
         cancellationToken.ThrowIfCancellationRequested();
         var changes = new List<ChangedSource>();
         foreach (var file in files)
@@ -83,9 +85,7 @@ public static class CodeQualityRule
         cancellationToken.ThrowIfCancellationRequested();
         var verdict = EvaluateScore(minimumGrade, scan.Overall.Score);
         if (!verdict.IsValid && double.IsFinite(scan.Overall.Score))
-            fixes = CodeQualityFixList.FixLines(
-                CodeQualityFindings.FromReport(MintLintReportFactory.Build(scan, 0, functionBaselines: analysis.Baselines)),
-                minimumGrade, FixFiles, FixProblems);
+            graded = CodeQualityFindings.FromReport(MintLintReportFactory.Build(scan, 0, functionBaselines: analysis.Baselines));
         return verdict;
     }
 
@@ -93,7 +93,8 @@ public static class CodeQualityRule
     /// Grades every captured file except explicit exemptions. A lane check's minimum grade uses this,
     /// so it and Git Guard's rule judge the same added code by the same thresholds (VIBE-278).
     /// Report ignore preferences do not apply here, as they do not apply to the rule. The message is
-    /// the verdict alone: the check's report lists what to fix from its own saved findings.
+    /// the verdict alone: the check's report lists what to fix from its own saved findings. The
+    /// overload below also returns the graded files, so the check can name the ones its report hides.
     /// </summary>
     /// <remarks>
     /// Unlike the rule, it never skips changed supported source it could not read. The snapshot marks a
@@ -102,14 +103,25 @@ public static class CodeQualityRule
     /// checked, with <see cref="RuleValidationResult.Metadata"/> listing them.
     /// </remarks>
     public static RuleValidationResult EvaluateSnapshot(char minimumGrade, GitStagedSnapshot snapshot,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        EvaluateSnapshot(minimumGrade, snapshot, out _, cancellationToken);
+
+    /// <summary>
+    /// <see cref="EvaluateSnapshot(char, GitStagedSnapshot, CancellationToken)"/>, also returning what was graded.
+    /// </summary>
+    /// <param name="graded">Below the minimum: every file the grade counted, with its problems. A caller
+    /// whose report leaves some of them out (local ignore settings) uses it to name those too, so a failed
+    /// minimum always says what to change. Empty when the minimum is met or was not checked.</param>
+    internal static RuleValidationResult EvaluateSnapshot(char minimumGrade, GitStagedSnapshot snapshot,
+        out IReadOnlyList<QualityFile> graded, CancellationToken cancellationToken = default)
     {
+        graded = [];
         var exemptions = snapshot.QualityExemptions ?? [];
         var files = snapshot.Files.Where(file => !CodeAnalyzerIgnoreRules.IsIgnored(file.RelativePath, exemptions)).ToList();
         var unreadable = files.Where(file => file.ExistsInIndex && file.ChangeKind != GitStagedChangeKind.Deleted
                 && MintLintAnalyzer.SupportsFile(file.RelativePath) && (file.IsBinary || file.Content is null))
             .Select(file => file.RelativePath).ToList();
-        if (unreadable.Count == 0) return Grade(minimumGrade, files, cancellationToken, out _);
+        if (unreadable.Count == 0) return Grade(minimumGrade, files, cancellationToken, out graded);
         var named = string.Join(", ", unreadable.Take(5)) + (unreadable.Count > 5 ? $" and {unreadable.Count - 5} more" : "");
         return new(false, $"Code quality could not read {unreadable.Count} changed source file(s): {named}. They are over the "
             + $"5 MiB text limit or the capture budget, or not text, so the minimum grade {minimumGrade} was not checked. "

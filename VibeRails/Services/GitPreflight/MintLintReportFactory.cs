@@ -25,7 +25,7 @@ public static class MintLintReportFactory
         IReadOnlyDictionary<string, string>? contentByFile = null,
         IReadOnlyDictionary<string, int>? referencedByFile = null,
         IReadOnlyDictionary<string, double>? baselineScoreByFile = null,
-        IReadOnlyDictionary<string, IReadOnlyDictionary<string, FunctionMetrics>>? functionBaselines = null)
+        IReadOnlyDictionary<string, IReadOnlyDictionary<(string Name, int Line), FunctionMetrics>>? functionBaselines = null)
     {
         List<MintLintFileReportResponse> files = [];
         Dictionary<string, (MintLintWorstMetricResponse Entry, double Score, double Value)> worst =
@@ -153,7 +153,7 @@ public static class MintLintReportFactory
     /// </summary>
     private static List<MintLintFindingResponse> BuildFindings(
         FileScore file,
-        IReadOnlyDictionary<string, FunctionMetrics>? baselines)
+        IReadOnlyDictionary<(string Name, int Line), FunctionMetrics>? baselines)
     {
         List<MintLintFindingResponse> findings = new(file.Findings.Count);
         foreach (var finding in file.Findings)
@@ -175,10 +175,14 @@ public static class MintLintReportFactory
         return findings;
     }
 
-    private static double? PreviousValue(MetricFinding finding, IReadOnlyDictionary<string, FunctionMetrics>? baselines)
+    private static double? PreviousValue(MetricFinding finding, IReadOnlyDictionary<(string Name, int Line), FunctionMetrics>? baselines)
     {
-        // Top-level code is measured on the added lines alone, so it has no "before".
-        if (baselines is null || finding.Source is null || !baselines.TryGetValue(finding.Source, out var before))
+        // A function is named by where it is declared: several can share a name. Top-level code
+        // is measured on the added lines alone, so it has no "before".
+        if (baselines is null
+            || finding.Source is not { } name
+            || finding.Line is not { } line
+            || !baselines.TryGetValue((name, line), out var before))
         {
             return null;
         }

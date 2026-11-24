@@ -140,6 +140,25 @@ public sealed class CodeQualityRuleTests
     }
 
     [Fact]
+    public void ANewFunctionIsGraded_WhateverAnotherOfItsNameMeasured()
+    {
+        // The file has a type whose Run has 30 branches. The change adds a second type with a Run of 25.
+        // The new Run is this change's: it fails, and it is not said to have been anything before.
+        var existing = TypeWithRun("Existing", 30);
+        var added = TypeWithRun("Added", 25);
+        var content = existing + "\n" + added;
+        var firstAdded = existing.Split('\n').Length + 1;
+        var file = new GitStagedFileSnapshot("jobs.cs", Path.GetFullPath("jobs.cs", Root), GitStagedChangeKind.Modified, true, false, 1, content,
+            PreviousContent: existing, AddedContent: added, AddedLineNumbers: [.. Enumerable.Range(firstAdded, added.Split('\n').Length)]);
+
+        var result = CodeQualityRule.Evaluate('C', [file], Ct);
+
+        Assert.False(result.IsValid, result.Message);
+        Assert.Contains($"Cyclomatic complexity 26 in Run, line {firstAdded + 2} (critical at 20)", result.Message);
+        Assert.DoesNotContain("before this change", result.Message);
+    }
+
+    [Fact]
     public void ScoresAddedLinesRatherThanExistingFile()
     {
         Assert.False(CodeQualityRule.Evaluate('C', [File("bad.cs", Messy)], Ct).IsValid);
@@ -307,6 +326,10 @@ public sealed class CodeQualityRuleTests
         + string.Concat(Enumerable.Range(0, 6).Select(method =>
             $"    public int Step{seed}x{method}(int value)\n    {{\n        return value + {seed * 10 + method};\n    }}\n"))
         + "}\n";
+
+    private static string TypeWithRun(string type, int branches) => $"public class {type}\n{{\n    public int Run(int x)\n    {{\n"
+        + string.Concat(Enumerable.Range(1, branches).Select(i => $"        if (x == {i}) return {i};\n"))
+        + "        return 0;\n    }\n}";
 
     /// <summary>A staged edit that adds one line inside Run, just before its last line, as Git reports it.</summary>
     private static GitStagedFileSnapshot Changed(string before, string addedLine)

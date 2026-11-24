@@ -79,7 +79,7 @@ public sealed class ChangeAnalyzerTests
         FileMetrics file = Assert.Single(analysis.Files);
         FunctionMetrics legacy = Assert.Single(file.Functions);
         Assert.Equal(("Legacy", 13, LineOf(after, "int Legacy(int x)")), (legacy.Name, legacy.Cyclomatic, legacy.Line));
-        Assert.Equal(12, analysis.Baselines["Orders.cs"]["Legacy"].Cyclomatic);
+        Assert.Equal(12, analysis.Baselines["Orders.cs"][("Legacy", legacy.Line)].Cyclomatic);
 
         // Twelve independent branches are also 2^12 = 4,096 paths, past NPath's warning limit of
         // 1,000. Cyclomatic lists first: it is further past its limit (3 of 10 against 3,096 of 99,000).
@@ -105,7 +105,8 @@ public sealed class ChangeAnalyzerTests
         FileMetrics file = Assert.Single(analysis.Files);
         FunctionMetrics upper = Assert.Single(file.Functions);
         Assert.Equal(("Upper", 7, LineOf(after, "int Upper(int x)")), (upper.Name, upper.Cyclomatic, upper.Line));
-        Assert.False(analysis.Baselines["Orders.cs"].ContainsKey("Upper"));
+        // Upper kept lines that were Legacy's, but Legacy is still there: Upper is not Legacy renamed.
+        Assert.DoesNotContain(analysis.Baselines["Orders.cs"].Keys, key => key.Name == "Upper");
         // Upper is inside its limit (7 of 10 → Complexity 35, dampened to 10.5): grade B, nothing to fix.
         FileScore score = MintLintScorer.Score(file);
         Assert.Empty(score.Findings);
@@ -160,7 +161,7 @@ public sealed class ChangeAnalyzerTests
         Assert.Empty(MintLintScorer.Score(file).Findings);
         // Measured whole, the same function does have that finding.
         Assert.Contains(MintLintScorer.Score(Assert.Single(analysis.WholeFiles)).Findings, finding => finding.Name == "parameter_count" && finding.Source == "Wide");
-        Assert.Equal(5, analysis.Baselines["W.cs"]["Wide"].ParameterCount);
+        Assert.Equal(5, analysis.Baselines["W.cs"][("Wide", 3)].ParameterCount);
     }
 
     [Fact]
@@ -180,7 +181,7 @@ public sealed class ChangeAnalyzerTests
         FunctionMetrics topLevel = Assert.Single(Assert.Single(branch.Files).Functions);
         Assert.Equal(("global", 1), (topLevel.Name, topLevel.Cyclomatic));
         Assert.Equal(6, Assert.Single(branch.WholeFiles).Functions.Single(function => function.Name == "global").Cyclomatic - 1);
-        Assert.False(branch.Baselines["tool.py"].ContainsKey("global"));
+        Assert.Empty(branch.Baselines["tool.py"]); // top-level code has no "before", and run was not touched
 
         // A line added inside run is part of run, not top-level code: nothing is top-level here.
         ChangeAnalysis inside = ChangeAnalyzer.Analyze([Change("tool.py", script, script.Replace("    return value\n", "    value = value or 1\n    return value\n"))]);
@@ -188,17 +189,119 @@ public sealed class ChangeAnalyzerTests
     }
 
     [Fact]
-    public void SameNamedFunctions_CountAsWorse_OnlyPastTheWorstOfThem()
+    public void Overloads_AreToldApartByTheLinesTheyKept()
     {
-        // Two overloads named Pick, cyclomatic 2 and 4. The first grows to 3: still no worse
-        // than a Pick was before, and with only names to go on that is not provably worse.
+        // Two overloads named Pick, cyclomatic 2 and 4. The first gains a branch: 2 becomes 3.
+        // It kept its own declaration line, so it is compared with itself (made worse), not
+        // passed as "no worse than a Pick was".
         const string before = "class P\n{\n    int Pick(int a)\n    {\n        if (a > 0) return 1;\n        return 0;\n    }\n\n    int Pick(int a, int b)\n    {\n        if (a > 0) return 1;\n        if (b > 0) return 2;\n        if (a > b) return 3;\n        return 0;\n    }\n}";
         string after = before.Replace("        if (a > 0) return 1;\n        return 0;", "        if (a > 0) return 1;\n        if (a < 0) return 2;\n        return 0;");
 
         ChangeAnalysis analysis = ChangeAnalyzer.Analyze([Change("P.cs", before, after)]);
 
+        FunctionMetrics pick = Assert.Single(Assert.Single(analysis.Files).Functions);
+        Assert.Equal(("Pick", 3, 3), (pick.Name, pick.Cyclomatic, pick.Line));
+        Assert.Equal(2, analysis.Baselines["P.cs"][("Pick", 3)].Cyclomatic);
+    }
+
+    [Fact]
+    public void ANewOverload_IsNew_BesideTheOneThatWasThere()
+    {
+        // Pick(int) has four branches. The change adds Pick(int, int) with 20: cyclomatic 21.
+        // The first Pick kept its lines, so the new one is not it. It is new, and graded whole.
+        const string before = "class P\n{\n    int Pick(int a)\n    {\n        if (a == 1) return 1;\n        if (a == 2) return 2;\n        if (a == 3) return 3;\n        if (a == 4) return 4;\n        return 0;\n    }\n}";
+        string overload = "\n    int Pick(int a, int b)\n    {\n"
+            + string.Concat(Enumerable.Range(1, 20).Select(i => $"        if (b == {i}) return {i};\n"))
+            + "        return a;\n    }\n";
+        string after = before.Replace("        return 0;\n    }\n}", "        return 0;\n    }\n" + overload + "}");
+
+        ChangeAnalysis analysis = ChangeAnalyzer.Analyze([Change("P.cs", before, after)]);
+
+        FunctionMetrics pick = Assert.Single(Assert.Single(analysis.Files).Functions, function => function.Name == "Pick");
+        Assert.Equal((21, LineOf(after, "int Pick(int a, int b)")), (pick.Cyclomatic, pick.Line));
+        Assert.Empty(analysis.Baselines["P.cs"]);
+    }
+
+    [Fact]
+    public void ANewFunction_IsGradedWhole_WhateverAnotherOfItsNameMeasured()
+    {
+        // Existing.Run has 22 branches. The change adds a second type with a Run of its own:
+        // 20 branches, cyclomatic 21, past the critical limit of 20. It is a new function. That
+        // an unrelated Run in the same file was already worse is no reason to pass it.
+        string before = TypeWithRun("Existing", 22);
+        string after = before + "\n\n" + TypeWithRun("Added", 20);
+
+        ChangeAnalysis analysis = ChangeAnalyzer.Analyze([Change("Jobs.cs", before, after)]);
+
+        FileMetrics file = Assert.Single(analysis.Files);
+        FunctionMetrics run = Assert.Single(file.Functions, function => function.Name == "Run");
+        Assert.Equal((21, LineOf(after, "class Added") + 2), (run.Cyclomatic, run.Line));
+        Assert.Empty(analysis.Baselines["Jobs.cs"]);
+        FileScore score = MintLintScorer.Score(file);
+        Assert.Contains(score.Findings, finding =>
+            finding.Name == "cyclomatic_complexity" && finding.Level == "critical" && finding.Source == "Run" && finding.Line == run.Line);
+        Assert.Equal('F', score.Overall.Grade);
+    }
+
+    [Fact]
+    public void AFunctionMadeWorse_IsComparedWithTheFunctionItWas_NotWithAnotherOfItsName()
+    {
+        // Two types, each with a Run: one with 22 branches, one with none. The change gives the
+        // second 20 branches, so it goes from 1 to 21. Every line it kept also occurs in the
+        // other Run, so no line says which it was; the other Run kept its own lines, which
+        // leaves this one as the Run nobody else was.
+        string before = TypeWithRun("Existing", 22) + "\n\n" + TypeWithRun("Added", 0);
+        string after = TypeWithRun("Existing", 22) + "\n\n" + TypeWithRun("Added", 20);
+
+        ChangeAnalysis analysis = ChangeAnalyzer.Analyze([Change("Jobs.cs", before, after)]);
+
+        FunctionMetrics run = Assert.Single(Assert.Single(analysis.Files).Functions);
+        Assert.Equal((21, LineOf(after, "class Added") + 2), (run.Cyclomatic, run.Line));
+        Assert.Equal(1, analysis.Baselines["Jobs.cs"][("Run", run.Line)].Cyclomatic);
+    }
+
+    [Fact]
+    public void ARenamedFunction_IsStillTheFunctionItWas()
+    {
+        // Legacy becomes Lookup and nothing else changes. Its twelve paths were there before the
+        // change, under the old name, so they are not this change's finding.
+        string after = Before.Replace("int Legacy(int x)", "int Lookup(int x)");
+
+        ChangeAnalysis analysis = ChangeAnalyzer.Analyze([Change("Orders.cs", Before, after)]);
+
         Assert.Empty(Assert.Single(analysis.Files).Functions);
-        Assert.Equal(4, analysis.Baselines["P.cs"]["Pick"].Cyclomatic);
+        FunctionMetrics was = analysis.Baselines["Orders.cs"][("Lookup", LineOf(after, "int Lookup(int x)"))];
+        Assert.Equal(("Legacy", 12), (was.Name, was.Cyclomatic));
+    }
+
+    [Fact]
+    public void WhenEveryLineChanged_AFunctionIsTheOneOfItsName()
+    {
+        // The file is indented two more columns: every line is an added line and no function
+        // kept one. Each is still the function of its name, so nothing is this change's finding.
+        string after = string.Join("\n", Before.Split('\n').Select(line => line.Length == 0 ? line : "  " + line));
+
+        ChangeAnalysis analysis = ChangeAnalyzer.Analyze([Change("Orders.cs", Before, after)]);
+
+        Assert.DoesNotContain(Assert.Single(analysis.Files).Functions, function => function.Name != "global");
+        Assert.Equal(
+            [("Legacy", 12), ("Total", 3)],
+            analysis.Baselines["Orders.cs"].Select(pair => (pair.Key.Name, pair.Value.Cyclomatic)).Order());
+    }
+
+    [Fact]
+    public void ANewAnonymousFunction_IsNew_AmongOthersOfItsName()
+    {
+        // A spec file: every test body is an anonymous function with the same name. A new test
+        // is a new function, graded whole, whatever the tests before it measure.
+        string before = Spec("one", 12) + "\n\n" + Spec("two", 1);
+        string after = before + "\n\n" + Spec("three", 11);
+
+        ChangeAnalysis analysis = ChangeAnalyzer.Analyze([Change("orders.test.js", before, after)]);
+
+        FunctionMetrics added = Assert.Single(Assert.Single(analysis.Files).Functions, function => function.Name != "global");
+        Assert.Equal((12, LineOf(after, "test('three'")), (added.Cyclomatic, added.Line));
+        Assert.Empty(analysis.Baselines["orders.test.js"]);
     }
 
     [Fact]
@@ -230,6 +333,18 @@ public sealed class ChangeAnalyzerTests
         Assert.Throws<ArgumentNullException>(() => ChangeAnalyzer.Analyze(null!));
         Assert.Throws<ArgumentException>(() => ChangeAnalyzer.Analyze([null!]));
     }
+
+    /// <summary>A type with one method, Run, of <paramref name="branches"/> if statements: cyclomatic complexity one more.</summary>
+    private static string TypeWithRun(string type, int branches) =>
+        $"class {type}\n{{\n    int Run(int x)\n    {{\n"
+        + string.Concat(Enumerable.Range(1, branches).Select(i => $"        if (x == {i}) return {i};\n"))
+        + "        return 0;\n    }\n}";
+
+    /// <summary>A JavaScript test whose body has <paramref name="branches"/> if statements.</summary>
+    private static string Spec(string name, int branches) =>
+        $"test('{name}', () => {{\n"
+        + string.Concat(Enumerable.Range(1, branches).Select(i => $"    if (value === {i}) expect(value).toBe({i});\n"))
+        + "});";
 
     /// <summary>The 1-based line of the first line containing <paramref name="text"/>.</summary>
     private static int LineOf(string source, string text)

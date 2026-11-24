@@ -11,9 +11,11 @@ namespace MintLint;
 /// <item>A function the change created is measured whole, at its real line.</item>
 /// <item>A function that existed and that the change touched is measured whole too, but only
 /// for what the change made worse: a cyclomatic, cognitive or NPath complexity, nesting depth
-/// or parameter count higher than the same-named function had. What it inherited, and what it
+/// or parameter count higher than that function had. What it inherited, and what it
 /// improved, is left out (it reads 0), and a function the change did not make worse in any
-/// of them is not graded at all.</item>
+/// of them is not graded at all. Which function it was is decided by the lines it kept, not
+/// by its name alone (<see cref="FunctionHistory"/>): methods of different types, overloads
+/// and anonymous functions share names.</item>
 /// <item>Added lines outside every function (imports, fields, script statements) are measured
 /// on their own, as top-level code.</item>
 /// </list>

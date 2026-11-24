@@ -87,8 +87,10 @@ public sealed class BoardCheckService(
             if (kind == JobActionKind.CodeQuality && record.Status is not ("Failed to run" or "Cancelled"))
                 record = WithNotReviewed(record, NotReviewed(snapshot, ignoreRules ?? []));
             if (minimum is char grade && !record.FailsAction)
-                record = ApplyMinimumGrade(record, grade, CodeQualityRule.EvaluateSnapshot(grade, snapshot, ct),
-                    HiddenByIgnores(snapshot, ignoreRules ?? []));
+                record = WithHiddenFilesToFix(
+                    ApplyMinimumGrade(record, grade, CodeQualityRule.EvaluateSnapshot(grade, snapshot, out var graded, ct),
+                        HiddenByIgnores(snapshot, ignoreRules ?? [])),
+                    graded, ignoreRules);
             record = WithUnlinkedCommits(record, unlinked);
         }
         catch (OperationCanceledException)
@@ -571,6 +573,29 @@ public sealed class BoardCheckService(
         return record with { MinimumGradeResult = gate.IsValid ? BoardCheckRecord.GradeMet : BoardCheckRecord.GradeNotMet,
             GradeSummary = message, Summary = summary, Limitations = limitations,
             Status = gate.IsValid || record.Status is "Failed to run" or "Cancelled" ? record.Status : "Findings" };
+    }
+
+    // The reason is also the step's error text, so it names the worst few; exempting or fixing them shows the rest.
+    private const int HiddenFiles = 5, HiddenProblems = 3;
+
+    /// <summary>
+    /// The minimum grade counts files that local ignore settings hide from the report. When it is not
+    /// met, the reason goes on to name the hidden files that are below it, each with its problems, where
+    /// they are and how to fix them. Without this a step could fail on a file that nothing shows: the
+    /// report lists none of its problems (VIBE-274 review).
+    /// </summary>
+    internal static BoardCheckRecord WithHiddenFilesToFix(BoardCheckRecord record, IReadOnlyList<QualityFile> graded,
+        IReadOnlyList<CodeAnalyzerIgnoredFile>? ignoreRules)
+    {
+        if (record.MinimumGradeResult != BoardCheckRecord.GradeNotMet || ignoreRules is null) return record;
+        var hidden = graded.Where(file => CodeAnalyzerIgnoreRules.IsIgnored(file.Path, ignoreRules)).ToList();
+        var lines = CodeQualityFixList.FixLines(hidden, Bar(record), HiddenFiles, HiddenProblems);
+        if (lines.Count == 0) return record;
+        return record with
+        {
+            GradeSummary = $"{record.GradeSummary}\nThese files count toward the minimum grade but are hidden from this report by local ignore settings. "
+                + $"Fix them, or exempt a file with exempt_code_quality_file:\n{string.Join('\n', lines)}"
+        };
     }
 
     /// <summary>Supported files the report leaves out only because of local ignore settings.</summary>

@@ -14,16 +14,19 @@ internal static class ChangedFunctions
     /// existing one reduced to what got worse, and the top-level scope of the added lines that
     /// are outside every function.
     /// </summary>
+    /// <param name="touched">The functions of the current file with an added line inside them.</param>
+    /// <param name="was">Each function that existed, with the function it was (<see cref="FunctionHistory"/>); null when there is no previous version.</param>
+    /// <param name="topLevel">The measurement of the added lines outside every function, if any.</param>
     public static List<FunctionMetrics> Counted(
         IReadOnlyList<FunctionMetrics> touched,
-        Dictionary<string, FunctionMetrics>? before,
+        Dictionary<FunctionMetrics, FunctionMetrics>? was,
         FileMetrics? topLevel)
     {
         List<FunctionMetrics> counted = [];
         foreach (FunctionMetrics function in touched)
         {
-            FunctionMetrics? was = before?.GetValueOrDefault(function.Name);
-            FunctionMetrics? graded = was is null ? function : OnlyWhatGotWorse(function, was);
+            FunctionMetrics? previous = was?.GetValueOrDefault(function);
+            FunctionMetrics? graded = previous is null ? function : OnlyWhatGotWorse(function, previous);
             if (graded is not null)
             {
                 counted.Add(graded);
@@ -88,41 +91,6 @@ internal static class ChangedFunctions
             ComplexityLevel = MetricEngine.ClassifyComplexity(highestCyclomatic, options.WarningThreshold, options.ErrorThreshold),
             MaxNestingDepth = maxNesting,
             MaxParameterCount = maxParameters,
-        };
-    }
-
-    /// <summary>
-    /// The previous version's functions by name. Overloads and anonymous functions share a
-    /// name, so each measurement keeps its highest value: a function only counts as worse
-    /// when it is worse than every predecessor it could be. Top-level code has no entry: it
-    /// is measured on the added lines alone.
-    /// </summary>
-    public static Dictionary<string, FunctionMetrics> WorstByName(FileMetrics file)
-    {
-        Dictionary<string, FunctionMetrics> worst = new(StringComparer.Ordinal);
-        foreach (FunctionMetrics function in file.Functions)
-        {
-            if (function.Name == ChangePlacement.TopLevelName)
-            {
-                continue;
-            }
-
-            worst[function.Name] = worst.TryGetValue(function.Name, out FunctionMetrics? known) ? Worst(known, function) : function;
-        }
-
-        return worst;
-    }
-
-    private static FunctionMetrics Worst(FunctionMetrics left, FunctionMetrics right)
-    {
-        return left with
-        {
-            Cyclomatic = Math.Max(left.Cyclomatic, right.Cyclomatic),
-            Cognitive = Math.Max(left.Cognitive, right.Cognitive),
-            NPath = Math.Max(left.NPath, right.NPath),
-            HalsteadDifficulty = Math.Max(left.HalsteadDifficulty, right.HalsteadDifficulty),
-            NestingDepth = Math.Max(left.NestingDepth, right.NestingDepth),
-            ParameterCount = Math.Max(left.ParameterCount, right.ParameterCount),
         };
     }
 
