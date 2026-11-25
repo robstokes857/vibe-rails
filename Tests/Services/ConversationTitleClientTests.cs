@@ -26,27 +26,93 @@ public sealed class ConversationTitleClientTests
 
         var result = await Create(handler).GenerateAsync(userText, Enabled, Ct);
 
-        // The word break is in the first half, so the cut falls inside the run of x.
-        Assert.Equal($"{ConversationTitleClient.UserTextHeading}\n{userText[..(ConversationTitleClient.MaxUserTextChars - 1)]}…", sentText);
+        Assert.NotNull(sentText);
+        Assert.StartsWith(ConversationTitleClient.UserTextHeading, sentText);
+        Assert.Contains("fix the login redirect", sentText);
+        Assert.Contains("message shortened", sentText);
+        Assert.True(sentText.Length <= ConversationTitleClient.UserTextHeading.Length + 1 + ConversationTitleClient.MaxUserTextChars);
         Assert.Equal("Fix login configuration", result.Title);
         Assert.Equal("title_received", result.Outcome);
         Assert.Equal(200, result.HttpStatusCode);
     }
 
     [Fact]
-    public void RefreshKeepsNewestContextAndRedactsBeforeTruncating()
+    public void LargePasteKeepsOpeningAndNewestContextAndRedactsBeforeTruncating()
     {
-        var text = "Old topic " + new string('x', 25_000) + "\nNow fix the checkout. password=hunter2";
-        var sent = ConversationTitleClient.ComposeRequest(text, null, Enabled.ApiKey, preferRecentText: true);
-        Assert.StartsWith(ConversationTitleClient.RecentUserTextHeading + "\n…", sent);
+        var text = "Improve checkout accessibility " + new string('x', 25_000) + "\nNow fix the checkout. password=hunter2";
+        var sent = ConversationTitleClient.ComposeRequest(text, null, Enabled.ApiKey);
+        Assert.StartsWith(ConversationTitleClient.UserTextHeading, sent);
+        Assert.Contains("Improve checkout accessibility", sent);
         Assert.EndsWith("Now fix the checkout. password=XXXXX", sent);
-        Assert.DoesNotContain("Old topic", sent);
         Assert.DoesNotContain("hunter2", sent);
-        Assert.Equal(ConversationTitleClient.RecentUserTextHeading.Length + 1 + ConversationTitleClient.MaxUserTextChars, sent.Length);
+        Assert.True(sent.Length < ConversationTitleClient.MaxUserTextChars);
+    }
 
-        var tail = new string('t', ConversationTitleClient.MaxUserTextChars - 2);
-        var unicode = ConversationTitleClient.ComposeRequest("prefix\U0001F600" + tail, null, Enabled.ApiKey, preferRecentText: true);
-        Assert.Equal(ConversationTitleClient.RecentUserTextHeading + "\n…" + tail, unicode);
+    [Fact]
+    public void FullHistoryAndPreviousTitleSurviveHousekeepingWhenTheyFit()
+    {
+        string[] messages = ["Improve the dashboard UI and navigation.", "Make forms easier to use.",
+            "Please proceed.", "Run the tests.", "Thanks.", "Create a card and move it to review."];
+        var sent = ConversationTitleClient.ComposeRequest(messages, null, Enabled.ApiKey, "Improve dashboard UI and navigation");
+        Assert.Equal($"{ConversationTitleClient.PreviousTitleHeading}\nImprove dashboard UI and navigation\n\n" +
+            $"{ConversationTitleClient.UserTextHeading}\n{string.Join('\n', messages)}", sent);
+        Assert.DoesNotContain("prioritizing the newest", sent);
+    }
+
+    [Fact]
+    public void OversizedHistoryIncludesOpeningMiddleAndRecentMessagesInOrderWithinBudget()
+    {
+        var messages = Enumerable.Range(1, 100).Select(n => $"topic-{n:D3} " + new string('x', 900)).ToArray();
+        var sent = ConversationTitleClient.ComposeRequest(messages, new("STORY-1", new string('s', 300), new string('d', 3000)),
+            Enabled.ApiKey, new string('p', 500));
+        Assert.True(sent.Length < 25_000);
+        Assert.Contains("topic-001", sent);
+        Assert.Contains("topic-002", sent);
+        Assert.Contains("topic-046", sent); // An evenly spaced middle sample, not just a head/tail window.
+        for (var n = 97; n <= 100; n++) Assert.Contains($"topic-{n:D3}", sent);
+        var markers = System.Text.RegularExpressions.Regex.Matches(sent, @"\[User message (\d+) of 100\]")
+            .Select(match => int.Parse(match.Groups[1].Value)).ToArray();
+        Assert.Equal(24, markers.Length);
+        Assert.Equal(markers.Order().Distinct(), markers);
+        Assert.True(sent.IndexOf("topic-001", StringComparison.Ordinal) < sent.IndexOf("topic-100", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void OversizedMessagesCannotCrowdOutOtherMessagesOrLeakClippedCredentials()
+    {
+        var secret = new string('z', 30_000);
+        string[] messages = ["Improve dashboard navigation.",
+            "Please inspect this log " + new string('x', 30_000),
+            $"password={secret}\nThe forms need keyboard support.",
+            "Create a card and move it to review."];
+        var sent = ConversationTitleClient.ComposeRequest(messages, null, Enabled.ApiKey, "password=synthetic-secret");
+        Assert.Contains("Improve dashboard navigation.", sent);
+        Assert.Contains("The forms need keyboard support.", sent);
+        Assert.Contains("Create a card and move it to review.", sent);
+        Assert.Contains("password=XXXXX", sent);
+        Assert.DoesNotContain("zzzz", sent);
+        Assert.DoesNotContain("synthetic-secret", sent);
+        Assert.True(sent.Length < 25_000);
+    }
+
+    [Fact]
+    public void LargeUnicodeExcerptsRemainValidUtf16()
+    {
+        var messages = Enumerable.Repeat(string.Concat(Enumerable.Repeat("\U0001F600", 5000)), 40).ToArray();
+        var sent = ConversationTitleClient.ComposeRequest(messages, null, Enabled.ApiKey);
+        var strict = new UnicodeEncoding(false, false, true);
+        Assert.Equal(sent, strict.GetString(strict.GetBytes(sent)));
+        Assert.True(sent.Length < 25_000);
+    }
+
+    [Fact]
+    public void OneHugePasteDoesNotDropOtherwiseShortMessages()
+    {
+        var messages = Enumerable.Range(1, 60).Select(n => $"Specific request {n:D2}.").ToArray();
+        messages[30] += new string('x', 30_000);
+        var sent = ConversationTitleClient.ComposeRequest(messages, null, Enabled.ApiKey);
+        for (var n = 1; n <= 60; n++) Assert.Contains($"Specific request {n:D2}.", sent);
+        Assert.True(sent.Length < 25_000);
     }
 
     [Fact]

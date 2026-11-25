@@ -197,8 +197,9 @@ Explicit naming cancels future/pending/claimed work in the same transaction, eve
 stays the same. Completion rechecks Automation/resume/shell eligibility and the claim, preserving
 changed names while allowing the transcript parser to set its automatic preview during a claim.
 Root-only `ConversationTitleJob` uses captured user messages through the claim's input watermark,
-with only the latest four for a refresh. It uses credential redaction, fresh saved settings and
-bounded HTTP; no input-path network call is made. The primary Board card is optional background
+preserving full history when it fits and bounded opening/middle/recent excerpts otherwise. Refreshes
+include the previous generated title for continuity. It uses credential redaction before bounding,
+fresh saved settings and bounded HTTP; no input-path network call is made. The primary Board card is optional background
 for the request. Generated titles take precedence over card labels in the sidebar. Resume summaries
 and explicit live-tab/Board session labels are separate.
 

@@ -56,8 +56,7 @@ public sealed class ConversationTitleClient
     internal const string StoryHeading =
         "Story information you might find useful (the Vibe Story this chat is attached to; other chats may share it):";
     internal const string UserTextHeading = "User text to make the title from:";
-    internal const string RecentUserTextHeading =
-        "Recent user messages, oldest to newest. Make the title reflect the current topic, prioritizing the newest request:";
+    internal const string PreviousTitleHeading = "Previous generated title (continuity hint; correct it if inaccurate):";
     /// <summary>The API's answer when nothing meaningful remains; never saved as a name.</summary>
     internal const string FallbackTitle = "New conversation";
     private readonly HttpClient http;
@@ -83,9 +82,15 @@ public sealed class ConversationTitleClient
     /// text are logged. <paramref name="sessionId"/> is the terminal session the relay knows the
     /// conversation by, so the web's terminal list can show the same title (VIBE-178).
     /// </summary>
-    public async Task<ConversationTitleResult> GenerateAsync(string userText,
+    public Task<ConversationTitleResult> GenerateAsync(string userText,
         ConversationTitleSettings settings, CancellationToken ct, ConversationTitleStory? story = null,
-        bool preferRecentText = false, string? sessionId = null)
+        string? previousTitle = null, string? sessionId = null) =>
+        GenerateAsync([userText], settings, ct, story, previousTitle, sessionId);
+
+    /// <summary>Requests a title using bounded context from the complete captured user-message history.</summary>
+    public async Task<ConversationTitleResult> GenerateAsync(IReadOnlyList<string> userMessages,
+        ConversationTitleSettings settings, CancellationToken ct, ConversationTitleStory? story = null,
+        string? previousTitle = null, string? sessionId = null)
     {
         int? statusCode = null;
         ConversationTitleResult Result(ConversationTitleResult result, string outcome) =>
@@ -93,7 +98,7 @@ public sealed class ConversationTitleClient
 
         if (!settings.CanSend || settings != readSettings())
             return Result(new(null, TimeSpan.FromMinutes(1)), "settings_changed_or_disabled");
-        if (string.IsNullOrWhiteSpace(userText))
+        if (!userMessages.Any(text => !string.IsNullOrWhiteSpace(text)))
             return Result(new(null, TimeSpan.FromMinutes(1)), "no_user_text");
 
         using var settingsChanged = new CancellationTokenSource();
@@ -103,7 +108,7 @@ public sealed class ConversationTitleClient
         var monitor = WatchSettingsAsync(settings, settingsChanged, monitorStop.Token);
         try
         {
-            var text = ComposeRequest(userText, story, settings.ApiKey, preferRecentText);
+            var text = ComposeRequest(userMessages, story, settings.ApiKey, previousTitle);
             if (settings != readSettings())
                 return Result(new(null, TimeSpan.FromMinutes(1)), "settings_changed_or_disabled");
             using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint)
@@ -196,30 +201,30 @@ public sealed class ConversationTitleClient
     /// it is bounded, so a secret is never cut short of the context that lets the redactor see it.
     /// </summary>
     internal static string ComposeRequest(string userText, ConversationTitleStory? story, string apiKey,
-        bool preferRecentText = false)
-    {
-        var redacted = CredentialRedactor.RedactTranscript(userText.Trim(), apiKey);
-        var user = preferRecentText ? BoundRecent(redacted, MaxUserTextChars) : Bound(redacted, MaxUserTextChars);
-        var heading = preferRecentText ? RecentUserTextHeading : UserTextHeading;
-        if (story is null)
-            return $"{heading}\n{user}";
+        string? previousTitle = null) => ComposeRequest([userText], story, apiKey, previousTitle);
 
-        var title = Bound(CredentialRedactor.RedactTranscript(story.Title.Trim(), apiKey), MaxStoryTitleChars);
-        var description = Bound(CredentialRedactor.RedactTranscript(story.Description.Trim(), apiKey), MaxStoryDescriptionChars);
-        var builder = new StringBuilder(StoryHeading).Append('\n').Append(story.Id).Append(": ").Append(title);
-        if (description.Length > 0)
-            builder.Append('\n').Append(description);
-        return builder.Append("\n\n").Append(heading).Append('\n').Append(user).ToString();
-    }
-
-    // Redact before retaining the tail, so clipping cannot turn a recognizable credential into
-    // an unrecognizable fragment. Keep the newest request even after a very large earlier paste.
-    private static string BoundRecent(string text, int max)
+    internal static string ComposeRequest(IReadOnlyList<string> userMessages, ConversationTitleStory? story, string apiKey,
+        string? previousTitle = null)
     {
-        if (text.Length <= max) return text;
-        var start = text.Length - max + 1;
-        if (char.IsLowSurrogate(text[start])) start++;
-        return "…" + text[start..];
+        var redacted = userMessages.Where(text => !string.IsNullOrWhiteSpace(text))
+            .Select(text => CredentialRedactor.RedactTranscript(text.Trim(), apiKey)).ToArray();
+        var user = ConversationTitleContext.Build(redacted, MaxUserTextChars);
+        var builder = new StringBuilder();
+        if (story is not null)
+        {
+            var id = Bound(CredentialRedactor.RedactTranscript(story.Id.Trim(), apiKey), 100);
+            var title = Bound(CredentialRedactor.RedactTranscript(story.Title.Trim(), apiKey), MaxStoryTitleChars);
+            var description = Bound(CredentialRedactor.RedactTranscript(story.Description.Trim(), apiKey), MaxStoryDescriptionChars);
+            builder.Append(StoryHeading).Append('\n').Append(id).Append(": ").Append(title);
+            if (description.Length > 0) builder.Append('\n').Append(description);
+            builder.Append("\n\n");
+        }
+        if (!string.IsNullOrWhiteSpace(previousTitle))
+        {
+            var previous = Bound(CredentialRedactor.RedactTranscript(previousTitle.Trim(), apiKey), 150);
+            builder.Append(PreviousTitleHeading).Append('\n').Append(previous).Append("\n\n");
+        }
+        return builder.Append(UserTextHeading).Append('\n').Append(user).ToString();
     }
 
     /// <summary>

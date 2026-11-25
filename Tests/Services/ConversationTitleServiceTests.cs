@@ -136,7 +136,7 @@ public sealed class ConversationTitleServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RefreshesFromFourRecentMessagesAndKeepsTitleSeparateFromResumeSummary()
+    public async Task RefreshesAfterFourMessagesWithFullHistoryAndPreviousTitleSeparateFromResumeSummary()
     {
         var repository = await Seed();
         await repository.SaveChatSummaryAsync(new ChatSummary { SessionId = "session", SummaryText = "Existing resume recap", Date = DateTime.UtcNow }, Ct);
@@ -158,8 +158,9 @@ public sealed class ConversationTitleServiceTests : IDisposable
             await service.ProcessOneAsync(Ct);
             Assert.Equal(1 + (message - 1) / 4, handler.Count);
         }
-        Assert.Equal($"{ConversationTitleClient.RecentUserTextHeading}\n" +
-            string.Join('\n', Enumerable.Range(10, 4).Select(n => $"Current topic message {n}")), sent[^1]);
+        Assert.Equal($"{ConversationTitleClient.PreviousTitleHeading}\nTitle 3\n\n" +
+            $"{ConversationTitleClient.UserTextHeading}\n{new string('a', 300)}\n" +
+            string.Join('\n', Enumerable.Range(2, 12).Select(n => $"Current topic message {n}")), sent[^1]);
         Scalar("UPDATE Sessions SET EndedUTC='2026-10-12T13:00:00.0000000Z'");
         await service.ProcessOneAsync(Ct);
         Assert.Equal(4, handler.Count);
@@ -194,7 +195,8 @@ public sealed class ConversationTitleServiceTests : IDisposable
 
         Assert.Equal(2, handler.Count);
         Assert.DoesNotContain("New topic", sent[0]);
-        Assert.Equal($"{ConversationTitleClient.RecentUserTextHeading}\n" +
+        Assert.Equal($"{ConversationTitleClient.PreviousTitleHeading}\nCurrent title\n\n" +
+            $"{ConversationTitleClient.UserTextHeading}\n{new string('a', 300)}\n" +
             string.Join('\n', Enumerable.Range(2, 4).Select(n => $"New topic {n}")), sent[1]);
     }
 
@@ -244,8 +246,8 @@ public sealed class ConversationTitleServiceTests : IDisposable
     public void CommandsAreKeptWhenTheyAreAllTheUserWrote()
     {
         UserInputRecord Input(int sequence, string text) => new(sequence, "session", sequence, text, null, DateTime.UtcNow);
-        Assert.Equal("/login\n/model", ConversationTitleService.UserText([Input(2, "/model"), Input(1, "/login")]));
-        Assert.Equal("", ConversationTitleService.UserText([Input(1, "   ")]));
+        Assert.Equal(["/login", "/model"], ConversationTitleService.UserMessages([Input(2, "/model"), Input(1, "/login")]));
+        Assert.Empty(ConversationTitleService.UserMessages([Input(1, "   ")]));
     }
 
     [Fact]

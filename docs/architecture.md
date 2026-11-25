@@ -231,13 +231,20 @@ and debug logging, security, performance, future enhancements, resources.
 
 `ConversationTitleService` makes leased title requests through `IConversationTitleStore` in
 `state.db`: first when the user has written enough, or when the session ends, then after every
-four additional captured user messages. Refreshes use the latest four messages through the
-claim's input watermark; messages arriving during the request count toward the next refresh.
+four additional captured user messages. Every request uses the history through the claim's input
+watermark; messages arriving during the request count toward the next refresh.
 It sends the user's captured messages (`IUserInputStore`), not the Send-to transcript, so launch
 prompts such as the story-tracking nudge never reach the title API. A Board-linked conversation is
 titled too; its primary card's display ID, title and description go first, labeled as background.
-`ConversationTitleClient.ComposeRequest` redacts each part whole, then bounds it. Refreshes keep
-the most recent text within the payload limit and ask for the current topic. Each request also
+`ConversationTitleClient.ComposeRequest` redacts each message and context field whole before
+bounding it. Histories fitting 20,000 characters are sent in full. Oversized histories use at most
+24 chronological excerpts if capping individual messages is insufficient: the first two messages,
+the last four and evenly spaced middle messages. Both ends of long messages are retained, with
+a maximum of 4,000 characters per excerpt.
+Framing counts against the budget. Refreshes include the previous generated title as a bounded,
+redacted continuity hint; manual names still cancel generation. The title describes the substantive
+work across the conversation, retaining the topic through bookkeeping and changing when the user
+switches objectives. This needs the corresponding hosted title prompt update. Each request also
 sends the work item's session id as `sessionId`. That is the id `TerminalStateService` registers
 with the relay, so viberails.ai /Terminals shows the newest title on that terminal's row
 (VIBE-178). A null id is left out of the body. The old VIBE-158
