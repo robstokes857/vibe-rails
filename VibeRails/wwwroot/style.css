@@ -7783,6 +7783,11 @@ input.form-control:disabled {
     --ch-sidebar-peek: 44px;
     display: grid;
     grid-template-columns: var(--ch-sidebar-width) minmax(0, 1fr);
+    /* The one row is exactly the layout's height. An auto row grew to the history
+       sidebar's pixel height, which updateFocusContainerHeight copies from the panel:
+       after the viewport shrank, the old height held the row, the panel and the
+       terminal's rows, and the bottom of the terminal was cut off. */
+    grid-template-rows: minmax(0, 1fr);
     column-gap: 0.5rem;
     align-items: stretch;
     flex: 1 1 auto;

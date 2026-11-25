@@ -156,6 +156,8 @@ separation from the Board Automation robot menu at desktop and phone widths. The
 host first reports no session, as a real child does while the CLI spawns, and one case starts
 from a blank "+" placeholder tab. The renderer font cases emulate Chromium 156's strict canvas
 font parser (VS Code webviews) for WebGL and Canvas, failing on any glyph font it would drop.
+A short-window case shrinks the viewport under a live tab: the panel, history rail and xterm
+screen must end inside the page and the terminal must lose rows rather than run past the bottom.
 The two VIBE-351 cases in `terminal-board-card.spec.js` keep two live tabs whose socket fixture
 closes an earlier viewer as "taken over", like the server. Leaving Terminals with the Canvas
 renderer, or with one xterm failing to dispose, must mount the next view, close every socket,

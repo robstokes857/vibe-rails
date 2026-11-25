@@ -711,6 +711,33 @@ test('reloading a selected Automation still lets ordinary terminals reconnect on
     await expect(page.locator(normalTabs)).toHaveCount(1);
 });
 
+test('a shorter window refits the terminal instead of cutting off its last rows', async ({ page }) => {
+    // updateFocusContainerHeight copies the panel's height to the history sidebar, and the two
+    // share the layout's one grid row. An auto row grew to the sidebar's old height after the
+    // window shrank (VS Code's bottom panel opening), so the panel and the terminal's last rows
+    // ran past the bottom of the page.
+    await page.setViewportSize({ width: 1306, height: 824 });
+    await openFixture(page, 1);
+    const layout = () => page.evaluate(() => {
+        const tab = window.app.terminalController.manager.getActiveTab();
+        const bottom = element => element.getBoundingClientRect().bottom;
+        const visible = bottom(document.getElementById('app-content'));
+        return {
+            rows: tab.instance.vibeTerminal._terminal.rows,
+            overflow: Math.round(Math.max(
+                bottom(document.getElementById('vb-terminal-panel')),
+                bottom(document.getElementById('ch-sidebar')),
+                bottom(tab.state.ui.terminalElement.querySelector('.xterm-screen'))) - visible)
+        };
+    });
+    await expect.poll(async () => (await layout()).overflow).toBeLessThanOrEqual(0);
+    const tallRows = (await layout()).rows;
+
+    await page.setViewportSize({ width: 1306, height: 704 });
+    await expect.poll(async () => (await layout()).overflow).toBeLessThanOrEqual(0);
+    await expect.poll(async () => (await layout()).rows).toBeLessThan(tallRows);
+});
+
 test('robot menu stays inside a narrow viewport and supports keyboard dismissal', async ({ page }) => {
     await page.setViewportSize({ width: 460, height: 720 });
     await openFixture(page);
