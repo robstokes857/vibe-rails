@@ -548,9 +548,10 @@ public class TerminalRunner
                                 // Atomic snapshot delivery: the remote consumer is already
                                 // subscribed, so PushSnapshotTo hands it a fresh state dump
                                 // under the subscriber lock — no live bytes interleave, no
-                                // TUI poking required.
+                                // TUI poking required. Only the newest history that fits
+                                // under the relay's message limit is sent (VIBE-177).
                                 resizeSnapshotsRequested = false;
-                                remoteGrid = terminal.PushSnapshotTo(remoteOutputConsumer);
+                                remoteGrid = terminal.PushSnapshotTo(remoteOutputConsumer, TerminalControlProtocol.MaxMessageBytes);
                                 return;
                             }
 
@@ -630,8 +631,9 @@ public class TerminalRunner
                     // and hands it to the already-subscribed remote consumer under the
                     // terminal's subscriber lock, so no live bytes can interleave. The
                     // snapshot begins with ED2 + ED3 + cursor home so whatever the remote
-                    // had on screen is wiped and rebuilt from ground truth.
-                    remoteGrid = terminal.PushSnapshotTo(remoteOutputConsumer);
+                    // had on screen is wiped and rebuilt from ground truth. Only the newest
+                    // history that fits under the relay's message limit is sent (VIBE-177).
+                    remoteGrid = terminal.PushSnapshotTo(remoteOutputConsumer, TerminalControlProtocol.MaxMessageBytes);
                 }
                 finally
                 {

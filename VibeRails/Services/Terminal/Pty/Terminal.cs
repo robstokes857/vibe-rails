@@ -379,7 +379,16 @@ public sealed class Terminal : IAsyncDisposable
     /// via the consumer's normal channel.
     /// </summary>
     /// <returns>The grid the snapshot paints.</returns>
-    public (int Cols, int Rows) PushSnapshotTo(ITerminalConsumer consumer) => PushSnapshotTo(consumer, includeScrollback: true);
+    public (int Cols, int Rows) PushSnapshotTo(ITerminalConsumer consumer) => PushSnapshotTo(consumer, includeScrollback: true, int.MaxValue);
+
+    /// <summary>
+    /// <see cref="PushSnapshotTo(ITerminalConsumer)"/> for a consumer that takes at most
+    /// <paramref name="maxBytes"/> in one message: the oldest scrollback rows are left out until the
+    /// snapshot fits. The screen is always sent whole. The relay closes a desktop socket whose message
+    /// passes its limit, so every remote snapshot is sent this way (VIBE-177).
+    /// </summary>
+    /// <returns>The grid the snapshot paints.</returns>
+    public (int Cols, int Rows) PushSnapshotTo(ITerminalConsumer consumer, int maxBytes) => PushSnapshotTo(consumer, includeScrollback: true, maxBytes);
 
     /// <summary>
     /// <see cref="PushSnapshotTo(ITerminalConsumer)"/> without the scrollback rows: the same reset
@@ -388,13 +397,16 @@ public sealed class Terminal : IAsyncDisposable
     /// the prologue still clears a viewer's scrollback, so send it only to a viewer that asked.
     /// </summary>
     /// <returns>The grid the snapshot paints.</returns>
-    public (int Cols, int Rows) PushScreenSnapshotTo(ITerminalConsumer consumer) => PushSnapshotTo(consumer, includeScrollback: false);
+    public (int Cols, int Rows) PushScreenSnapshotTo(ITerminalConsumer consumer) => PushSnapshotTo(consumer, includeScrollback: false, int.MaxValue);
 
-    private (int Cols, int Rows) PushSnapshotTo(ITerminalConsumer consumer, bool includeScrollback)
+    private (int Cols, int Rows) PushSnapshotTo(ITerminalConsumer consumer, bool includeScrollback, int maxBytes)
     {
         lock (_subscriberLock)
         {
-            var snapshot = CaptureSnapshotLocked(includeScrollback, out var cols, out var rows);
+            var snapshot = CaptureSnapshotLocked(includeScrollback, maxBytes, out var cols, out var rows);
+            if (snapshot.Length > maxBytes)
+                Log.Warning("[Terminal] A {Cols}x{Rows} snapshot is {Bytes} bytes without history, over the {MaxBytes}-byte limit",
+                    cols, rows, snapshot.Length, maxBytes);
             DeliverSnapshot(consumer, snapshot);
             return (cols, rows);
         }
@@ -402,9 +414,9 @@ public sealed class Terminal : IAsyncDisposable
 
     // Must be called with _subscriberLock held. Takes _emulatorLock internally
     // so the serializer sees a consistent emulator state.
-    private byte[] CaptureSnapshotLocked() => CaptureSnapshotLocked(includeScrollback: true, out _, out _);
+    private byte[] CaptureSnapshotLocked() => CaptureSnapshotLocked(includeScrollback: true, int.MaxValue, out _, out _);
 
-    private byte[] CaptureSnapshotLocked(bool includeScrollback, out int cols, out int rows)
+    private byte[] CaptureSnapshotLocked(bool includeScrollback, int maxBytes, out int cols, out int rows)
     {
         TerminalEmulator.TerminalCell[][] scrollback;
         TerminalEmulator.TerminalCell[,] snap;
@@ -428,7 +440,7 @@ public sealed class Terminal : IAsyncDisposable
         return TerminalGridSerializer.Serialize(
             scrollback, snap, rows, cols,
             cursorRow, cursorCol, cursorVisible, cursorShape, isAlternateScreen, bracketedPaste,
-            inputReportingModes);
+            inputReportingModes, maxBytes);
     }
 
     private static void DeliverSnapshot(ITerminalConsumer consumer, byte[] snapshot)

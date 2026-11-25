@@ -19,6 +19,11 @@ internal static class TerminalGridSerializer
     ///   - Current screen rows
     ///   - Cursor repositioned to match terminal cursor
     /// </summary>
+    /// <param name="maxBytes">
+    /// The largest result wanted. The oldest scrollback rows are left out until the result fits
+    /// (VIBE-177: the relay closes a socket whose message passes its limit). The screen is always
+    /// kept, so a screen that alone is larger than this is still returned whole.
+    /// </param>
     public static byte[] Serialize(
         TerminalCell[][] scrollback,
         TerminalCell[,] screen,
@@ -28,8 +33,17 @@ internal static class TerminalGridSerializer
         int cursorShape = 0,
         bool isAlternateScreen = false,
         bool bracketedPaste = false,
-        IReadOnlyList<int>? inputReportingModes = null)
+        IReadOnlyList<int>? inputReportingModes = null,
+        int maxBytes = int.MaxValue)
     {
+        if (maxBytes != int.MaxValue && scrollback.Length > 0 && !isAlternateScreen)
+        {
+            // Everything except the history, plus the newlines written after it below.
+            var otherBytes = Serialize([], screen, rows, cols, cursorRow, cursorCol, cursorVisible, cursorShape,
+                isAlternateScreen, bracketedPaste, inputReportingModes).Length + 2 * (rows - 1);
+            scrollback = NewestRowsWithin(scrollback, cols, maxBytes - otherBytes);
+        }
+
         int scrollbackCount = scrollback.Length;
         // Rough capacity: reset prologue + per-row(cols*8 avg + newline) for scrollback + screen
         var sb = new StringBuilder((scrollbackCount + rows) * cols * 4 + (scrollbackCount + rows) * 16 + 64);
@@ -133,6 +147,26 @@ internal static class TerminalGridSerializer
         sb.Append(" q");
 
         return EncodeUtf8(sb);
+    }
+
+    /// <summary>
+    /// The newest rows whose serialized bytes, each with its "\r\n", add up to at most
+    /// <paramref name="budget"/>. Rows are whole, so a cut never splits an escape sequence.
+    /// </summary>
+    private static TerminalCell[][] NewestRowsWithin(TerminalCell[][] scrollback, int cols, int budget)
+    {
+        var row = new StringBuilder();
+        var kept = 0;
+        for (var i = scrollback.Length - 1; i >= 0; i--)
+        {
+            row.Clear();
+            SerializeRow(row, scrollback[i], Math.Min(scrollback[i].Length, cols));
+            budget -= Encoding.UTF8.GetByteCount(row.ToString()) + 2;
+            if (budget < 0)
+                break;
+            kept++;
+        }
+        return kept == scrollback.Length ? scrollback : scrollback[^kept..];
     }
 
     /// <summary>

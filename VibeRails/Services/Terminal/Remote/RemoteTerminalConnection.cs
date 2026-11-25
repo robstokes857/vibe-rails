@@ -313,6 +313,11 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
             // policy close already ends the loop below; this one also tells the entitlement snapshot.
             if (policyClosed && socket.CloseStatusDescription == ProDenial.CloseReason)
                 NoteProRequired();
+            // Say why, so a relay close such as 1007 "Message too large" is in the log (VIBE-177).
+            // No close status means the connection broke without a close frame.
+            if (!lifetime.IsCancellationRequested)
+                Log.Warning("[Remote] Relay connection for session {SessionId} ended: close status {CloseStatus}, reason {CloseReason}",
+                    _sessionId![..8], socket.CloseStatus, socket.CloseStatusDescription);
             try { socket.Dispose(); } catch { }
             if (ReferenceEquals(_socket, socket))
                 _socket = null;

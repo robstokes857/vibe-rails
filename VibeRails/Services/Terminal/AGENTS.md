@@ -357,7 +357,8 @@ Authorization:
 - Exposes `GetGridReplay()` (ANSI byte stream from emulator grid) and `Resize(cols, rows, source)`.
   Every resize raises `Resized` with the surface that asked for it (`TerminalResizeCoordinator` passes it).
 - `SubscribeWithSnapshot(...)` / `PushSnapshotTo(...)` provide atomic snapshot + live attach for reconnect.
-  `PushScreenSnapshotTo(...)` is the same push without the scrollback rows (VIBE-172); both return the grid they paint.
+  `PushScreenSnapshotTo(...)` is the same push without the scrollback rows (VIBE-172). `PushSnapshotTo(consumer, maxBytes)`
+  leaves out the oldest scrollback rows until the snapshot fits (VIBE-177, below). All of them return the grid they paint.
 - `CreateAsync(..., title)` sets PTY name; supports `app`/`argv` to spawn a specific program instead of an interactive shell.
 - Implements `IAsyncDisposable` and kills PTY on dispose.
 - Ends the session on the PTY process's **own exit**, not only on output-pipe EOF: `IPtyConnection.ProcessExited`
@@ -565,6 +566,24 @@ at the next replay or unlock, and lines drawn for a wider grid wrapped there unt
 - Tests: `RemoteViewerResizeSnapshotTests` (both console hosts, local web and native sources,
   bursts, remote-origin resizes, no request, locked viewer, takeover/disconnect/reconnect,
   deferred and in-progress synchronized frames).
+
+**Remote snapshot size (VIBE-177).** The relay closes a desktop socket with 1007 "Message too large"
+once one message passes 256 KiB (`TerminalControlProtocol.MaxMessageBytes`, the same limit on both
+sides), and a snapshot is one binary message. A full 20k-row history is several MB, so before this
+fix a long session could not be opened remotely. Each PIN unlock sent `__UNLOCKED__`, then the
+oversized snapshot. The relay dropped the socket, the desktop reconnected and locked the viewer
+again. The viewer showed a blank screen, then the PIN prompt.
+- The unlock and replay paths (replay also serves the overflow resync) call
+  `PushSnapshotTo(remoteOutputConsumer, TerminalControlProtocol.MaxMessageBytes)`.
+  `TerminalGridSerializer.Serialize(..., maxBytes)` measures the rest of the snapshot, then keeps
+  the newest whole rows whose serialized bytes fit. A cut never splits an escape sequence.
+  At 120 columns that is about 1,900 plain rows. Rows with many color changes are larger, so fewer fit.
+- The screen is always sent whole. A screen that alone passes the limit is still sent, and is logged
+  as a warning. The local viewer and recordings are unchanged.
+- `SuperviseAsync` logs the relay's close status and reason before it reconnects. The relay does not
+  log the reason itself.
+- Tests: `TerminalGridSerializerTests` (newest rows that fit, no change under the limit, screen kept
+  when the limit is too small) and `RemoteViewerResizeSnapshotTests` (unlock and replay with long history).
 5. On macOS, managed CLI launches pass executable + argv to a login zsh wrapper at PTY
    creation; nothing types a startup command or Enter into the shell. The wrapper runs MCP
    setup, invokes `"$@"`, reports a nonzero CLI exit, and leaves an interactive shell after it.

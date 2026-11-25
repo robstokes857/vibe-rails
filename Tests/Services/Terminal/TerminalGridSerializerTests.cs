@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using TerminalEmulator;
 using VibeRails.Services.Terminal;
 using Xunit;
@@ -324,9 +325,65 @@ public sealed class TerminalGridSerializerTests
         Assert.Contains(client.GetScreenText(), rowText => rowText.Contains("\U0001F600"));
     }
 
-    private static byte[] Serialize(TerminalEmulator.Terminal terminal)
+    // VIBE-177: the relay closes a desktop socket once one message passes 256 KiB, and a remote
+    // snapshot is one message, so it carries only the newest history that fits.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SnapshotReplay_WithAByteLimit_KeepsTheNewestHistoryThatFits(bool colorAndEmoji)
+    {
+        const int limit = 256 * 1024;
+        var lines = Enumerable.Range(1, 5000).Select(i => $"line {i}").ToArray();
+        var server = new TerminalEmulator.Terminal(cols: 120, rows: 24, scrollbackSize: 20000);
+        server.Write(string.Join("\r\n", colorAndEmoji
+            ? lines.Select((line, i) => $"\x1b[38;5;{i % 230 + 1}m{line} \U0001F600\x1b[0m")
+            : lines));
+
+        var snapshot = Serialize(server, maxBytes: limit);
+
+        Assert.True(snapshot.Length <= limit, $"{snapshot.Length} bytes is over the {limit}-byte limit");
+        var client = new TerminalEmulator.Terminal(cols: 120, rows: 24, scrollbackSize: 20000);
+        client.Write(snapshot.AsSpan());
+        var history = client.GetScrollback().Select(Label).ToArray();
+        var kept = history.Length;
+        Assert.InRange(kept, 1, server.GetScrollback().Length - 1);
+        // The newest history, in order, with no gap before the screen.
+        Assert.Equal(lines[^(kept + server.Rows)..^server.Rows], history);
+        Assert.Equal(server.GetScreenText(), client.GetScreenText());
+        Assert.Equal(server.CursorRow, client.CursorRow);
+        Assert.Equal(server.CursorCol, client.CursorCol);
+        // As many rows as fit: one more would pass the limit.
+        Assert.True(Serialize(server, scrollback: server.GetScrollback()[^(kept + 1)..]).Length > limit);
+    }
+
+    [Fact]
+    public void SnapshotReplay_UnderTheByteLimit_IsUnchanged()
+    {
+        var server = new TerminalEmulator.Terminal(cols: 40, rows: 5, scrollbackSize: 100);
+        server.Write(string.Join("\r\n", Enumerable.Range(1, 60).Select(i => $"line {i}")));
+
+        Assert.Equal(Serialize(server), Serialize(server, maxBytes: 256 * 1024));
+    }
+
+    [Fact]
+    public void SnapshotReplay_WithALimitBelowTheScreen_SendsTheWholeScreenAndNoHistory()
+    {
+        var server = new TerminalEmulator.Terminal(cols: 40, rows: 5, scrollbackSize: 100);
+        server.Write(string.Join("\r\n", Enumerable.Range(1, 60).Select(i => $"line {i}")));
+
+        Assert.Equal(Serialize(server, scrollback: []), Serialize(server, maxBytes: 10));
+    }
+
+    private static string Label(TerminalCell[] row)
+    {
+        var text = new StringBuilder();
+        foreach (var cell in row) cell.AppendText(text);
+        return Regex.Match(text.ToString(), @"^line \d+").Value;
+    }
+
+    private static byte[] Serialize(TerminalEmulator.Terminal terminal, int maxBytes = int.MaxValue, TerminalCell[][]? scrollback = null)
         => TerminalGridSerializer.Serialize(
-            terminal.GetScrollback(),
+            scrollback ?? terminal.GetScrollback(),
             terminal.GetSnapshot(),
             terminal.Rows,
             terminal.Cols,
@@ -336,5 +393,6 @@ public sealed class TerminalGridSerializerTests
             terminal.CursorShape,
             terminal.IsAlternateScreen,
             terminal.BracketedPasteActive,
-            terminal.GetInputReportingModes());
+            terminal.GetInputReportingModes(),
+            maxBytes);
 }

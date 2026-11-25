@@ -221,6 +221,27 @@ public sealed class RemoteViewerResizeSnapshotTests
         AssertShows(screen, "repaint-start repaint-end");
     }
 
+    // VIBE-177: the relay closes the desktop's socket once one message passes its limit, so a long
+    // session's unlock and replay snapshots carry only the newest history that fits.
+    [Fact]
+    public async Task ALongSessionsUnlockAndReplaySnapshotsFitUnderTheRelaysLimit()
+    {
+        await using var fixture = new Fixture();
+        fixture.Publish(string.Concat(Enumerable.Range(1, 5000).Select(i => $"line-{i:D4}\r\n")) + "$ ");
+
+        var unlock = fixture.Unlock();
+        fixture.Relay.Raise(r => r.OnReplayRequested += null);
+        var replay = One(await fixture.SnapshotsAsync());
+
+        foreach (var snapshot in new[] { unlock, replay })
+        {
+            var bytes = Encoding.UTF8.GetByteCount(snapshot);
+            Assert.True(bytes <= TerminalControlProtocol.MaxMessageBytes, $"{bytes} bytes is over the relay's limit");
+            AssertShows(snapshot, "line-5000");
+            AssertShows(snapshot, "line-0001", expected: false);
+        }
+    }
+
     /// <summary>
     /// String assertions here never echo a snapshot: <c>dotnet test</c> (the VSTest adapter) drops
     /// the result of a test whose failure message carries raw ESC bytes, so a failure would vanish
