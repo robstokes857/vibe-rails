@@ -137,14 +137,14 @@ Its add picker uses the shared Tom Select helper, including search, viewport pos
 Escape and disposal. Menu options and the selected value reuse provider logos for agents,
 the code icon for scripts and the VibeRails mark for saved/new VCA and code-quality checks.
 VCA and code-quality checks can be created from this picker; creating a definition never runs it.
-The run order saves on every change: **Add to run order**, **Remove** and Up/Down each `PUT` the
-whole order with its revision at once (`saveOrder`). There is no Save button, no unsaved state and
+The run order saves on every change: **Save** adds the selected entry; **Remove** and Up/Down each `PUT` the
+whole order with its revision at once (`saveOrder`). There is no separate order-wide Save, no unsaved state and
 no discard prompt; only a write in flight holds a close (`beforeClose`). A refused write, a conflict
 included, keeps the last saved order and shows the error with **Reload latest**. After a save only
 the rows (and, after Add or Remove, the picker) re-render, so the `role="status"` line below the run
 order announces it. After Add the picker keeps focus with its menu closed (`focusTomSelectClosed`
 in `utils.js`): Tom Select opens on focus, which looked like a prompt to add a second entry.
-The **Create an agent in AI Agents** link below the picker opens the AI Agents page
+The bordered secondary **Create Agent** button with a robot icon below the picker opens the AI Agents page
 through guarded app navigation and cleanup.
 A new VCA or code-quality check asks for its scope below the picker (VIBE-271): linked commits
 (default for both), unpushed, working tree or repository. A new Code quality scan also asks for
@@ -178,7 +178,8 @@ value stays one line. The check kinds read as **Rules check** (`vca`) and **Code
 here and in `launch-presentation.js`; checks saved under the older names keep them, and
 `laneChoiceLabel` does not repeat the kind after them. After a choice, **What this does** shows
 the full text, a guarded link to the Rules (`dashboard`) or Quality page for checks, and the scope
-field; **Add to run order** carries the note that adding saves the lane. Run order rows show
+field; a full-width **Save** button with a floppy-disk icon follows, without a helper paragraph.
+Run order rows have a trash-can icon on **Remove** and show
 `laneRowDetail` (kind, then what it runs or its scope).
 **Manage list** is an inline panel, not a dialog: the Board lane panel closes on outside pointer
 events. Its switches save `PUT /api/v1/lane-picker/preferences { key, hidden }` at once; keys are

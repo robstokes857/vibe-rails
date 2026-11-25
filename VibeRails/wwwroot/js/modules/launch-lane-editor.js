@@ -182,8 +182,8 @@ export function laneManageGroups(items) {
 const choiceLogo = item => LANE_CHECKS[item.kind] ? boardBrandLogo(null, '') : launchPresentation(item).logoHtml;
 
 /**
- * Ordered definitions, shared by lane settings and the lane popup. Add, Remove and each move save the
- * run order at once: there is no Save button and nothing left unsaved to discard.
+ * Ordered definitions, shared by lane settings and the lane popup. Save adds the selected entry;
+ * Remove and each move also save at once, leaving no order changes unsaved to discard.
  */
 export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
     const api = new LaunchApi(app),
@@ -202,8 +202,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
     const scopeHelpId = `launch-lane-check-help-${id}`,
         minimumHelpId = `launch-lane-check-minimum-help-${id}`,
         pickerId = `launch-lane-choice-${id}`,
-        manageId = `launch-lane-manage-${id}`,
-        addHelpId = `launch-lane-add-help-${id}`;
+        manageId = `launch-lane-manage-${id}`;
     const scopeHelp = scope => `${LANE_CHECK_SCOPES.find(([value]) => value === scope)?.[2] || ''} A pinned commit or range can be set on the check in AI Agents.`;
     const current = () => !abort.signal.aborted && host.isConnected;
     // Every change saves at once, so only a write in flight holds the panel, dialog or page open.
@@ -220,7 +219,7 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
             const detail = item ? `<span class="launch-lane-row-detail">${escapeHtml(laneRowDetail(item))}</span>` : '';
             // VIBE-274: a lane-made Code quality scan sets its minimum passing grade here, in place.
             const grade = laneRowGradeMarkup(item);
-            return `<div class="launch-lane-row" data-lane-index="${index}"><div class="launch-lane-title"><span class="launch-lane-number" aria-hidden="true">${index + 1}</span><span class="launch-lane-row-text"><strong>${name}</strong>${detail}${grade}</span></div>${!item?.canRunAutomatically ? '<p class="text-warning">Unavailable for automatic runs. Remove or replace this selection.</p>' : ''}<div class="launch-run-actions"><button class="btn btn-sm btn-secondary" data-lane-move="-1"${index === 0 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} up"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Up</button><button class="btn btn-sm btn-secondary" data-lane-move="1"${index === selections.length - 1 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} down"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Down</button><button class="btn btn-sm btn-outline-danger" data-lane-remove>Remove</button></div></div>`;
+            return `<div class="launch-lane-row" data-lane-index="${index}"><div class="launch-lane-title"><span class="launch-lane-number" aria-hidden="true">${index + 1}</span><span class="launch-lane-row-text"><strong>${name}</strong>${detail}${grade}</span></div>${!item?.canRunAutomatically ? '<p class="text-warning">Unavailable for automatic runs. Remove or replace this selection.</p>' : ''}<div class="launch-run-actions"><button class="btn btn-sm btn-secondary" data-lane-move="-1"${index === 0 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} up"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Up</button><button class="btn btn-sm btn-secondary" data-lane-move="1"${index === selections.length - 1 ? ' disabled' : ''} aria-label="Move ${escapeHtml(item?.name || 'entry')} down"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Down</button><button class="btn btn-sm btn-outline-danger" data-lane-remove><i class="fa-solid fa-trash" aria-hidden="true"></i> Remove</button></div></div>`;
         })
         .join('') || '<p class="launch-lane-empty">No runs yet. Add an agent, script or check below.</p>';
     const render = () => {
@@ -240,8 +239,8 @@ export function mountLaunchLane(app, host, columnId, onSaved = () => {}) {
         .join('')}</select></label><p class="form-text" id="${scopeHelpId}" data-lane-check-help>${escapeHtml(scopeHelp(DEFAULT_LANE_CHECK_SCOPE))}</p>
                         <div class="launch-lane-check" data-lane-check-minimum-options hidden><label>${CHECK_MINIMUM_LABEL}<select class="form-select" data-lane-check-minimum aria-describedby="${minimumHelpId}">${checkMinimumOptions('')}</select></label><p class="form-text" id="${minimumHelpId}">${escapeHtml(CHECK_MINIMUM_HELP)}</p></div></div>
                 </div>
-                <div class="launch-lane-stage"><button type="button" class="btn btn-secondary" data-lane-add disabled aria-describedby="${addHelpId}">Add to run order</button><p class="form-text" id="${addHelpId}">Adding saves the lane. Nothing runs now: the run order starts when a card enters this lane.</p></div>
-            </div><div><button type="button" class="btn btn-link btn-sm px-0" data-lane-manage-agents>Create an agent in AI Agents</button></div>`;
+                <div class="launch-lane-stage"><button type="button" class="btn btn-secondary" data-lane-add disabled><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save</button></div>
+            </div><div><button type="button" class="btn btn-secondary" data-lane-manage-agents><i class="fa-solid fa-robot" aria-hidden="true"></i> Create Agent</button></div>`;
         renderPicker();
         if (manageOpen) setManage(true, false);
     };

@@ -4986,7 +4986,7 @@ for (const width of [320, 375, 768, 1024]) test(`lane picker explains choices an
     const about = panel.locator('[data-lane-about]');
     await expect(about).toContainText('What this does: Checks the card’s code against this repository’s rules');
     await expect(about.getByRole('combobox', { name: 'Check scope', exact: true })).toBeVisible();
-    await expect(panel.getByRole('button', { name: 'Add to run order', exact: true })).toBeEnabled();
+    await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
     const toggle = panel.getByRole('button', { name: 'Manage list', exact: true });
     await toggle.click();
     const manage = panel.locator('[data-lane-manage-list]');

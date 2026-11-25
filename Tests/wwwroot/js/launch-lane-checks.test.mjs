@@ -230,9 +230,8 @@ test('a saved check the built-in entry reuses is offered once, through that entr
     ]);
 });
 
-test('the run order saves on every change: no Save button, unsaved state or discard prompt', () => {
+test('the run order saves on every change: no separate order save, unsaved state or discard prompt', () => {
     assert.doesNotMatch(source, /Save lane settings|data-lane-save|data-lane-unsaved|Discard lane changes|confirmDialog/);
-    assert.match(source, /Adding saves the lane\. Nothing runs now/);
     // Tom Select opens on focus; reopening the menu after Add read as a prompt to add a second entry.
     assert.match(source, /focusTomSelectClosed\(picker\)/);
 });

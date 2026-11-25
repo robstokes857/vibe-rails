@@ -804,7 +804,7 @@ read as one setting at any dialog width. It is a draft field; **Save lane** (or
 
 Lane Agents and Actions run in the displayed top-to-bottom order. Each waits for
 the previous process to finish, then continues regardless of its result. Show
-numbered rows with Up, Down and Remove controls; do not offer a continuation-result
+numbered rows with Up, Down and Remove controls; Remove has a decorative trash-can icon. Do not offer a continuation-result
 selector. Under each row's name, a 13px muted line gives its kind and what it runs:
 an agent's saved description (else "Starts Codex with its saved prompt"), a script's
 path and interpreter, or a check's scope. Keep process outcomes and review results
@@ -844,16 +844,18 @@ grade, so choosing the built-in entry adds it. A saved check that a built-in ent
 cannot make, such as one pinned to a commit or range, keeps its own entry. After a
 choice, a **What this does** line with the full text appears below the picker; a
 check adds a teal link to the Rules or Quality page, then its **Check scope** field
-and help. **Add to run order** follows, with one help sentence: adding saves the
-lane, and nothing runs until a card enters it.
+and help. A full-width **Save** button follows with a decorative floppy-disk icon and no helper paragraph.
+It saves the selected entry to the lane; nothing runs until a card enters it.
 
-The run order saves on every change: **Add to run order**, **Remove** and the
+The run order saves on every change: **Save**, **Remove** and the
 Up/Down moves each save at once. There is no **Save lane settings** button and no
 unsaved state to discard. A 13px muted status sentence below the run order
 confirms each save; a failed save keeps the last saved order and shows the error
 there with **Reload latest**. After Add, the picker resets and keeps focus with
 its menu closed, so it never looks as if a second entry is being added. The full
 lane dialog's **Save lane** covers only the name, colour and default destination.
+
+Below the picker, **Create Agent** is a bordered secondary button with a decorative robot icon. It opens AI Agents through guarded navigation.
 
 A compact `btn-link` **Manage list** sits on the **Add to this lane** label row. It
 toggles (`aria-expanded`, `aria-controls`) an inline panel inside lane settings,

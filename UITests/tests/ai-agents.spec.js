@@ -1054,7 +1054,7 @@ test('ordered lane selections save on each move, retain compatibility data and l
     });
     await page.evaluate(async()=>{const {mountLaunchLane}=await import('/js/modules/launch-lane-editor.js');const host=document.createElement('div');document.querySelector('#app-content').replaceChildren(host);mountLaunchLane(window.app,host,'lane');});
     await page.getByRole('button',{name:'Move Test up',exact:true}).click();
-    // The move saves at once: no Save button, and the editor stays locked until the write returns.
+    // The move saves at once without a separate order save, and the editor stays locked until the write returns.
     await expect(page.getByRole('button',{name:'Save lane settings',exact:true})).toHaveCount(0);
     await expect(page.locator('[data-lane-gate]')).toHaveCount(0);
     await expect(page.getByRole('button',{name:'Move Review down',exact:true})).toBeDisabled();
@@ -1400,7 +1400,7 @@ async function mountLaneEditor(page) {
 }
 const laneLabels = page => page.locator('.launch-lane-dropdown .option:not([data-value=""]) .launch-lane-choice-label');
 
-test('lane picker says what each choice does, escaped, and Add saves the lane with the menu closed (VIBE-337)', async ({ page }, testInfo) => {
+test('lane picker says what each choice does, escaped, and Save adds to the lane with the menu closed (VIBE-337)', async ({ page }, testInfo) => {
     const state = await setup(page);
     state.presets.push(
         { id: 'p1', name: 'Review', description: '<b>Reviews</b> the diff & reports', cli: 'claude', initialPrompt: 'Review', enabled: true, revision: 1 },
@@ -1432,8 +1432,7 @@ test('lane picker says what each choice does, escaped, and Add saves the lane wi
     await expect(about).toContainText('What this does: <b>Reviews</b> the diff & reports');
     await expect(about.getByRole('button')).toHaveCount(0);
     await expect(page.getByRole('combobox', { name: 'Check scope', exact: true })).toBeHidden();
-    const add = page.getByRole('button', { name: 'Add to run order', exact: true });
-    await expect(add).toHaveAccessibleDescription('Adding saves the lane. Nothing runs now: the run order starts when a card enters this lane.');
+    const add = page.getByRole('button', { name: 'Save', exact: true });
     await expect(page.getByRole('button', { name: 'Save lane settings', exact: true })).toHaveCount(0);
     const status = page.locator('[data-lane-status]');
     await expect(status).toBeHidden();
@@ -1534,7 +1533,7 @@ test('a hidden choice is cleared from the picker, and hiding everything points t
     await expect(page.locator('[data-lane-add-choice]')).toHaveCount(0);
     await expect(page.locator('[data-lane-about]')).toBeHidden();
     await expect(page.getByRole('combobox', { name: 'Check scope', exact: true })).toBeHidden();
-    await expect(page.getByRole('button', { name: 'Add to run order', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
     await manage.getByRole('button', { name: 'Done', exact: true }).click();
     await empty.getByRole('button', { name: 'Show hidden entries', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Manage list', exact: true })).toHaveAttribute('aria-expanded', 'true');
