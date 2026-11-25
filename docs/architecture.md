@@ -237,7 +237,10 @@ It sends the user's captured messages (`IUserInputStore`), not the Send-to trans
 prompts such as the story-tracking nudge never reach the title API. A Board-linked conversation is
 titled too; its primary card's display ID, title and description go first, labeled as background.
 `ConversationTitleClient.ComposeRequest` redacts each part whole, then bounds it. Refreshes keep
-the most recent text within the payload limit and ask for the current topic. The old VIBE-158
+the most recent text within the payload limit and ask for the current topic. Each request also
+sends the work item's session id as `sessionId`. That is the id `TerminalStateService` registers
+with the relay, so viberails.ai /Terminals shows the newest title on that terminal's row
+(VIBE-178). A null id is left out of the body. The old VIBE-158
 excerpt-hash refresh remains retired; `LastExcerptHash` stays unused. Explicit renames stop
 automatic titles; failures preserve the last title and retain the existing retry limits. The sidebar shows a
 generated title ahead of the card label, and the card keeps its own row.

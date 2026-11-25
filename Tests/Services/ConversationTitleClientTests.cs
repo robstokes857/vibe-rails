@@ -69,6 +69,30 @@ public sealed class ConversationTitleClientTests
     }
 
     [Fact]
+    public async Task SendsTheTerminalSessionIdOnlyWhenItHasOne()
+    {
+        // VIBE-178: viberails.ai names the terminal on /Terminals by the title made for its session.
+        var sent = new List<string>();
+        var handler = new Handler(async (request, ct) =>
+        {
+            sent.Add(await request.Content!.ReadAsStringAsync(ct));
+            return Reply("""{"title":"Fix login after refresh"}""");
+        });
+        var client = Create(handler);
+        var sessionId = Guid.NewGuid().ToString();
+
+        Assert.Equal("Fix login after refresh", (await client.GenerateAsync("Fix login", Enabled, Ct, sessionId: sessionId)).Title);
+        Assert.Equal("Fix login after refresh", (await client.GenerateAsync("Fix login", Enabled, Ct)).Title);
+
+        using var withSession = JsonDocument.Parse(sent[0]);
+        Assert.Equal(["text", "sessionId"], withSession.RootElement.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(sessionId, withSession.RootElement.GetProperty("sessionId").GetString());
+        // Without one, the body is what every server already accepted.
+        using var without = JsonDocument.Parse(sent[1]);
+        Assert.Equal(["text"], without.RootElement.EnumerateObject().Select(p => p.Name));
+    }
+
+    [Fact]
     public void StoryIsFramedAsBackgroundRedactedAndBounded()
     {
         var story = new ConversationTitleStory("VIBE-7", new string('t', 300),

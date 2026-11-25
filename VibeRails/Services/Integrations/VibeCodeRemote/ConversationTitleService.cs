@@ -46,7 +46,8 @@ public sealed class ConversationTitleService(IConversationTitleStore store, IUse
             Write(work, "request-started",
                 $"Starting automatic chat-title request to {ConversationTitleClient.Endpoint}; attempt={work.Attempts}; storyContext={story is not null}.", "started");
             var started = Stopwatch.GetTimestamp();
-            var result = await client.GenerateAsync(userText, settings, ct, story, preferRecentText: work.Generation > 0);
+            var result = await client.GenerateAsync(userText, settings, ct, story, preferRecentText: work.Generation > 0,
+                sessionId: work.SessionId);
             var status = result.Title is not null ? "succeeded"
                 : result.Outcome is "no_topic" or "no_user_text" or "settings_changed_or_disabled" ? "skipped" : "failed";
             Write(work, "request-finished",

@@ -117,6 +117,25 @@ public sealed class ConversationTitleServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task EachTitleRequestNamesTheSessionItIsFor()
+    {
+        // VIBE-178: the same id TerminalStateService registers with the relay, so the web can match them.
+        var repository = await Seed();
+        string? sentSessionId = null;
+        var handler = new Handler(async (request, ct) =>
+        {
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            sentSessionId = json.RootElement.GetProperty("sessionId").GetString();
+            return Reply("Fix login after refresh");
+        });
+
+        await Service(repository, EmptyBoard(), handler).ProcessOneAsync(Ct);
+
+        Assert.Equal("session", sentSessionId);
+        Assert.Equal("Fix login after refresh", (await repository.GetSessionDisplayInfoAsync("session")).DisplayName);
+    }
+
+    [Fact]
     public async Task RefreshesFromFourRecentMessagesAndKeepsTitleSeparateFromResumeSummary()
     {
         var repository = await Seed();

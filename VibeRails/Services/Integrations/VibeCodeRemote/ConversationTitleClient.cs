@@ -80,11 +80,12 @@ public sealed class ConversationTitleClient
 
     /// <summary>
     /// Requests the conversation's current title. No remote response/error text, credentials or user
-    /// text are logged.
+    /// text are logged. <paramref name="sessionId"/> is the terminal session the relay knows the
+    /// conversation by, so the web's terminal list can show the same title (VIBE-178).
     /// </summary>
     public async Task<ConversationTitleResult> GenerateAsync(string userText,
         ConversationTitleSettings settings, CancellationToken ct, ConversationTitleStory? story = null,
-        bool preferRecentText = false)
+        bool preferRecentText = false, string? sessionId = null)
     {
         int? statusCode = null;
         ConversationTitleResult Result(ConversationTitleResult result, string outcome) =>
@@ -107,7 +108,7 @@ public sealed class ConversationTitleClient
                 return Result(new(null, TimeSpan.FromMinutes(1)), "settings_changed_or_disabled");
             using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint)
             {
-                Content = JsonContent.Create(new ConversationTitleRequest(text),
+                Content = JsonContent.Create(new ConversationTitleRequest(text, sessionId),
                     ConversationTitleJsonContext.Default.ConversationTitleRequest)
             };
             request.Headers.Add("X-Api-Key", settings.ApiKey);
@@ -257,7 +258,9 @@ public sealed class ConversationTitleClient
     }
 }
 
-internal sealed record ConversationTitleRequest(string Text);
+// Left out when null, so a request without a session is byte for byte what it was before VIBE-178.
+internal sealed record ConversationTitleRequest(string Text,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SessionId = null);
 internal sealed record ConversationTitleResponse(string? Title);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, MaxDepth = 8)]

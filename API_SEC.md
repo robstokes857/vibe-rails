@@ -988,7 +988,10 @@ which are never captured as user input, cannot reach the API. Conversations link
 are titled too: the request adds the primary card's display ID, title (at most 200 characters) and
 description (at most 1,500), labeled as background other conversations may share, so the title
 names the conversation rather than its story. It requires the saved API key and Remote Access;
-hosted Integrations permission failures preserve existing labels.
+hosted Integrations permission failures preserve existing labels. Each request also carries
+`sessionId`, the terminal's session id. That is the same id the relay registration already sends,
+so viberails.ai /Terminals can show the title on that terminal's row (VIBE-178). It identifies
+the terminal to the account that owns it; it is not a credential.
 
 Keys use only `X-Api-Key`. No redirects, cookies, HTTP body/error logging or new listener is added.
 The local `conversation-titles` feature journal records only session/attempt identifiers,
