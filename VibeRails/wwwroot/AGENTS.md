@@ -1252,7 +1252,25 @@ program's screen (Codex, Grok, OpenCode) is kept before each user message, when 
 alternate screen and at the end, as `=== Full-screen view (...) ===` blocks. Do not filter or
 parse the text into turns: imperfect rendering is accepted, a conversation extractor is not wanted.
 A session over 800,000 estimated tokens (four UTF-8 bytes each) is refused before anything is sent.
-The text goes to `POST /api/v1/chatHistory/{id}/handoff`; Regenerate replays again (no cache).
+The text goes to `POST /api/v1/chatHistory/{id}/handoff`. There is no Regenerate (VIBE-370): the
+handoff is edited by hand, and sending again replays again (no cache).
+
+The replay queues each piece from the previous piece's xterm write callback (VIBE-370). Do not go
+back to awaiting each `term.write`: a write into xterm's empty buffer starts a `setTimeout`, clamped
+to 4 ms in a browser and held about a second in an unfocused or covered VS Code webview, which
+reports itself visible throughout. One timer per write made a 9.5 MB recording take 1.3 s in a
+browser and minutes in VS Code; the pump leaves only xterm's own 12 ms time slices, and the
+rendered text is byte-identical. Only one piece is queued at a time, so the scrollback is still
+read after every piece. Progress is reported in whole percents.
+
+`session-handoff-dialog.js` owns the work, keyed by app, not the dialog or the history sidebar
+(which is rebuilt whenever the Terminals view mounts). **Minimize** closes the dialog and keeps
+working; a `#script-run-dock` button shows the phase and reopens it. Escape, navigation and
+another dialog taking the modal container minimize too; only Cancel and the header close button
+discard it. Finished while minimized, the dock button reads Ready and a sticky success toast
+offers **Open** (`showAppToast`'s `action`); a failure is a sticky error toast instead. Edits to
+the handoff survive reopening. Sending the same session to the same target again reopens it;
+anything else asks before discarding, since only one handoff is written at a time.
 
 The dialog displays the response's associated card links and permanent keys separately from the
 editable handoff. `SessionResumeService.AppendBoardContextAsync` re-reads all source-session
@@ -1261,8 +1279,9 @@ guidance after the handoff. Card titles and display labels never enter the remot
 cache; the request names in-project cards by row id and permanent key only. Keep the
 handoff limit (the response's `maxChars`, 20,000) separate from the overall prompt cap; never
 silently drop cards to fit. Opening a card uses the existing local-card editor for cross-project
-history. Closing, replacing or destroying the modal aborts the replay and invalidates late
-responses. No Board grants or attachments are inferred.
+history; the handoff waits in the dock meanwhile. Cancel, the close button, Launch or a replacing
+Send to abort the replay and invalidate late responses, so no summary request follows a cancelled
+replay. No Board grants or attachments are inferred.
 
 `chat-history-sidebar.js` combines provider, selected Board card and current-folder filters.
 Provider selections are OR; the other filters intersect. The **Find a card** dropdown reuses

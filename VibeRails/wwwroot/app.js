@@ -1460,7 +1460,7 @@ export class VibeControlApp {
     }
 
     showToast(title, message, type = 'info', options = {}) {
-        showAppToast(title, message, type, options);
+        return showAppToast(title, message, type, options);
     }
 
     showError(message) {

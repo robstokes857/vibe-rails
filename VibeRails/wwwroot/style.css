@@ -9636,6 +9636,25 @@ input.form-control:disabled {
 
 .notAToasttoast-container .notAToastclsBtn:hover { opacity: 1; }
 
+/* The optional action (showAppToast's `action`), such as Open on a finished Send to handoff.
+   The library styles it inline, hence the !important overrides. */
+.notAToasttoast-container .notAToastactionBtn {
+    flex: 0 0 auto;
+    align-self: center;
+    margin: 0 !important;
+    padding: 3px 10px !important;
+    border: 1px solid var(--control-border) !important;
+    border-radius: var(--radius-control) !important;
+    background: transparent !important;
+    color: var(--color-accent) !important;
+    font-weight: 600;
+    line-height: 18px;
+    white-space: nowrap;
+}
+
+.notAToasttoast-container .notAToastactionBtn:hover { background: var(--color-bg-surface) !important; }
+.notAToasttoast-container .notAToastactionBtn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
 @media (prefers-reduced-motion: reduce) {
     .notAToasttoast-container > div,
     .notAToasttoast-container .notAToasticon {
@@ -18434,6 +18453,10 @@ body.vb-terminal-focus-active .app-subnav .nav-exit-btn-sm {
     box-shadow: 0 3px 12px #0005; font: 12px Consolas, monospace; }
 .vb-run-dock-button::before { content: '›_'; color: #89d185; margin-right: 8px; }
 .vb-run-dock-button:hover { background: #363636; }
+/* A minimized Send to handoff (session-handoff-dialog.js) is not a script: no prompt glyph. */
+.vb-handoff-dock-button::before { content: "\f1d8"; font: var(--fa-font-solid, normal 900 1em/1 "Font Awesome 6 Free");
+    color: var(--color-accent, #14b8a6); }
+.vb-handoff-dock-button[data-tone="success"]::before { color: #89d185; }
 @media (max-width: 540px) {
     .vb-run-window { right: 8px; bottom: 8px; width: calc(100vw - 16px); height: min(400px, calc(100dvh - 80px)); }
     .vb-run-runtime { display: none; }

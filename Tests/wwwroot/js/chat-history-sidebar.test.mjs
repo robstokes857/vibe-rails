@@ -77,9 +77,10 @@ test('ChatHistorySidebar only emits allowlisted inline logo filters', () => {
 });
 
 test('Resume modal passes its title to the shared modal escaper exactly once', () => {
-    const source = readFileSync(modulePath, 'utf8');
-    assert.match(source, /showModal\(`Sending to \$\{llmDisplayLabel\}`/);
-    assert.doesNotMatch(source, /showModal\(`Sending to \$\{escapeHtml\(llmDisplayLabel\)\}`/);
+    // VIBE-370: the Send to dialog lives in session-handoff-dialog.js so it can outlive the sidebar.
+    const source = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/session-handoff-dialog.js'), 'utf8');
+    assert.match(source, /showModal\(`Sending to \$\{this\.llmLabel\}`/);
+    assert.doesNotMatch(source, /showModal\(`Sending to \$\{escapeHtml\(this\.llmLabel\)\}`/);
 });
 
 function historySidebar(apiCall = async () => ({ items: [] })) {

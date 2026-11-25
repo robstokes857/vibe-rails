@@ -270,8 +270,10 @@ at the recorded window sizes (`session-handoff-text.js`) and posts the rendered 
 (`gpt-6.1-terra`, high reasoning) with the session id, its cards on this project's Board (row ids
 and keys) and the repository folder and computer names that Board publication sends
 (`RemoteSourceNames`). Up to about 800,000 tokens are sent; a longer session is refused with its
-size, never cut. It reads and writes no transcript or summary cache, so a running session and
-Regenerate both get current output. The response carries the card labels for linked-card
+size, never cut. It reads and writes no transcript or summary cache, so sending a running session
+again gets current output (there is no Regenerate; the handoff is edited by hand). The dialog
+(`session-handoff-dialog.js`) can be minimized while it works and alerts when the handoff is ready
+(VIBE-370). The response carries the card labels for linked-card
 navigation and the handoff limit, 20,000 characters (`SessionResumeService.MaxResumeSummaryChars`):
 the handoff rides on the launch command line, in a 30,000-character prompt it shares with card
 references and up to 8,000 characters of App and Project context, under Windows' 32,000-character

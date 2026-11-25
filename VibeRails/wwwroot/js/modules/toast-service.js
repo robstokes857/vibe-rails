@@ -61,7 +61,8 @@ export function showAppToast(title, message, type = 'info', options = {}) {
         entryAnimation,
         exitAnimation,
         position,
-        compact = false
+        compact = false,
+        action = null
     } = options;
 
     const toastType = normalizeToastType(type);
@@ -89,8 +90,50 @@ export function showAppToast(title, message, type = 'info', options = {}) {
         closeButtonColor: 'var(--vr-toast-muted)',
         iconBackground: iconBackground ?? 'transparent',
         iconColor: iconColor ?? accent,
-        ...(icon != null ? { icon, showIcon: true } : {})
+        ...(icon != null ? { icon, showIcon: true } : {}),
+        // `action: { label, onClick }` adds one button that closes the toast and runs onClick.
+        ...(action?.label && typeof action.onClick === 'function' ? {
+            showActionButton: true,
+            actionButtonLabel: action.label,
+            actionButtonMargin: '0 0 0 0.8rem',
+            onAction: handle => {
+                dismissAppToast(handle);
+                action.onClick();
+            }
+        } : {})
     };
 
-    return toast(toastOptions);
+    const handle = toast(toastOptions);
+    if (toastOptions.showActionButton) makeActionKeyboardButton(handle);
+    return handle;
+}
+
+function toastElement(handle) {
+    if (!handle || typeof document === 'undefined') return null;
+    return Array.from(document.querySelectorAll('.notAToasttoast-container > div'))
+        .find(candidate => candidate._controller === handle) ?? null;
+}
+
+// The library draws the action as a clickable div; give it a button's role and keys.
+function makeActionKeyboardButton(handle) {
+    const action = toastElement(handle)?.querySelector('.notAToastactionBtn');
+    if (!action) return;
+    action.setAttribute('role', 'button');
+    action.tabIndex = 0;
+    action.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        action.click();
+    });
+}
+
+/**
+ * Closes a toast returned by showAppToast. not-a-toast's own close() does nothing for a toast
+ * that waits to be dismissed, so this presses the toast's close button, as the user would.
+ */
+export function dismissAppToast(handle) {
+    if (!handle) return;
+    const close = toastElement(handle)?.querySelector('.notAToastclsBtn');
+    if (close) close.click();
+    else handle.close?.();
 }

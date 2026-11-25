@@ -12,7 +12,8 @@ async function prepareResume(page) {
             app.closeModal();
             const modal = document.createElement('div');
             modal.id = 'resume-fixture';
-            modal.style.cssText = 'position:fixed;inset:10px;background:white;color:black;padding:20px;z-index:9999;overflow:auto;';
+            // Bootstrap's modal layer, so a confirmation opens above it as it does in the app.
+            modal.style.cssText = 'position:fixed;inset:10px;background:white;color:black;padding:20px;z-index:1055;overflow:auto;';
             modal.innerHTML = body;
             document.body.append(modal);
             app.modalCleanup = onClose;
@@ -40,16 +41,23 @@ async function prepareResume(page) {
             const replay = replayFixture(url);
             if (replay) return replay;
             resumePosts.push({ url, method, text: data?.text });
-            return { summary: resumePosts.length > 1 ? 'regenerated handoff' : 'first handoff', maxChars: 20000, boardCards: [
+            return { summary: resumePosts.length > 1 ? 'second handoff' : 'first handoff', maxChars: 20000, boardCards: [
                 { id: 'card-a', key: 'VB-ABCDE-1', displayId: 'VIBE-67', title: 'First <img src=x onerror=alert(1)>' },
                 { id: 'card-b', key: 'VB-FGHIJ-2', title: 'Second' }
             ] };
+        };
+        // VIBE-370: alerts are recorded so a test can press their action.
+        window.resumeToasts = [];
+        app.showToast = (title, message, type, options = {}) => {
+            resumeToasts.push({ title, message, type, action: options.action?.label ?? null, requireDismiss: options.requireDismiss === true });
+            window.resumeToastAction = options.action?.onClick ?? null;
+            return { id: resumeToasts.length };
         };
         historySidebar.activeItem = { id: 'source', cli: 'codex', workingDirectory: 'C:/source' };
     });
 }
 
-test('Send To shows all current cards separately, regenerates and launches the edited recap', async ({ page }) => {
+test('Send To shows all current cards separately and launches the edited recap', async ({ page }) => {
     await prepareResume(page);
     await page.evaluate(() => historySidebar._showResumeModal({ cli: 'codex' }, 'Codex'));
     await expect(page.locator('[data-resume-card]')).toHaveCount(2);
@@ -58,6 +66,8 @@ test('Send To shows all current cards separately, regenerates and launches the e
     await expect(page.locator('#ch-resume-body img')).toHaveCount(0);
     await expect(page.locator('#ch-resume-summary')).toHaveValue('first handoff');
     await expect(page.locator('#ch-resume-char-count')).toHaveText('13 / 20,000');
+    // VIBE-370: no Regenerate; an unwanted handoff is edited by hand.
+    await expect(page.getByRole('button', { name: 'Regenerate' })).toHaveCount(0);
     const posted = await page.evaluate(() => resumePosts[0]);
     expect(posted).toMatchObject({ url: '/api/v1/chatHistory/source/handoff', method: 'POST' });
     // The rendered terminal text, including the full-screen program's screen, not a parsed transcript.
@@ -66,33 +76,135 @@ test('Send To shows all current cards separately, regenerates and launches the e
         '/api/v1/session-replay/sessions/source',
         '/api/v1/session-replay/sessions/source/frames?after=0&max=1&source=raw'
     ]);
-    await page.getByRole('button', { name: 'Regenerate' }).click();
-    await expect(page.locator('#ch-resume-summary')).toHaveValue('regenerated handoff');
-    // Regenerate replays the recording again rather than reusing anything cached.
-    expect(await page.evaluate(() => resumeCalls.filter(url => url.endsWith('/session-replay/sessions/source')).length)).toBe(2);
-    await expect(page.locator('[data-resume-card]')).toHaveCount(2);
     await page.locator('#ch-resume-summary').fill('edited recap');
     await page.getByRole('button', { name: 'Launch Terminal' }).click();
     expect(await page.evaluate(() => resumeLaunch)).toMatchObject({ cli: 'codex', resumeSummary: 'edited recap', resumeSessionId: 'source', workingDirectory: 'C:/source' });
+    await expect(page.locator('#resume-fixture')).toHaveCount(0);
+    await expect(page.locator('.vb-handoff-dock-button')).toHaveCount(0);
+
+    // Sending again replays the recording again rather than reusing anything cached.
     await page.evaluate(() => historySidebar._showResumeModal({ cli: 'claude' }, 'Claude'));
+    await expect(page.locator('#ch-resume-summary')).toHaveValue('second handoff');
+    expect(await page.evaluate(() => resumeCalls.filter(url => url.endsWith('/session-replay/sessions/source')).length)).toBe(2);
+    await page.locator('#ch-resume-summary').fill('kept while reading the card');
+    // Opening a card closes the dialog; the finished handoff, with its edits, waits in the dock.
     await page.locator('[data-resume-card="card-b"]').click();
     expect(await page.evaluate(() => resumeNavigation)).toEqual({ view: 'board', data: { openCardId: 'card-b' } });
+    await expect(page.locator('.vb-handoff-dock-button')).toHaveText('Send to Claude · Ready');
+    await page.locator('.vb-handoff-dock-button').click();
+    await expect(page.locator('#ch-resume-summary')).toHaveValue('kept while reading the card');
+    await expect(page.locator('.vb-handoff-dock-button')).toHaveCount(0);
+    expect(await page.evaluate(() => resumePosts.length)).toBe(2);
 });
 
-test('Send To ignores a late summary from a replaced modal and handles sessions without cards', async ({ page }) => {
+test('Send To keeps working when minimized and its alert reopens the finished handoff', async ({ page }, testInfo) => {
     await prepareResume(page);
-    await page.evaluate(async () => {
-        let finishOld;
-        historySidebar.app.apiCall = () => new Promise(resolve => { finishOld = resolve; });
-        const old = historySidebar._showResumeModal({ cli: 'codex' }, 'Codex');
-        historySidebar.app.apiCall = async (url, method, data) => replayFixture(url)
+    await page.evaluate(() => {
+        const replay = historySidebar.app.apiCall;
+        historySidebar.app.apiCall = (url, method, data, options) => method === 'POST'
+            ? new Promise(resolve => {
+                window.finishHandoff = resolve;
+                window.handoffSignal = options?.signal;
+            })
+            : replay(url, method, data, options);
+        window.handoffDone = historySidebar._showResumeModal({ cli: 'codex' }, 'Codex');
+    });
+    await expect(page.locator('#ch-resume-status')).toHaveText('Writing the handoff…');
+    await page.getByRole('button', { name: 'Minimize' }).click();
+    await expect(page.locator('#resume-fixture')).toHaveCount(0);
+    const dock = page.locator('.vb-handoff-dock-button');
+    await expect(dock).toHaveText('Send to Codex · Writing');
+    await page.screenshot({ path: testInfo.outputPath('send-to-minimized.png') });
+
+    // The dock reopens the dialog while it works; any close but Cancel (Escape, navigation) minimizes.
+    await dock.click();
+    await expect(page.locator('#ch-resume-status')).toHaveText('Writing the handoff…');
+    await expect(dock).toHaveCount(0);
+    await page.evaluate(() => historySidebar.app.closeModal());
+    await expect(dock).toHaveText('Send to Codex · Writing');
+    // Leaving the Terminals view destroys the sidebar; the handoff carries on.
+    await page.evaluate(() => historySidebar.destroy());
+    expect(await page.evaluate(() => handoffSignal.aborted)).toBe(false);
+
+    // Asking again for the same session and target reopens it instead of starting another.
+    await page.evaluate(() => {
+        historySidebar.activeItem = { id: 'source', cli: 'codex', workingDirectory: 'C:/source' };
+        historySidebar._showResumeModal({ cli: 'codex' }, 'Codex');
+    });
+    await expect(page.locator('#ch-resume-status')).toHaveText('Writing the handoff…');
+    await page.getByRole('button', { name: 'Minimize' }).click();
+
+    await page.evaluate(() => finishHandoff({ summary: 'finished while minimized', maxChars: 20000, boardCards: [] }));
+    await expect(dock).toHaveText('Send to Codex · Ready');
+    expect(await page.evaluate(() => resumeToasts)).toEqual([{ title: 'Handoff ready', type: 'success', action: 'Open',
+        requireDismiss: true, message: 'The handoff from “source” for Codex is ready to review.' }]);
+    await page.evaluate(() => resumeToastAction());
+    await expect(page.locator('#ch-resume-summary')).toHaveValue('finished while minimized');
+    await expect(dock).toHaveCount(0);
+    await page.getByRole('button', { name: 'Launch Terminal' }).click();
+    expect(await page.evaluate(() => resumeLaunch)).toMatchObject({ cli: 'codex', resumeSummary: 'finished while minimized' });
+    await page.evaluate(() => handoffDone);
+});
+
+test('Send To Cancel stops a minimized handoff before any summary request, and a failure is an alert', async ({ page }) => {
+    await prepareResume(page);
+    await page.evaluate(() => {
+        const replay = historySidebar.app.apiCall;
+        historySidebar.app.apiCall = (url, method, data, options) => {
+            if (!url.includes('/frames?')) return replay(url, method, data, options);
+            resumeCalls.push(url);
+            return new Promise(resolve => { window.finishFrames = () => resolve(replayFixture(url)); });
+        };
+        window.handoffDone = historySidebar._showResumeModal({ cli: 'codex' }, 'Codex');
+    });
+    await expect(page.locator('#ch-resume-status')).toHaveText('Replaying the session…');
+    await page.getByRole('button', { name: 'Minimize' }).click();
+    await expect(page.locator('.vb-handoff-dock-button')).toHaveText('Send to Codex · Replaying');
+    await page.locator('.vb-handoff-dock-button').click();
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator('#resume-fixture')).toHaveCount(0);
+    await expect(page.locator('.vb-handoff-dock-button')).toHaveCount(0);
+    // The recording arrives after Cancel: nothing is replayed into a summary request.
+    await page.evaluate(async () => { finishFrames(); await handoffDone; });
+    expect(await page.evaluate(() => resumePosts)).toEqual([]);
+    expect(await page.evaluate(() => resumeToasts)).toEqual([]);
+
+    await page.evaluate(() => {
+        historySidebar.app.apiCall = async url => replayFixture(url) ?? Promise.reject(new Error('viberails.ai is unavailable.'));
+        window.handoffDone = historySidebar._showResumeModal({ cli: 'codex' }, 'Codex');
+        // Another dialog takes the shared container while the handoff works: it minimizes.
+        historySidebar.app.showModal('Another dialog', '<p>Something else</p>');
+    });
+    await page.evaluate(() => handoffDone);
+    expect(await page.evaluate(() => resumeToasts)).toEqual([{ title: 'Handoff failed', type: 'error', action: null, requireDismiss: true,
+        message: 'Could not write the handoff from “source”: viberails.ai is unavailable.' }]);
+    await expect(page.locator('.vb-handoff-dock-button')).toHaveCount(0);
+    await expect(page.locator('#resume-fixture')).toContainText('Something else');
+});
+
+test('Send To ignores a late summary from a replaced handoff and handles sessions without cards', async ({ page }) => {
+    await prepareResume(page);
+    await page.evaluate(() => {
+        historySidebar.app.apiCall = (url, method, data, options) => new Promise(resolve => {
+            window.finishOld = resolve;
+            window.oldSignal = options?.signal;
+        });
+        window.oldHandoff = historySidebar._showResumeModal({ cli: 'codex' }, 'Codex');
+        historySidebar.app.apiCall = async (url, method) => replayFixture(url)
             ?? (method === 'POST' ? { summary: 'new session recap', maxChars: 20000, boardCards: [] } : null);
         historySidebar.activeItem = { id: 'new-source', cli: 'claude' };
-        await historySidebar._showResumeModal({ cli: 'claude' }, 'Claude');
-        // The replaced modal's recording arrives late; it is aborted and never shows anything.
-        finishOld(replayFixture('/api/v1/session-replay/sessions/source'));
-        await old;
+        window.newHandoff = historySidebar._showResumeModal({ cli: 'claude' }, 'Claude');
     });
+    // Only one handoff is written at a time; starting another asks first.
+    await expect(page.getByRole('alertdialog')).toContainText('Send to is still writing a handoff from “source”.');
+    await page.getByRole('button', { name: 'Stop and start' }).click();
+    await page.evaluate(async () => {
+        await newHandoff;
+        // The replaced handoff's recording arrives late; it is aborted and never shows anything.
+        finishOld(replayFixture('/api/v1/session-replay/sessions/source'));
+        await oldHandoff;
+    });
+    expect(await page.evaluate(() => oldSignal.aborted)).toBe(true);
     await expect(page.locator('#ch-resume-summary')).toHaveValue('new session recap');
     await expect(page.locator('[data-resume-card]')).toHaveCount(0);
     await page.locator('#ch-resume-summary').fill('x'.repeat(20001));
@@ -101,7 +213,7 @@ test('Send To ignores a late summary from a replaced modal and handles sessions 
     await expect(page.getByRole('button', { name: 'Launch Terminal' })).toBeEnabled();
 });
 
-test('Send To reports a session over the token allowance and a failed handoff, then retries', async ({ page }) => {
+test('Send To reports a session over the token allowance in the dialog, and a new Send to retries', async ({ page }) => {
     await prepareResume(page);
     await page.evaluate(() => {
         let attempt = 0;
@@ -115,8 +227,11 @@ test('Send To reports a session over the token allowance and a failed handoff, t
         historySidebar._showResumeModal({ cli: 'codex' }, 'Codex');
     });
     await expect(page.locator('#ch-resume-body')).toContainText('Could not write the handoff: This session is about 912,345 tokens');
-    await expect(page.getByRole('button', { name: 'Launch Terminal' })).toBeDisabled();
-    await page.getByRole('button', { name: 'Regenerate' }).click();
+    await expect(page.getByRole('button', { name: 'Launch Terminal' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Regenerate' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Close' }).click();
+    await expect(page.locator('.vb-handoff-dock-button')).toHaveCount(0);
+    await page.evaluate(() => historySidebar._showResumeModal({ cli: 'codex' }, 'Codex'));
     await expect(page.locator('#ch-resume-summary')).toHaveValue('retried handoff');
 });
 

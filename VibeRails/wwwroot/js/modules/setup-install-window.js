@@ -63,7 +63,7 @@ export class SetupInstallWindow {
         if (!dock) {
             dock = document.createElement('div');
             dock.id = 'script-run-dock';
-            dock.setAttribute('aria-label', 'Running scripts');
+            dock.setAttribute('aria-label', 'Minimized windows');
             document.body.appendChild(dock);
         }
         if (!this._dockButton) {

@@ -10,11 +10,7 @@ import { showSessionShareModal } from './terminal-session-share.js';
 import { cardDisplayId, cardLabel, cardSearchText } from './board-card-label.js';
 import { BoardApi } from './board-api.js';
 import { CardSearchPicker } from './board-card-search-picker.js';
-import { renderSessionHandoffText } from './session-handoff-text.js';
-
-// The longest handoff a launch accepts; the handoff route returns the current value as maxChars.
-const DEFAULT_HANDOFF_CHAR_LIMIT = 20000;
-const formatCount = value => value.toLocaleString('en-US');
+import { openSessionHandoff } from './session-handoff-dialog.js';
 
 const DEFAULT_PAGE_SIZE = 20;
 const SCROLL_LOAD_THRESHOLD_PX = 48;
@@ -405,7 +401,6 @@ export class ChatHistorySidebar {
         this._cardSearch = null;
         this._cardPickerLifetime?.abort();
         this.cardPickerHost = null;
-        this._resumeAbort?.abort();
         this._invalidateRequests();
         if (this._documentClickHandler) {
             document.removeEventListener('click', this._documentClickHandler);
@@ -1261,174 +1256,24 @@ export class ChatHistorySidebar {
         });
     }
 
-    async _showResumeModal(parsedLlm, llmDisplayLabel) {
-        if (!this.activeItem) return;
-
-        let charLimit = DEFAULT_HANDOFF_CHAR_LIMIT;
-        const sessionId = this.activeItem.id;
-        const activeItemSnapshot = this.activeItem;
+    // Send to (VIBE-363, VIBE-370): the handoff outlives this sidebar, which is rebuilt whenever the
+    // Terminals view mounts, so it can be minimized and the view left while it is written.
+    _showResumeModal(parsedLlm, llmDisplayLabel) {
+        const item = this.activeItem;
+        if (!item) return Promise.resolve();
         this._closeContextMenu();
-        this._resumeAbort?.abort();
-        const abort = this._resumeAbort = new AbortController();
-
-        this.app.showModal(`Sending to ${llmDisplayLabel}`, `
-            <div class="text-muted small mb-3">${escapeHtml(sessionId)}</div>
-            <div id="ch-resume-body"></div>
-            <div class="d-flex justify-content-between align-items-center mt-3" id="ch-resume-actions" style="display:none !important;">
-                <button type="button" class="btn btn-outline-secondary btn-sm" id="ch-resume-regenerate-btn" disabled>
-                    <i class="fa-solid fa-rotate-right me-1"></i>Regenerate
-                </button>
-                <div class="d-flex gap-2">
-                    <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" id="ch-resume-launch-btn" disabled>
-                        <i class="fa-solid fa-terminal me-1"></i>Launch Terminal
-                    </button>
-                </div>
-            </div>
-        `, { onClose: () => abort.abort() });
-
-        const resumeBody = document.getElementById('ch-resume-body');
-        const actionsBar = document.getElementById('ch-resume-actions');
-        const regenerateBtn = document.getElementById('ch-resume-regenerate-btn');
-        const launchBtn = document.getElementById('ch-resume-launch-btn');
-        const isCurrent = () => !abort.signal.aborted && resumeBody?.isConnected
-            && document.getElementById('ch-resume-body') === resumeBody;
-        let loadGeneration = 0;
-
-        const showSpinner = (container, label, detail) => {
-            container.innerHTML = `
-                <div class="d-flex flex-column gap-2 py-2 text-muted">
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="vb-spinner vb-spinner-sm flex-shrink-0" role="status" aria-label="${escapeHtml(label)}"></span>
-                        <span id="ch-resume-status">${escapeHtml(label)}&hellip;</span>
-                    </div>
-                    <div class="small" id="ch-resume-status-detail" style="padding-left:1.75rem;">${escapeHtml(detail)}</div>
-                </div>`;
-        };
-
-        // VIBE-363: play the whole recording through an off-screen xterm.js, then send the text it
-        // rendered for the handoff. Nothing is cached, so Regenerate also picks up newer output.
-        const loadSummary = async () => {
-            if (!isCurrent()) return;
-            const generation = ++loadGeneration;
-            const stillLoading = () => isCurrent() && generation === loadGeneration;
-
-            showSpinner(resumeBody, 'Replaying the session', 'Reading everything this session has recorded so far.');
-            if (actionsBar) actionsBar.style.cssText = 'display:none !important;';
-            if (regenerateBtn) regenerateBtn.disabled = true;
-            if (launchBtn) launchBtn.disabled = true;
-
-            try {
-                const text = await renderSessionHandoffText(sessionId, {
-                    request: (path, signal) => this.app.apiCall(path, 'GET', null, { showLoading: false, signal }),
-                    createTerminal: options => this._createHandoffTerminal(options),
-                    signal: abort.signal,
-                    onProgress: ({ phase, done, total }) => {
-                        if (!stillLoading() || !total) return;
-                        const detail = document.getElementById('ch-resume-status-detail');
-                        const percent = Math.min(100, Math.floor(done / total * 100));
-                        if (detail) detail.textContent = phase === 'loading'
-                            ? `Reading the recording (${percent}%).`
-                            : `Rendering the terminal output (${percent}%).`;
-                    }
-                });
-                if (!stillLoading()) return;
-                if (!text.trim()) throw new Error('This session has no terminal output to send.');
-
-                showSpinner(resumeBody, 'Writing the handoff',
-                    'GPT-6.1 Terra is reading the whole session. A long session can take several minutes.');
-                // The backend answers a viberails.ai failure with JSON naming what went wrong; show it.
-                const result = await this.app.apiCall(`/api/v1/chatHistory/${encodeURIComponent(sessionId)}/handoff`, 'POST',
-                    { text }, { showLoading: false, signal: abort.signal, preferErrorResponseMessage: true });
-                if (!stillLoading()) return;
-
-                const summary = result?.summary ?? '';
-                charLimit = Number.isInteger(result?.maxChars) && result.maxChars > 0 ? result.maxChars : DEFAULT_HANDOFF_CHAR_LIMIT;
-
-                resumeBody.innerHTML = `
-                    <div class="mb-2">
-                        <label class="form-label fw-semibold small text-muted text-uppercase mb-1" style="letter-spacing:.05em;" for="ch-resume-summary">Handoff</label>
-                        <textarea class="form-control" id="ch-resume-summary" rows="14"
-                            style="font-size:0.85rem;resize:vertical;">${escapeHtml(summary)}</textarea>
-                        <div class="d-flex justify-content-end mt-1">
-                            <small id="ch-resume-char-count" class="${summary.length > charLimit ? 'text-danger' : 'text-muted'}">${formatCount(summary.length)} / ${formatCount(charLimit)}</small>
-                        </div>
-                    </div>
-                    ${this._renderResumeCards(result?.boardCards || [])}`;
-
-                resumeBody.querySelectorAll('[data-resume-card]').forEach(link => {
-                    link.addEventListener('click', () => {
-                        if (!isCurrent()) return;
-                        this.app.navigate('board', { openCardId: link.dataset.resumeCard });
-                    });
-                });
-
-                // Wire character counter + validation
-                const summaryTextarea = document.getElementById('ch-resume-summary');
-                const charCount = document.getElementById('ch-resume-char-count');
-                const updateCharCount = () => {
-                    const len = summaryTextarea.value.length;
-                    charCount.textContent = `${formatCount(len)} / ${formatCount(charLimit)}`;
-                    const overLimit = len > charLimit;
-                    charCount.classList.toggle('text-danger', overLimit);
-                    charCount.classList.toggle('text-muted', !overLimit);
-                    if (launchBtn) launchBtn.disabled = len === 0 || overLimit;
-                };
-                summaryTextarea?.addEventListener('input', updateCharCount);
-
-                if (actionsBar) actionsBar.style.cssText = '';
-                if (regenerateBtn) regenerateBtn.disabled = false;
-                if (launchBtn) launchBtn.disabled = summary.length === 0 || summary.length > charLimit;
-            } catch (error) {
-                if (!stillLoading() || error?.name === 'AbortError') return;
-                resumeBody.innerHTML = `<div class="text-danger small">Could not write the handoff: ${escapeHtml(error.message)}</div>`;
-                if (actionsBar) actionsBar.style.cssText = '';
-                if (regenerateBtn) regenerateBtn.disabled = false;
-            }
-        };
-
-        // Wire buttons
-        document.getElementById('ch-resume-regenerate-btn')?.addEventListener('click', () => loadSummary());
-        document.getElementById('ch-resume-launch-btn')?.addEventListener('click', () => {
-            if (!isCurrent() || launchBtn.disabled) return;
-            const summaryText = document.getElementById('ch-resume-summary')?.value?.trim() || '';
-            if (!summaryText || summaryText.length > charLimit) return;
-
-            this.app.closeModal();
-
-            const manager = this.app.terminalController.manager;
-            if (!manager || manager.isDestroyed()) return;
-
-            manager.startWithOptions({
-                cli: parsedLlm.cli,
-                environmentName: parsedLlm.environmentName || null,
-                workingDirectory: activeItemSnapshot.workingDirectory || null,
-                resumeSummary: summaryText,
-                resumeSessionId: sessionId,
-                title: this._getDisplayName(activeItemSnapshot),
-                forceNewTab: true
-            });
+        return openSessionHandoff(this.app, {
+            session: { id: item.id, title: this._getDisplayName(item), workingDirectory: item.workingDirectory || null },
+            llm: parsedLlm,
+            llmLabel: llmDisplayLabel,
+            createTerminal: options => this._createHandoffTerminal(options)
         });
-
-        await loadSummary();
     }
 
     // The replay terminal is never opened, so nothing is drawn. Tests replace this.
     _createHandoffTerminal(options) {
         if (typeof window.Terminal !== 'function') throw new Error('The terminal emulator did not load. Reload VibeRails and try again.');
         return new window.Terminal(options);
-    }
-
-    _renderResumeCards(cards) {
-        if (!cards.length) return '';
-        return `<div class="mt-3">
-            <div class="form-label fw-semibold small text-muted text-uppercase">Associated Board cards</div>
-            <ul class="list-unstyled mb-2">${cards.map(card => `<li class="mb-1">
-                <button type="button" class="btn btn-link p-0 text-start" data-resume-card="${escapeHtml(card.id)}">${escapeHtml(cardLabel(card))}</button>
-                <div class="small text-muted">${escapeHtml(card.key)}</div>
-            </li>`).join('')}</ul>
-            <p class="small text-muted mb-0">These card references and guidance for reviewing them through VibeRails MCP will be added after the summary when the terminal launches.</p>
-        </div>`;
     }
 
     _populateLlmSubmenu(submenu) {
