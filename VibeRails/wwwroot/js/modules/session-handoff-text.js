@@ -234,11 +234,23 @@ export async function renderRecordingText({ frames, prompts = [] }, { createTerm
     try {
         const totalBytes = frames.reduce((sum, frame) => sum + frame.data.length, 0);
         let writtenBytes = 0;
-        let reportedBytes = 0;
+        let reportedPercent = -1;
         let promptIndex = 0;
         let index = 0;
-        while (index < frames.length) {
-            throwIfAborted(signal);
+        let pieces = null;
+        let batchBytes = 0;
+
+        // Progress in whole percent, so the status moves steadily without a timer.
+        const reportProgress = () => {
+            const percent = totalBytes ? Math.floor(writtenBytes / totalBytes * 100) : 100;
+            if (percent <= reportedPercent) return;
+            reportedPercent = percent;
+            onProgress?.({ phase: 'replaying', done: writtenBytes, total: totalBytes });
+        };
+
+        // The next run of frames that share one window size and do not cross a user message,
+        // after keeping the full screen from before that message and applying the size.
+        const startBatch = () => {
             const frame = frames[index];
             // A user message was sent before this output: keep the full screen the user was looking at.
             if (promptIndex < prompts.length && prompts[promptIndex] < frame.at) {
@@ -263,16 +275,54 @@ export async function renderRecordingText({ frames, prompts = [] }, { createTerm
                 lineFeeds += feeds;
                 index++;
             }
-            for (const piece of splitBatch(batch, bytes)) {
-                await new Promise(resolve => term.write(piece, resolve));
-                collectScrollback();
+            pieces = splitBatch(batch, bytes);
+            batchBytes = bytes;
+        };
+
+        // The next piece to write, or null at the end of the recording.
+        const nextPiece = () => {
+            for (;;) {
+                if (pieces) {
+                    const step = pieces.next();
+                    if (!step.done) return step.value;
+                    pieces = null;
+                    writtenBytes += batchBytes;
+                    reportProgress();
+                }
+                if (index >= frames.length) return null;
+                throwIfAborted(signal);
+                startBatch();
             }
-            writtenBytes += bytes;
-            if (writtenBytes - reportedBytes >= 1024 * 1024 || index >= frames.length) {
-                reportedBytes = writtenBytes;
-                onProgress?.({ phase: 'replaying', done: writtenBytes, total: totalBytes });
-            }
-        }
+        };
+
+        // Each piece is queued from the previous piece's write callback, which xterm calls as soon
+        // as it has parsed that piece and before it moves on. Its write buffer never runs dry, so it
+        // goes on to the next piece at once instead of starting a setTimeout for every write. Those
+        // timers are clamped to 4 ms in a browser, and a VS Code webview whose window is unfocused,
+        // covered or minimized holds each one a second or more while still reporting itself visible.
+        // xterm still yields to the page after 12 ms of parsing. Only one piece is ever queued, so
+        // the scrollback is read after every piece, as when each write was awaited.
+        await new Promise((resolve, reject) => {
+            const pump = () => {
+                try {
+                    const piece = nextPiece();
+                    if (piece === null) resolve();
+                    else term.write(piece, parsed);
+                } catch (error) {
+                    reject(error);
+                }
+            };
+            const parsed = () => {
+                try {
+                    collectScrollback();
+                } catch (error) {
+                    reject(error);
+                    return;
+                }
+                pump();
+            };
+            pump();
+        });
 
         // Whatever is left on the normal screen, then the full screen if a program is still open.
         collect(term.buffer.normal.length, { mark: false });

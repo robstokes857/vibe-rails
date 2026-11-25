@@ -35,6 +35,35 @@ test('normal-buffer output beyond the scrollback is all kept, in order, once', {
     assert.doesNotMatch(text, /scrolled away/);
 });
 
+test('each write is queued from the last one\'s callback, not behind a timer of its own', { skip }, async t => {
+    // VIBE-370: a prompt between every frame makes 300 separate writes. Awaiting each write left
+    // xterm's buffer empty, and xterm starts every write into an empty buffer with a setTimeout:
+    // 4 ms each in a browser, about a second each in a throttled VS Code webview.
+    const frames = [];
+    const prompts = [];
+    for (let i = 0; i < 300; i++) {
+        frames.push(frame(`line ${i}\r\n`, 1000 + i * 10));
+        prompts.push(1005 + i * 10);
+    }
+    const original = globalThis.setTimeout;
+    let timers = 0;
+    globalThis.setTimeout = (...args) => { timers++; return original(...args); };
+    t.after(() => { globalThis.setTimeout = original; });
+    const progress = [];
+    const text = await renderRecordingText({ frames, prompts }, {
+        createTerminal, onProgress: ({ phase, done, total }) => progress.push({ phase, percent: Math.floor(done / total * 100) })
+    });
+    globalThis.setTimeout = original;
+    assert.deepEqual(text.split('\n'), frames.map((_, i) => `line ${i}`));
+    // xterm still yields every 12 ms of parsing; this recording takes a few slices at most.
+    assert.ok(timers < 30, `${timers} timers for 300 writes`);
+    // Progress moves in whole percents and ends at 100.
+    assert.ok(progress.every(entry => entry.phase === 'replaying'));
+    assert.ok(progress.length > 50 && progress.length <= 101, `${progress.length} progress updates`);
+    assert.ok(progress.every((entry, i) => i === 0 || entry.percent > progress[i - 1].percent));
+    assert.equal(progress.at(-1).percent, 100);
+});
+
 test('a line that wraps keeps the space at the wrap point and reads as one line', { skip }, async () => {
     const long = 'abcdefghij '.repeat(20).trim(); // 219 characters at 20 columns.
     const text = await render([frame(`${long}\r\nnext\r\n`, 1000, 20, 5)]);
