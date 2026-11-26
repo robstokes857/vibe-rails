@@ -819,12 +819,15 @@ the same label and options. Each option leads with its value so a narrow closed
 select still shows the grade. A check with pinned commits is edited in AI Agents
 and shows no select.
 
-In **Card runs**, keep the run name, process/result status and actions visible.
-Put the report body in a native **Report** disclosure, collapsed by default;
-omit the disclosure when there is no report. Use a 14px semibold run name,
-13px regular muted status and disclosure label, and 14px regular muted report
-text with 1.6 line height. Separate runs with quiet rules. Preserve expanded
-reports and disclosure focus during activity refreshes; long text wraps in the panel.
+The lane settings panel lists no card runs. A run belongs to the card it ran
+for, so it is shown and managed in that card's **Automations** rail (VIBE-372).
+Under **This lane**, each current lane step is a row with its name, one status
+pill and its actions: **Skip** (**Stop and skip** while it runs) and, once its
+run has ended without a pass, **Retry**. Under **Runs** are the card's own runs.
+A row shows the report or the run's error only when it says more than the pill,
+clamped behind **Show more**. Keep an expanded report expanded during refreshes,
+and make a control usable again when its request is refused. Do not add a
+lane-wide run list back.
 
 The lane settings **Add to this lane** picker shows a decorative icon beside each
 agent, script or check, including the selected value. Reuse the provider artwork
