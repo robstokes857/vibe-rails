@@ -4853,7 +4853,10 @@ async function installLaunchFixture(page, { conflict = false } = {}) {
     });
     await page.route('**/api/v1/board/cards/card_test/launches/*/skip',route=>{state.skips++;state.activity[0].entry.skipRequested=true;return route.fulfill({status:204});});
     await page.route('**/api/v1/board/cards/card_test/launches/runs',route=>route.fulfill({json:{runs:state.runs,nextCursor:null}}));
-    await page.route('**/api/v1/runs/*/retry',route=>{state.retries++;state.activity[0].run.status='queued';return route.fulfill({json:state.activity[0].run});});
+    await page.route('**/api/v1/runs/*/retry',route=>{
+        if(state.retryFails>0){state.retryFails--;return route.fulfill({status:503,json:{error:'The launch service is busy.'}});}
+        state.retries++;state.activity[0].run.status='queued';return route.fulfill({json:state.activity[0].run});
+    });
     return state;
 }
 
@@ -5047,8 +5050,17 @@ test("a card's rail retries and skips its own lane entries, and the lane panel l
     await expect(step.locator('.board-step-run-name')).toHaveText('Review');
     await expect(step.locator('.board-step-pill')).toHaveText('Failed');
     await expect(step.locator('.board-step-run-summary')).toHaveText('The build could not start.');
-    await step.getByRole('button',{name:'Retry',exact:true}).click();
+    // A refused Retry changes nothing, and an unchanged list is not redrawn: the button must be
+    // usable again, not left disabled until the dialog is reopened (code review of VIBE-372).
+    state.retryFails=1;
+    const retry=step.getByRole('button',{name:'Retry',exact:true});
+    await retry.click();
+    await expect(page.locator('[data-board-card-editor] [data-board-automation-message]')).toHaveText('The launch service is busy.');
+    await expect(retry).toBeEnabled();
+    expect(state.retries).toBe(0);
+    await retry.click();
     await expect.poll(()=>state.retries).toBe(1);
+    await expect(page.locator('[data-board-card-editor] [data-board-automation-message]')).toHaveText('');
     // The run is queued again: it can be stopped, not retried.
     await expect(step.locator('.board-step-pill')).toHaveText('Queued');
     await expect(step.getByRole('button',{name:'Retry'})).toHaveCount(0);
@@ -5057,6 +5069,27 @@ test("a card's rail retries and skips its own lane entries, and the lane panel l
     await expect(step.locator('.board-step-pill')).toHaveText('Skipped');
     await expect(step.getByRole('button')).toHaveCount(0);
     expect(requests.filter(request=>request.path.endsWith('/launches/activity'))).toEqual([]);
+});
+
+test("a lane step keeps its run error and Retry when fifty newer runs fill the card's run page",async({page})=>{
+    // The rail reads the card's newest 50 runs. A current step whose run is older than that is
+    // read by id, so the only Retry on the Board cannot disappear (code review of VIBE-372).
+    await openBoard(page);const state=await installLaunchFixture(page);
+    const run={id:'run_old',status:'failed',error:'The build could not start.',snapshot:{preset:{name:'Review'},context:{cardId:'card_test'}}};
+    state.runs=Array.from({length:50},(_,index)=>({id:`run_newer_${index}`,status:'succeeded',snapshot:{action:{name:'Check'},context:{cardId:'card_test'}}}));
+    state.activity=[{entry:{id:'entry_1',cardId:'card_test',definitionId:'preset_review',current:true,runId:'run_old',processStatus:'failed',verdict:null,gate:'review'},run}];
+    const reads=[];
+    await page.route('**/api/v1/runs/run_old',route=>{reads.push(route.request().method());return route.fulfill({json:run});});
+    await page.getByText('Description images',{exact:true}).click();
+    const rail=page.locator('[data-board-card-editor] [data-board-automation-runs]');
+    const step=rail.locator('.board-step-run:not(.is-history)');
+    await expect(rail.locator('.board-step-run.is-history')).toHaveCount(50);
+    await expect(step).toHaveCount(1);
+    await expect(step.locator('.board-step-pill')).toHaveText('Failed');
+    await expect(step.locator('.board-step-run-summary')).toHaveText('The build could not start.');
+    await expect(step.getByRole('button',{name:'Retry',exact:true})).toBeEnabled();
+    expect(reads.every(method=>method==='GET')).toBe(true);
+    expect(reads.length).toBeGreaterThan(0);
 });
 
 test('unified manual card launch preserves title and comment drafts and prevents duplicate starts',async({page})=>{
