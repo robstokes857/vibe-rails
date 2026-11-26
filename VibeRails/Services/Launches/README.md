@@ -359,7 +359,11 @@ because native-terminal base CLI launches (the sandbox launch route) spawn exact
 that. Base CLI launches, Board managers and script/check engines remain.
 Legacy rows, schema, folders and recordings are retained without conversion or
 cleanup. An old saved selection is unavailable until explicitly replaced; names
-are never matched to new IDs. An older application version can still run its own
+are never matched to new IDs. An old lane selection (a Job id in the Board's
+board/6 and board/7 tables) is not in the lane panel's run order, so agents are
+not shown it either: `list_board_columns`, `list_boards`, the lane line of
+`get_board_card`, the `move_board_card` report and preview, and the launch prompt
+list a lane's current Agents and Actions only (VIBE-372). An older application version can still run its own
 old schedules independently. New capacity claims coordinate new-version roots;
 they do not coordinate the retired scheduler in older binaries.
 

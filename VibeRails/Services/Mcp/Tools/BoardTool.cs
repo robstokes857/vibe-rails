@@ -1095,7 +1095,6 @@ public sealed partial class BoardTool(
     {
         var builder = new StringBuilder();
         var queued = preview ? "Would queue" : "Queued";
-        var blocked = preview ? "Would block" : "Blocked";
         if (!report.EnteredLane)
             builder.Append("Same lane; no lane automations triggered.\n");
         else if (report.Automations.Count == 0)
@@ -1116,11 +1115,11 @@ public sealed partial class BoardTool(
             {
                 if (automation.Unavailable is not null)
                 {
-                    var skipped = automation.Unavailable is "no longer exists" or "was deleted" or "is disabled";
-                    builder.Append(skipped ? preview ? "Would skip" : "Will skip" : blocked)
-                        .Append(": \"").Append(automation.Name).Append("\" — the Automation ").Append(automation.Unavailable)
-                        .Append(skipped ? ". Later steps can continue after this entry is skipped.\n"
-                            : ". Later steps wait for a pass or user skip.\n");
+                    // Says only that this step will not run. Sequencing is stated once, by
+                    // LaneAutomationGuidance; this line used to contradict it ("Blocked ... later
+                    // steps wait for a pass or user skip"), for a step that did not exist (VIBE-372).
+                    builder.Append(preview ? "Would not run" : "Will not run").Append(": \"").Append(automation.Name)
+                        .Append("\" — the Automation ").Append(automation.Unavailable).Append(".\n");
                 }
                 else if (automation.ActiveRunId is not null)
                     builder.Append(preview ? "Would wait" : "Waiting").Append(": \"").Append(automation.Name).Append("\" — a run of this Automation is already active (")
@@ -1138,9 +1137,6 @@ public sealed partial class BoardTool(
                     .Append(" before then cancels them. Poll get_board_card since=").Append(report.AtUtc.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture))
                     .Append(" for the run's session and anything it posts.\n");
         }
-        if (report.Cancelled.Count > 0)
-            builder.Append(preview ? "Would cancel pending: " : "Cancelled pending: ").Append(BoardService.QuotedNames(report.Cancelled))
-                .Append(" (earlier lane entries of this card that had not settled).\n");
         return builder.ToString().TrimEnd();
     }
 

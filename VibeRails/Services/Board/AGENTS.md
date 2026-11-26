@@ -165,7 +165,11 @@ rename, a new lane or a move changes any of these. `BoardTool.IsFinishedLaneName
 `BoardStore.IsCompletedLane` and `DesktopClosedLaneSql`. The store records no author
 for structure changes: each tool refuses an unnamed client and logs the caller's label.
 `list_boards`, the lane line and lane runs of `get_board_card` and the `move_board_card`
-report name a lane's Agents and Actions the way `list_board_columns` does.
+report name a lane's Agents and Actions the way `list_board_columns` does. All of them, and the
+launch prompt, read `BoardService.DescribeLaneAutomationsAsync`, which lists what the lane panel's
+run order shows and nothing else. A Job id an older version saved for the lane stays stored and
+is never listed, and its old queue is never reported: an agent told about a "Retired Automation"
+step planned around a step that did not exist (VIBE-372).
 
 The editor's two columns share one scroll region. The rail is usually the longer one, so each
 column is sticky at an offset set by `card-editor-columns.js`: the shorter column stays in view

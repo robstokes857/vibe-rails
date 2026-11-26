@@ -461,6 +461,15 @@ the full text file before slicing). No route, tool name, grant, schema or migrat
 
 ## VB-34: lane Automations visible to agents (2026-09-23)
 
+**Current behaviour (VIBE-372, 2026-11-26).** Every surface below lists a lane's current Agent
+and Action selections (`IBoardStore.GetLaunchLaneAsync`), the steps the lane panel's run order
+shows, and nothing else. A Job id that an older version saved for the lane (the board/6 and
+board/7 tables) stays stored and is not listed, and the entries the old triggers still queue for
+such a lane are not reported: this version does not run them. The move report therefore has no
+`Blocked:` or `Cancelled pending:` line. `BoardService.DescribeLaneAutomationsAsync` is the one
+place that decides what a lane lists. The rest of this section describes the Job path as VB-34
+designed it.
+
 A lane move never creates a run directly: the store's card triggers record pending lane entries
 that the root scheduler drains about 60 seconds later, applying the enabled/deleted/project/
 actions/self-overlap gate in `JobStore.InsertRunAsync`. Agents driving the Board over MCP now see

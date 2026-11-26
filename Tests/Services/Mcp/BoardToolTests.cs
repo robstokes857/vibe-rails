@@ -963,11 +963,83 @@ public sealed partial class BoardToolTests : IDisposable
 
 
     [Fact]
-    public async Task LaneReadsExplainRetiredSelectionsAndNewMovesCanBeSkipped()
+    public async Task ALaneListsOnlyWhatItsRunOrderShows_NeverAnOldTableSelection()
     {
-        await ReviewLaneAutomationsAsync();
+        // VIBE-372. Review still has two Job ids in the old lane-Automation tables. The lane panel
+        // does not show them and nothing runs them, so no agent surface may name them: an agent
+        // read "Retired Automation #9 ... Blocked ... Later steps wait for a pass or user skip"
+        // and told the owner to skip a step that did not exist.
+        var (review, openPr) = await ReviewLaneAutomationsAsync();
         await _tool.CreateBoardCard("Work", cancellationToken: Ct);
-        Assert.Contains("Retired Automation", await _tool.ListBoardColumns(cancellationToken: Ct));
+        var lanes = await _store.GetColumnsAsync(_project, Ct);
+        var lane = lanes.Single(l => l.Name == "Review");
+        var done = lanes.Single(l => l.Name == "Done");
+
+        // With no current selection the lane has no on-entry step at all.
+        var bare = await _tool.ListBoardColumns(cancellationToken: Ct);
+        Assert.DoesNotContain("on entry", bare);
+        Assert.DoesNotContain("Lane Automations run", bare);
+        Assert.EndsWith("moving it to Review would do the following.\nNo lane automations.",
+            await _tool.MoveBoardCard("PROJ-1", "review", preview: true, cancellationToken: Ct));
+
+        await _store.SaveLaunchLaneAsync(_project, lane.Id, new([new("preset_saved", "preset")], 0), Ct);
+        var surfaces = new List<string>
+        {
+            await _tool.ListBoardColumns(cancellationToken: Ct),
+            await _tool.ListBoards(cancellationToken: Ct),
+            await _tool.GetBoardCard("PROJ-1", cancellationToken: Ct),
+            await _tool.MoveBoardCard("PROJ-1", "review", preview: true, cancellationToken: Ct),
+            // The real move: the old triggers queue both Job ids for the card as it enters Review.
+            await _tool.MoveBoardCard("PROJ-1", "review", cancellationToken: Ct),
+            // Leaving replaces those old entries. Nothing was going to run them, so nothing was cancelled.
+            await _tool.MoveBoardCard("PROJ-1", "done", preview: true, cancellationToken: Ct),
+            await _tool.MoveBoardCard("PROJ-1", "done", cancellationToken: Ct)
+        };
+        Assert.All(surfaces, text =>
+        {
+            Assert.DoesNotContain("Retired", text);
+            Assert.DoesNotContain("Blocked", text);
+            Assert.DoesNotContain("Later steps", text);
+            Assert.DoesNotContain("ancel pending", text);
+            Assert.DoesNotContain($"#{review}", text);
+        });
+        Assert.Contains("  on entry: \"preset_saved\"", surfaces[0]);
+        Assert.Equal(1, surfaces[0].Split("on entry:").Length - 1);
+        Assert.Contains("Review (on entry: \"preset_saved\")", surfaces[2]);
+        Assert.Contains("moving it to Review would do the following.\nWould queue: \"preset_saved\"", surfaces[3]);
+        Assert.Contains(" to Review (position 0).\nQueued: \"preset_saved\"", surfaces[4]);
+        Assert.EndsWith("moving it to Done would do the following.\nNo lane automations.", surfaces[5]);
+        Assert.EndsWith(" to Done (position 0).\nNo lane automations.", surfaces[6]);
+        Assert.Equal(done.Id, (await _store.FindCardAsync(_project, "PROJ-1", Ct))!.ColumnId);
+
+        // The launch prompt reads the same list.
+        var card = (await _store.FindCardAsync(_project, "PROJ-1", Ct))!;
+        var prompt = (await BoardLaunchService.ComposePromptAsync(_store, _project, card, null, null, "work", Ct)).Prompt;
+        Assert.Contains("Review (on entry: \"preset_saved\")", prompt);
+        Assert.DoesNotContain("Retired", prompt);
+
+        // Removing them from what agents read deletes nothing: the old selection is still stored.
+        Assert.Equal(new[] { review, openPr }, (await _store.GetLaneAutomationAsync(_project, lane.Id, Ct))!.JobIds);
+    }
+
+    [Fact]
+    public void AStepThatWillNotRunSaysSoWithoutClaimingLaterStepsWait()
+    {
+        // The current lane list never marks a step unavailable. Should one be, the report says only
+        // that it will not run: "Blocked ... Later steps wait for a pass or user skip" contradicted
+        // the sequencing rule the same reply carries (VIBE-372).
+        var report = new BoardLaneEntryReport("Review", true, false,
+            [new(0, "Old check", "Single action; result gate", "Linked run evidence", "is disabled", null, false)],
+            DateTime.UtcNow);
+
+        Assert.Equal("Will not run: \"Old check\" — the Automation is disabled.", BoardTool.FormatLaneEntry(report, "PROJ-1", preview: false));
+        Assert.Equal("Would not run: \"Old check\" — the Automation is disabled.", BoardTool.FormatLaneEntry(report, "PROJ-1", preview: true));
+    }
+
+    [Fact]
+    public async Task NewMovesCanSkipTheLanesCurrentSteps()
+    {
+        await _tool.CreateBoardCard("Work", cancellationToken: Ct);
         var lanes = await _store.GetColumnsAsync(_project, Ct);
         var lane = lanes.Single(l => l.Name == "Review");
         await _store.SaveLaunchLaneAsync(_project, lane.Id, new([new("preset_saved", "preset")], 0), Ct);

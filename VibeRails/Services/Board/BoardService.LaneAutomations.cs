@@ -38,15 +38,14 @@ public sealed record BoardCardMoveRequest(string ColumnIdOrName, int? Position =
 /// <summary>
 /// What a lane entry does (or did) beyond moving the card. <see cref="EnteredLane"/> is false for
 /// a same-lane reposition, which records no entry. <see cref="Automations"/> are the destination
-/// lane's Automations in their configured order; <see cref="Cancelled"/> are earlier entries of
-/// this card that the move replaced before they committed a run.
+/// lane's Agents and Actions in their run order, as the lane panel lists them. The report says
+/// nothing about the old lane-Automation queue (see <c>DescribeLaneAutomationsAsync</c>).
 /// </summary>
 public sealed record BoardLaneEntryReport(
     string LaneName,
     bool EnteredLane,
     bool SkippedByCaller,
     IReadOnlyList<BoardLaneAutomationInfo> Automations,
-    IReadOnlyList<BoardLaneAutomationInfo> Cancelled,
     DateTime AtUtc);
 
 public sealed record BoardCardMoveResult(BoardCardResponse Card, BoardLaneEntryReport LaneEntry);
@@ -84,17 +83,12 @@ public sealed partial class BoardService
         if (move.Position is < 0)
             throw new BoardValidationException("Position cannot be negative.");
         var entering = !string.Equals(column.Id, existing.ColumnId, StringComparison.Ordinal);
-        // Read before the move: the lane-entry trigger replaces this card's pending entries.
-        var pendingBefore = entering
-            ? await store.GetPendingLaneAutomationsAsync(projectPath, existing.Id, cancellationToken)
-            : [];
         var moved = await store.MoveCardAsync(projectPath, existing.Id, column.Id, move.Position, move.SkipLaneAutomations, cancellationToken, move.Author);
         if (moved is null)
             return null;
         var automations = entering
             ? await DescribeLaneAutomationsAsync(store, projectPath, column.Id, cancellationToken)
             : [];
-        var cancelled = await DescribeCancelledAsync(projectPath, pendingBefore, entering && !move.SkipLaneAutomations ? automations : [], cancellationToken);
         if (entering && move.SkipLaneAutomations && automations.Count > 0 && move.Author is not null)
         {
             // The skip leaves no pending row behind, so the card itself must say why no run
@@ -104,7 +98,7 @@ public sealed partial class BoardService
         var card = await GetCardAsync(projectPath, moved.Id, cancellationToken);
         return card is null
             ? null
-            : new BoardCardMoveResult(card, new BoardLaneEntryReport(column.Name, entering, move.SkipLaneAutomations, automations, cancelled, moved.UpdatedUtc));
+            : new BoardCardMoveResult(card, new BoardLaneEntryReport(column.Name, entering, move.SkipLaneAutomations, automations, moved.UpdatedUtc));
     }
 
     public async Task<BoardLaneEntryReport?> PreviewMoveAsync(
@@ -119,11 +113,7 @@ public sealed partial class BoardService
         var automations = entering
             ? await DescribeLaneAutomationsAsync(store, projectPath, column.Id, cancellationToken)
             : [];
-        var pending = entering
-            ? await store.GetPendingLaneAutomationsAsync(projectPath, existing.Id, cancellationToken)
-            : [];
-        var cancelled = await DescribeCancelledAsync(projectPath, pending, skipLaneAutomations ? [] : automations, cancellationToken);
-        return new BoardLaneEntryReport(column.Name, entering, skipLaneAutomations, automations, cancelled, DateTime.UtcNow);
+        return new BoardLaneEntryReport(column.Name, entering, skipLaneAutomations, automations, DateTime.UtcNow);
     }
 
     public Task<IReadOnlyList<BoardLaneAutomationInfo>> GetLaneAutomationsAsync(string projectPath, string columnId, CancellationToken cancellationToken = default) =>
@@ -145,16 +135,25 @@ public sealed partial class BoardService
         return pending.Select(p => new BoardPendingLaneAutomationInfo(described[p.JobId], p.ColumnId, p.DueUtc)).ToList();
     }
 
-    /// <summary>Shared with the launch prompt, which has the store but not the service.</summary>
+    /// <summary>
+    /// A lane's on-entry steps as the lane panel's run order shows them: its current Agent and
+    /// Action selections and nothing else. Shared with the launch prompt, which has the store but
+    /// not the service.
+    /// <para>
+    /// A Job id that an older version saved for the lane (the board/6 and board/7 tables) stays
+    /// stored and is not listed. This version neither shows nor runs it, and listing it as
+    /// "Retired Automation #id" gave agents a step to plan around, wait for or skip that nobody
+    /// could see in the dashboard (VIBE-372). The entries the old triggers still queue for such a
+    /// lane are left alone for the same reason: nothing here runs them, so a move reports none of
+    /// them as cancelled.
+    /// </para>
+    /// </summary>
     internal static async Task<IReadOnlyList<BoardLaneAutomationInfo>> DescribeLaneAutomationsAsync(IBoardStore store, string projectPath, string columnId, CancellationToken cancellationToken)
     {
         var result = new List<BoardLaneAutomationInfo>();
         var current = await store.GetLaunchLaneAsync(projectPath, columnId, cancellationToken);
         foreach (var selected in current?.Selections ?? [])
             result.Add(new(0, selected.DefinitionId, $"Single {selected.DefinitionType}; {selected.Gate} gate", "Linked run evidence", null, null, false, DefinitionId: selected.DefinitionId));
-        var legacy = await store.GetLaneAutomationAsync(projectPath, columnId, cancellationToken);
-        foreach (var id in legacy?.JobIds ?? [])
-            result.Add(new(id, $"Retired Automation #{id}", "Replace this saved selection with an Agent or Action.", "Retained history", "is retired", null, false));
         return result;
     }
 
@@ -164,17 +163,6 @@ public sealed partial class BoardService
         var result = new Dictionary<string, IReadOnlyList<BoardLaneAutomationInfo>>(StringComparer.Ordinal);
         foreach (var id in columnIds.Distinct()) result[id] = await DescribeLaneAutomationsAsync(store, projectPath, id, cancellationToken);
         return result;
-    }
-
-    private async Task<IReadOnlyList<BoardLaneAutomationInfo>> DescribeCancelledAsync(
-        string projectPath, IReadOnlyList<BoardPendingLaneAutomation> pending, IReadOnlyList<BoardLaneAutomationInfo> requeued, CancellationToken cancellationToken)
-    {
-        // An Automation the destination lane records again is replaced, not cancelled. Pending
-        // rows written by two triggers can straddle a millisecond, so order by id, not due time.
-        var ids = pending.Select(p => p.JobId).Distinct().Where(id => requeued.All(a => a.JobId != id)).Order().ToList();
-        if (ids.Count == 0)
-            return [];
-        return (await store.DescribeLaneAutomationsAsync(projectPath, ids, cancellationToken)).Select(Describe).ToList();
     }
 
     /// <summary>
