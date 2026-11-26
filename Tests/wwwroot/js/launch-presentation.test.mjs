@@ -39,12 +39,12 @@ test('a library script row uses the same icon as a script Action row', () => {
     assert.equal(action.subtitle, 'Script');
 });
 
-test('code quality checks are presented like every other Action: nothing filters them out', () => {
+test('code quality checks retain their presentation in the catalog and Board pickers', () => {
     assert.equal(launchPresentation({ definitionType: 'action', kind: 'code-quality', name: 'Gate' }).subtitle, 'Code quality scan');
     // VIBE-337: the check kinds are named for what they do, as in the Board lane picker.
     assert.equal(launchPresentation({ definitionType: 'action', kind: 'vca', name: 'Rules' }).subtitle, 'Rules check');
-    // VIBE-309's presentation filter is gone; a reintroduced hide has to be a deliberate decision.
-    for (const name of ['launch-presentation.js', 'launch-menu.js', 'ai-agents-controller.js',
+    // Play-menu filtering must not hide Actions from their management and Board surfaces.
+    for (const name of ['launch-presentation.js', 'ai-agents-controller.js',
         'board-card-automations.js', 'launch-lane-editor.js'])
         assert.doesNotMatch(source(name), /isLaunchVisible/, name);
     assert.match(source('launch-lane-editor.js'), /id: 'new:code-quality', key: 'check:code-quality', name: 'Code quality scan', kind: 'code-quality'/);
@@ -53,6 +53,6 @@ test('code quality checks are presented like every other Action: nothing filters
 test('Quick actions lists signed library scripts after the saved launches and runs them through the library', () => {
     const menu = source('launch-menu.js');
     assert.match(menu, /libraryScripts\(library\?\.state\)\.filter\(\(script\) => script\.canRun &&/);
-    assert.ok(menu.indexOf('...available.map') < menu.indexOf('...scripts.map'), 'scripts follow the agents and Actions');
+    assert.ok(menu.indexOf('...available.map') < menu.indexOf('...scripts.map'), 'scripts follow the Agents and Quick Launches');
     assert.match(menu, /library\.run\(script\.id\)/);
 });

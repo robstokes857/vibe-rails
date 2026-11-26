@@ -63,7 +63,6 @@ export function openQuickActionPreferences(app, trigger) {
             if (abort.signal.aborted) return;
             const groups = [
                 ['Agents and Quick Launches', items.filter(item => !item.retired && item.definitionType === 'preset').map(item => ({ ...item, ...launchPresentation(item), key: quickActionKey(item) }))],
-                ['Actions', items.filter(item => !item.retired && item.definitionType === 'action').map(item => ({ ...item, ...launchPresentation(item), key: quickActionKey(item) }))],
                 ['Scripts', libraryScripts(library?.state).filter(item => item.canRun).map(item => ({ ...item, key: `script:${item.id}` }))]
             ];
             list.innerHTML = groups.filter(([, entries]) => entries.length).map(([name, entries]) => `

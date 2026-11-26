@@ -7,7 +7,7 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 - **Embedded Dashboard**: Opens the VibeRails dashboard directly inside VS Code as a webview panel
 - **Backend Management**: Starts the VibeRails .NET backend quietly after VS Code opens a trusted workspace (disable with `viberails.autoStart`). The root backend belongs to that VS Code window; closing the dashboard tab leaves it running, while Stop, the dashboard Exit button, and extension shutdown stop it
 - **Status Bar Integration**: A `$(terminal) VibeRails` button in the bottom left opens the dashboard; a `$(close)` Stop item appears beside it while the backend is running
-- **Activity Bar launcher**: A play icon in the Activity Bar opens the **Launch** view, the side-bar twin of the dashboard's nav Play button. It groups the project's entries under **Agents and Quick Launches**, **Actions** and **Scripts** (the signed script library, VIBE-311), with counts and runtime labels; clicking a row runs it, and the view title offers Refresh, Customize list… and Manage automations. Deleted definitions are never listed. It works without an open dashboard tab once the backend is ready. When the backend is stopped the view shows an Open Dashboard button
+- **Activity Bar launcher**: A play icon in the Activity Bar opens the **Launch** view, the side-bar twin of the dashboard's nav Play button. It groups the project's entries under **Agents and Quick Launches** and **Scripts** (the signed script library, VIBE-311), with counts and runtime labels; clicking a row runs it, and the view title offers Refresh, Customize list… and Manage automations. Deleted definitions are never listed. It works without an open dashboard tab once the backend is ready. When the backend is stopped the view shows an Open Dashboard button
 - **Reviews requested of you**: a second view in the same container (VB-50 slice D) lists the review requests viberails.ai holds for the signed-in account, from the backend's cache (`GET /api/v1/review-inbox`). A row opens the dashboard's page; the inline Approve asks the backend to open the signing popup on its machine (the popup shows the request, rebuilds the tree from the repository and signs it there); the inline Reject asks for a comment here and posts it; the row's context menu offers Read on viberails.ai. Nothing in the extension signs or sees a key
 - **Local Context**: Runs in the context of your current workspace folder for project-specific configurations
 
@@ -83,9 +83,9 @@ the separate signed script library, `GET /api/v1/python-scripts`; a view that re
 catalog shows none of them. Only signed scripts are listed, as in the dashboard's Quick
 actions; an unsigned one is signed from the AI Agents page or its workbench first. A library
 that cannot be read leaves the definitions listed. The catalog also returns deleted (retired)
-definitions for their history: `visibleLauncherItems` drops them, as the browser does, or they
-appear as "Unavailable" rows. `code-quality` Actions are listed and runnable like any other
-Action (VIBE-311 undid the VIBE-309 hide).
+definitions for their history: `visibleLauncherItems` drops them, as the browser does.
+Saved Actions are also omitted from the Launch view and shared customization dialog;
+they remain available in AI Agents and Board pickers.
 
 The extension consists of these components plus a shared constants module:
 

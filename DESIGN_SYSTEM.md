@@ -872,11 +872,14 @@ replaces the picker and offers **Show hidden entries**, which opens the panel.
 
 #### Desktop Quick actions
 
-The top-bar play button opens a compact **Quick actions** popover. Each launch row
+The top-bar play button opens a compact **Quick actions** popover for Agents, Quick
+Launches and signed library scripts. Saved Actions (script, Rules check and Code quality
+scan definitions) are omitted from this menu, the VS Code Launch view and their shared
+customization dialog. They remain available in AI Agents and Board pickers. Each launch row
 matches its AI Agents catalog entry: the same provider logo or fallback icon
 and name. Show a muted saved description when present; otherwise omit the preset's
 provider label when its logo already identifies it. Keep a text label for unknown
-providers with fallback icons, and keep the type label for Actions.
+providers with fallback icons.
 Reuse the catalog's provider assets, filters and existing Font Awesome fallback
 icons, including `code` for Scripts, without adding a colored tile behind logos.
 Keep a separate secondary **Run** button matching the catalog's dark fill, border,
@@ -907,7 +910,7 @@ any custom template fields. Show the answer in the resolved-message preview. Can
 or Escape starts nothing. Apply this before both native-terminal and in-app launches,
 including the VS Code bridge. Keep the answer separate from the saved template so
 placeholder-like text in the answer stays literal. Unattended runs do not open dialogs.
-Actions and library scripts keep their existing launch controls.
+Library scripts keep their existing launch controls.
 
 Signed scripts from the script library follow the saved launches in the same list, with
 the same row: the `code` icon, the script's display name and a muted "{runtime} script"
@@ -929,7 +932,7 @@ actions…** and the existing right arrow on **Manage AI Agents**, using the men
 Font Awesome icons.
 Add **Manage quick actions…** in that footer and in the VS Code Launch view. Both
 open the same dialog: native show/hide switches for this project's saved Agents,
-Quick Launches, Actions and signed library scripts. Changes save immediately and
+Quick Launches and signed library scripts. Changes save immediately and
 apply to both Play menus on this computer. Keep hidden items in the dialog so they
 can be restored; hiding a shortcut never disables its definition or changes Board
 pickers. Explain saving and failures inline, keep the switch's previous value after

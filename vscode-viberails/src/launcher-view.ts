@@ -28,7 +28,6 @@ export interface LauncherGroup {
 export type LauncherNode = LauncherItem | LauncherGroup;
 const LAUNCHER_GROUPS: LauncherGroup[] = [
     { kind: 'group', key: 'presets', label: 'Agents and Quick Launches', category: 'preset' },
-    { kind: 'group', key: 'actions', label: 'Actions', category: 'action' },
     { kind: 'group', key: 'scripts', label: 'Scripts', category: 'script' }
 ];
 export const LAUNCHER_LOAD_FAILED_MESSAGE = 'Could not load AI Agents.';
@@ -65,9 +64,9 @@ export function normalizeLibraryScripts(raw: unknown): LauncherItem[] {
 export function isLauncherItemRunnable(item: LauncherItem): boolean {
     return item.enabled && !item.retired && item.canLaunch;
 }
-/** A deleted (retired) definition stays in the catalog response for its history; the tree never lists it. */
+/** Match the Play menu: presets and signed library scripts only; retain Actions in the catalog. */
 export function visibleLauncherItems(items: LauncherItem[]): LauncherItem[] {
-    return items.filter(item => !item.retired);
+    return items.filter(item => !item.retired && item.definitionType !== 'action');
 }
 export function launcherEmptyMessage(items: LauncherItem[] | null): string | undefined {
     if (items === null) return LAUNCHER_LOAD_FAILED_MESSAGE;

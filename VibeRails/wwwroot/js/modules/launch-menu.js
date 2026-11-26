@@ -122,7 +122,7 @@ export class LaunchMenu {
                 library?.refresh({ quiet: true })
             ]);
             if (abort.signal.aborted) return;
-            const available = items.filter((item) => item.canLaunch && !hidden.has(quickActionKey(item)));
+            const available = items.filter((item) => item.definitionType === 'preset' && item.canLaunch && !hidden.has(quickActionKey(item)));
             const scripts = libraryScripts(library?.state).filter((script) => script.canRun && !hidden.has(`script:${script.id}`));
             const rows = [
                 ...available.map((item, index) => menuRow(item.name, launchPresentation(item, { showProviderLabel: false }), `data-launch-id="${escapeHtml(item.id)}"`, item.definitionType === 'preset' ? `launch-message-${index}` : null)),
@@ -143,7 +143,7 @@ export class LaunchMenu {
                         toggleMessage(button, button.getAttribute('aria-expanded') !== 'true');
                         return;
                     }
-                    const item = items.find(
+                    const item = available.find(
                         (item) => item.id === button.dataset.launchId
                     );
                     const script = scripts.find(

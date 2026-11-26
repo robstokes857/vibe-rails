@@ -38,18 +38,18 @@ suite('Global launch catalog', () => {
         assert.equal(provider.getMessage(), LAUNCHER_EMPTY_MESSAGE);
         hiddenKeys = ['preset:agent'];
         await provider.refresh();
-        assert.deepEqual(provider.getItems().map(row => row.key), ['action:check', 'script:reg_run']);
+        assert.deepEqual(provider.getItems().map(row => row.key), ['script:reg_run']);
         hiddenKeys = [];
         await provider.refresh();
-        assert.deepEqual(provider.getItems().map(row => row.key), ['preset:agent', 'action:check', 'script:reg_run']);
+        assert.deepEqual(provider.getItems().map(row => row.key), ['preset:agent', 'script:reg_run']);
         provider.dispose();
     });
     test('refresh drops definitions removed by project scope and stale direct runs report server rejection', async () => {
-        let entries = [item('local'), item('elsewhere', { definitionType: 'action' })];
+        let entries = [item('local'), item('elsewhere'), item('stale_action', { definitionType: 'action' })];
         const provider = new LauncherTreeDataProvider({ isBackendReady: () => true, fetchItems: async () => ({ items: entries }) });
         await provider.refresh();
         assert.equal(provider.getItems().length, 2);
-        const stale = entries[1];
+        const stale = entries[2];
         entries = [entries[0]];
         await provider.refresh();
         assert.deepEqual(provider.getItems().map(entry => entry.id), ['local']);
@@ -86,15 +86,19 @@ suite('Global launch catalog', () => {
         assert.equal(launcherEmptyMessage([deleted]), LAUNCHER_EMPTY_MESSAGE);
         provider.dispose();
     });
-    test('groups presets and actions and discards responses after backend shutdown', async () => {
+    test('omits Actions and discards responses after backend shutdown', async () => {
         let ready = true;
         const quality = item('quality', { definitionType: 'action', kind: 'code-quality' });
         let response: Promise<unknown> = Promise.resolve({ items: [item(), item('action_1', { definitionType: 'action', kind: 'vca' }), quality] });
         const provider = new LauncherTreeDataProvider({ isBackendReady: () => ready, fetchItems: () => response });
         await provider.refresh();
-        assert.deepEqual(provider.getChildren().map(row => row.label), ['Agents and Quick Launches', 'Actions']);
-        // Code quality checks are offered again (VIBE-311 undid the VIBE-309 hide).
-        assert.deepEqual(provider.getItems().map(row => row.id), ['preset_1', 'action_1', 'quality']);
+        assert.deepEqual(provider.getChildren().map(row => row.label), ['Agents and Quick Launches']);
+        assert.deepEqual(provider.getItems().map(row => row.id), ['preset_1']);
+        response = Promise.resolve({ items: [quality] });
+        await provider.refresh();
+        assert.deepEqual(provider.getChildren(), []);
+        assert.equal(provider.getMessage(), LAUNCHER_EMPTY_MESSAGE);
+        // Hiding a shortcut does not disable the Action itself.
         assert.equal(isLauncherItemRunnable(quality), true);
         assert.equal(provider.getTreeItem(quality).command?.command, 'viberails.launcher.run');
         let resolve!: (value: unknown) => void;
@@ -139,10 +143,10 @@ suite('Signed library scripts', () => {
             fetchScripts: async () => library });
         await provider.refresh();
         const groups = provider.getChildren();
-        assert.deepEqual(groups.map(row => row.label), ['Agents and Quick Launches', 'Actions', 'Scripts']);
-        const rows = provider.getChildren(groups[2]) as LauncherItem[];
+        assert.deepEqual(groups.map(row => row.label), ['Agents and Quick Launches', 'Scripts']);
+        const rows = provider.getChildren(groups[1]) as LauncherItem[];
         assert.deepEqual(rows.map(row => row.label), ['Start CP210', 'legacy.sh']);
-        assert.equal(provider.getTreeItem(groups[2]).description, '2');
+        assert.equal(provider.getTreeItem(groups[1]).description, '2');
         const node = provider.getTreeItem(rows[0]);
         assert.equal(node.description, 'PowerShell');
         assert.equal(provider.getTreeItem(rows[1]).description, 'Bash');

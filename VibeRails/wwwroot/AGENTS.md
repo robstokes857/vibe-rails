@@ -58,9 +58,9 @@ script/check presentation and signed library script windows retain their existin
 
 The catalog presents Agents, Quick Launches and Scripts with the shared surface and
 empty-state styles. **Create script** opens the script-only Action editor; existing checks
-remain editable under Board checks. Code quality checks are offered everywhere again: VIBE-311
-removed the VIBE-309 presentation filter (`isLaunchVisible`), and `launch-presentation.test.mjs`
-fails if one comes back without a decision. Each catalog row exposes **Edit** and a confirmed **Delete**
+remain editable under Board checks. Saved Actions remain available in the catalog and Board
+pickers, but the Play menu, VS Code Launch view and shared customization dialog list only
+Agents, Quick Launches and signed library scripts. Each catalog row exposes **Edit** and a confirmed **Delete**
 action. Delete uses revision-checked retirement, hides the definition from the catalog and retains
 its history and attachments. The editor footer offers the same **Delete**, with the same
 confirmation wording (`DELETE_DEFINITION_MESSAGE`); do not call it Retire in the UI. The Agent editor hides Purpose, defaults new records to `work`,
@@ -219,7 +219,7 @@ navbar **Sign in** opens the device approval flow when signed out. The top navig
 only application navigation. Quality is third and Rules fourth; they are separate destinations.
 AI Agents follows Rules, then MCP. The account menu opens **Review requests**, the
 separate pre-commit inbox. The standalone play button opens
-Quick actions for eligible Agents, Quick Launches and Actions. Settings are two pages
+Quick actions for eligible Agents, Quick Launches and signed library scripts. Settings are two pages
 (DESIGN_SYSTEM.md, Top bar account). The gear beside Exit opens **App settings** (`settings`:
 General, LLMs, Context, Setup, AI board manager), signed in or out. **Account settings** in the
 account dropdown opens `account-settings` (Account, with the remote access password and API key,
@@ -231,7 +231,7 @@ Its footer opens **Manage AI Agents**.
 `launch-menu.js` renders each eligible item with the same provider logo or fallback icon,
 name and saved description as the AI Agents catalog, plus a matching secondary **Run** button.
 Both use `launch-presentation.js`: Quick actions omits redundant known-provider labels,
-retains unknown-provider and Action type labels, and gives descriptions precedence.
+retains unknown-provider labels, and gives descriptions precedence.
 Scripts retain the catalog's distinct code icon. The popover uses ordinary buttons and dialog semantics, with Tab navigation
 and Escape returning focus to the top-bar trigger. Keep launch dispatch keyed by definition ID.
 Rules runs validation only; Quality restores or starts its own cached scan when opened.

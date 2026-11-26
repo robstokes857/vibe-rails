@@ -282,7 +282,8 @@ for (const width of [375, 1280]) test(`Manage quick actions persists shared visi
     const menu = page.getByRole('dialog', { name:'Quick actions', exact:true });
     await menu.getByRole('button', { name:'Manage quick actions…', exact:true }).click();
     const dialog = page.getByRole('dialog', { name:'Manage quick actions', exact:true });
-    await expect(dialog.getByRole('switch')).toHaveCount(4);
+    await expect(dialog.getByRole('switch')).toHaveCount(3);
+    await expect(dialog.getByRole('switch', { name:'Show Check', exact:true })).toHaveCount(0);
     await dialog.getByRole('switch', { name:'Show Review <changes>', exact:true }).uncheck();
     await expect(dialog.getByRole('status')).toContainText('Saved.');
     expect(state.hiddenKeys).toEqual(['preset:reviewer']);
@@ -291,13 +292,13 @@ for (const width of [375, 1280]) test(`Manage quick actions persists shared visi
     await dialog.getByRole('button', { name:'Done', exact:true }).click();
     await expect(trigger).toBeFocused();
     await trigger.click();
-    await expect(menu.locator('.launch-menu-name')).toHaveText(['Fast terminal', 'Check', 'Start app']);
+    await expect(menu.locator('.launch-menu-name')).toHaveText(['Fast terminal', 'Start app']);
     // The same definition still exists and remains enabled; its changed label keeps its preference.
     expect(state.presets[0].enabled).toBe(true);
     state.presets[0].name = 'Renamed reviewer';
     await page.reload();
     await trigger.click();
-    await expect(menu.locator('.launch-menu-name')).toHaveText(['Fast terminal', 'Check', 'Start app']);
+    await expect(menu.locator('.launch-menu-name')).toHaveText(['Fast terminal', 'Start app']);
     await menu.getByRole('button', { name:'Manage quick actions…' }).click();
     await expect(dialog.getByRole('switch', { name:'Show Renamed reviewer' })).not.toBeChecked();
     for (const toggle of await dialog.getByRole('switch').all()) {
@@ -509,8 +510,8 @@ test('quick actions use explicit Run buttons and preserve launch and keyboard be
     const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
     await trigger.click();
     await expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');
-    await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['Script']);
-    for (const id of ['release', 'script']) {
+    await expect(panel.locator('.launch-menu-subtitle')).toHaveCount(0);
+    for (const id of ['release']) {
         const catalogRow = page.locator('.launch-catalog-row').filter({ has: page.locator(`[data-agent-edit="${id}"]`) });
         const menuRow = panel.locator('.launch-menu-row').filter({ has: page.locator(`[data-launch-id="${id}"]`) });
         await expect(menuRow.locator('.launch-menu-name')).toHaveText(await catalogRow.locator('.launch-catalog-copy [data-agent-edit]').innerText());
@@ -521,16 +522,16 @@ test('quick actions use explicit Run buttons and preserve launch and keyboard be
     }
     await expect(panel.locator('img.launch-provider-logo')).toBeVisible();
     await expect.poll(() => panel.locator('img.launch-provider-logo').evaluate(el => el.complete && el.naturalWidth > 0)).toBe(true);
-    await expect(panel.locator('.fa-code')).toBeVisible();
+    await expect(panel.locator('.fa-code')).toHaveCount(0);
     await expect(panel.getByText('Disabled agent')).toHaveCount(0);
-    await expect(panel.getByText('Build <client> & test', { exact: true })).toBeVisible();
+    await expect(panel.getByText('Build <client> & test', { exact: true })).toHaveCount(0);
     await expect(panel.locator('client')).toHaveCount(0);
     const runAgent = panel.getByRole('button', { name: 'Run Release Vibe Rails Client App', exact: true });
     const addMessage = panel.getByRole('button', { name: 'Add message for Release Vibe Rails Client App', exact: true });
     await expect(runAgent).toBeFocused();
     await expect(panel.locator('[data-launch-message]')).toBeHidden();
     await expect(addMessage).toHaveAttribute('aria-expanded', 'false');
-    // Actions and library scripts keep their existing controls: no message link.
+    // Only the visible preset offers a message link.
     await expect(panel.locator('[data-launch-message-toggle]')).toHaveCount(1);
     await page.screenshot({ path: testInfo.outputPath('quick-actions-desktop.png') });
     await panel.getByText('Release Vibe Rails Client App', { exact: true }).click();
@@ -544,10 +545,8 @@ test('quick actions use explicit Run buttons and preserve launch and keyboard be
     await page.keyboard.press('Tab');
     await expect(addMessage).toBeFocused();
     await page.keyboard.press('Tab');
-    await expect(panel.getByRole('button', { name: 'Run Build <client> & test', exact: true })).toBeFocused();
-    await page.keyboard.press('Enter');
-    expect(await page.evaluate(() => window.quickActionLaunches)).toEqual([['release', 'preset', { userMessage: '' }], ['script', 'action', { userMessage: null }]]);
-    await trigger.click();
+    await expect(panel.getByRole('button', { name: 'Manage quick actions…', exact: true })).toBeFocused();
+    expect(await page.evaluate(() => window.quickActionLaunches)).toEqual([['release', 'preset', { userMessage: '' }]]);
     await expect(panel).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(panel).toHaveCount(0);
@@ -574,9 +573,9 @@ test('quick actions match catalog descriptions and provider branding for other l
     await expect(page.locator('.launch-catalog-copy [data-agent-edit="claude"]')).toBeVisible();
     await page.getByRole('button', { name: 'Launch an agent or automation', exact: true }).click();
     const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
-    await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['Review <changes> & report', 'custom', 'Compile <client>']);
+    await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['Review <changes> & report', 'custom']);
     await expect(panel.locator('changes, client')).toHaveCount(0);
-    for (const id of ['claude', 'quick', 'unknown', 'script']) {
+    for (const id of ['claude', 'quick', 'unknown']) {
         const catalogRow = page.locator('.launch-catalog-row').filter({ has: page.locator(`[data-agent-edit="${id}"]`) });
         const menuRow = panel.locator('.launch-menu-row').filter({ has: page.locator(`[data-launch-id="${id}"]`) });
         if (id === 'quick') await expect(menuRow.locator('.launch-menu-subtitle')).toHaveCount(0);
@@ -591,7 +590,7 @@ for (const width of [320, 375, 768, 1024]) {
         await page.setViewportSize({ width, height: 700 });
         const state = await setup(page);
         state.presets.push({ id: 'release', name: 'Release Vibe Rails Client App with a very long descriptive agent name', cli: 'codex', initialPrompt: 'Release', enabled: true });
-        state.actions.push({ id: 'script', name: 'BuildAndValidateAllClientPackagesWithoutSpaces', kind: 'script' });
+        state.scripts = [{ id: 'long_script', name: 'build.ps1', displayName: 'BuildAndValidateAllClientPackagesWithoutSpaces', status: 'approved' }];
         await page.getByRole('button', { name: 'Launch an agent or automation', exact: true }).click();
         const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
         await expect(panel.locator('.launch-menu-row')).toHaveCount(2);
@@ -1728,12 +1727,12 @@ for (const width of [375, 1280]) test(`library scripts list with script Actions 
     await draft.getByRole('button', { name: 'draft.py', exact: true }).click();
     expect(await page.evaluate(() => window.scriptCalls)).toEqual([['run', 'reg_run'], ['open', 'reg_run'], ['open', 'reg_draft']]);
 
-    // Quick actions: the agents and Actions first, then only the signed scripts.
+    // Quick actions: the Agents first, then only the signed library scripts.
     const trigger = page.getByRole('button', { name: 'Launch an agent or automation', exact: true });
     const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
     await trigger.click();
-    await expect(panel.locator('.launch-menu-name')).toHaveText(['Release', 'Build', 'Start <CP210>']);
-    await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['Script', 'PowerShell script · run.ps1']);
+    await expect(panel.locator('.launch-menu-name')).toHaveText(['Release', 'Start <CP210>']);
+    await expect(panel.locator('.launch-menu-subtitle')).toHaveText(['PowerShell script · run.ps1']);
     const menuRow = panel.locator('.launch-menu-row').filter({ has: page.locator('[data-script-id="reg_run"]') });
     expect(await menuRow.locator('.launch-provider-logo').evaluate(el => el.outerHTML))
         .toBe(await signed.locator('.launch-provider-logo').evaluate(el => el.outerHTML));
@@ -1821,18 +1820,24 @@ test('the editor deletes a definition with the catalog confirmation instead of R
     await expect(page.getByRole('button', { name: 'Review changes', exact: true })).toHaveCount(0);
 });
 
-test('code quality checks are offered again in the catalog, Quick actions and the editor', async ({ page }) => {
+test('code quality checks stay in the catalog and editor but are omitted from Quick actions', async ({ page }) => {
     const state = await setup(page);
-    state.actions.push({ id: 'quality', name: 'Quality gate', kind: 'code-quality', enabled: true, revision: 1, check: { scope: 'card', failGrade: 'B' } });
+    state.actions.push({ id: 'quality', name: 'Code quality check · Linked commits', kind: 'code-quality', enabled: true, revision: 1, check: { scope: 'card', failGrade: 'B' } },
+        { id: 'quality_tree', name: 'Code quality scan · Working tree, minimum C', kind: 'code-quality', enabled: true, revision: 1, check: { scope: 'working-tree', failGrade: 'C' } });
     await page.locator('[data-agent-refresh]').click();
     const checks = page.locator('.launch-catalog-section').filter({ has: page.getByRole('heading', { name: /^Board checks/ }) });
-    await expect(checks.getByRole('button', { name: 'Quality gate', exact: true })).toBeVisible();
-    await expect(checks.locator('.launch-catalog-copy p')).toHaveText(['Code quality scan']);
+    await expect(checks.getByRole('button', { name: 'Code quality check · Linked commits', exact: true })).toBeVisible();
+    await expect(checks.locator('.launch-catalog-copy p')).toHaveText(['Code quality scan', 'Code quality scan']);
     await page.getByRole('button', { name: 'Launch an agent or automation', exact: true }).click();
     const panel = page.getByRole('dialog', { name: 'Quick actions', exact: true });
-    await expect(panel.getByRole('button', { name: 'Run Quality gate', exact: true })).toBeVisible();
+    await expect(panel.locator('[data-launch-id]')).toHaveCount(0);
+    await expect(panel.getByRole('status')).toContainText('No quick actions shown');
+    await panel.getByRole('button', { name: 'Manage quick actions…', exact: true }).click();
+    const preferences = page.getByRole('dialog', { name: 'Manage quick actions', exact: true });
+    await expect(preferences.getByRole('status')).toHaveText('No quick actions yet. Create one in AI Agents.');
+    await expect(preferences.getByRole('switch')).toHaveCount(0);
     await page.keyboard.press('Escape');
-    await checks.getByRole('button', { name: 'Edit Quality gate', exact: true }).click();
+    await checks.getByRole('button', { name: 'Edit Code quality check · Linked commits', exact: true }).click();
     const editor = page.locator('[data-launch-editor]');
     await expect(editor.locator('[data-launch-field="grade"]')).toHaveValue('B');
     await expect(editor.locator('[data-launch-field="grade"]')).toBeVisible();
