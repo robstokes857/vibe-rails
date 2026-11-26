@@ -8,9 +8,8 @@ const icon = name => `<i class="fa-solid fa-${name}" aria-hidden="true"></i>`;
 
 /** Compact entry points to the existing destination-lane Automation settings. */
 export class BoardLaneAgents {
-    constructor(app, openRunningAgent = null) {
+    constructor(app) {
         this.app = app;
-        this.openRunningAgent = openRunningAgent;
     }
 
     button(column) {
@@ -91,8 +90,7 @@ export class BoardLaneAgents {
             <button type="button" class="board-lane-agents-action" data-agent-action="close" aria-label="Close lane panel">${icon('xmark')}</button>
         </header>
         <p class="board-lane-agents-help">Runs top to bottom after a card stays here for 60 seconds. Each waits for the previous run to finish, regardless of its result.</p>
-        <div data-lane-agents-content>Loading agents…</div>
-        <section data-lane-running aria-label="Running agents" aria-live="polite"></section>`;
+        <div data-lane-agents-content>Loading agents…</div>`;
         this.anchor = button;
         this.panel = panel;
         button.setAttribute('aria-expanded', 'true');
@@ -111,7 +109,7 @@ export class BoardLaneAgents {
 
         const disposeBody = mountLaneAgentBody({ app: this.app, panel, column, signal: abort.signal, position,
             updateCount: settings => this.updateColumnCount(column.id, settings),
-            close: restoreFocus => this.close(restoreFocus), openRunningAgent: this.openRunningAgent });
+            close: restoreFocus => this.close(restoreFocus) });
         this.beforeClosePanel = disposeBody.beforeClose;
 
         const outside = event => {

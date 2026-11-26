@@ -41,6 +41,28 @@ test('a long report is clamped behind Show more, and text stays escaped', () => 
     assert.match(laneEntryRowMarkup({ id: 'e3', processStatus: 'running', runId: 'r' }, 'Check'), />Stop and skip</);
 });
 
+test('a lane step with its run offers Retry once the run finished without a pass, and shows the run error', () => {
+    // VIBE-372: the lane panel's "Card runs" list was the only place on the board with Retry and
+    // a failed run's error. They live on the card's own rail now, with the same rules.
+    const entry = { id: 'e1', runId: 'r1', processStatus: 'queued' };
+    const failed = laneEntryRowMarkup(entry, 'Build', { id: 'r1', status: 'failed', error: 'The build could not start <now>.' });
+    assert.match(failed, /data-launch-retry="r1"/);
+    assert.match(failed, />Retry</);
+    assert.match(failed, />Skip</, 'a finished run is skipped, not stopped');
+    assert.match(failed, /The build could not start &lt;now&gt;\./);
+    assert.match(failed, /is-danger/, "the run's own state wins over the entry's last recorded one");
+    // Finished without a verdict: the review never reported, so it can be run again.
+    assert.match(laneEntryRowMarkup(entry, 'Review', { id: 'r1', status: 'succeeded' }), /data-launch-retry="r1"/);
+    // Passed, still running, skipped, or no run in the card's list: no Retry.
+    assert.doesNotMatch(laneEntryRowMarkup({ ...entry, verdict: 'passed' }, 'Review', { id: 'r1', status: 'succeeded' }), /data-launch-retry/);
+    const running = laneEntryRowMarkup(entry, 'Review', { id: 'r1', status: 'running' });
+    assert.doesNotMatch(running, /data-launch-retry/);
+    assert.match(running, />Stop and skip</);
+    assert.doesNotMatch(laneEntryRowMarkup({ ...entry, skipRequested: true }, 'Build', { id: 'r1', status: 'failed' }), /data-launch-(retry|skip)/);
+    assert.doesNotMatch(laneEntryRowMarkup({ ...entry, processStatus: 'failed' }, 'Build'), /data-launch-retry/);
+    assert.doesNotMatch(laneEntryRowMarkup({ id: 'e2', processStatus: 'succeeded', verdict: 'passed' }, 'Check', null), /board-step-run-actions/);
+});
+
 test('a run row names the run and offers its recording', () => {
     const html = cardRunRowMarkup({ id: 'r1', status: 'failed', sessionId: 's1', snapshot: { action: { name: 'Quality' } },
         endedUtc: '2026-11-16T08:07:00Z' });

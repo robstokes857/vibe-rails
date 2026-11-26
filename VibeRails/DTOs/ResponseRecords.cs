@@ -2418,7 +2418,6 @@ namespace VibeRails.DTOs
 [JsonSerializable(typeof(LanePickerPreferencesResponse))]
 [JsonSerializable(typeof(LanePickerPreferenceRequest))]
 [JsonSerializable(typeof(IReadOnlyList<LaunchProject>))]
-[JsonSerializable(typeof(IReadOnlyList<LaunchLaneEntry>))]
 [JsonSerializable(typeof(SavedPreset))]
 [JsonSerializable(typeof(LaunchAction))]
 [JsonSerializable(typeof(LaunchAttachmentContent))]

@@ -403,8 +403,10 @@ one-run override; the saved preset is unchanged. Both prompt fields reject retir
 syntax. Project and execution directory still come only from the authenticated root.
 
 `POST /board/cards/{card}/launches` queues a definition using the saved project-owned
-card context and normal Board grants. `GET /board/columns/{column}/launches/activity`
-returns current per-card entries with labels and project-scoped run snapshots. The UI
-keeps process status and explicit verdict separate and uses the existing retry and
-per-card skip endpoints. These additions use normal root authentication and no schema
-migration or legacy-data conversion.
+card context and normal Board grants. A card's lane entries and runs are read per card
+(`GET /board/cards/{card}/launches` and `.../launches/runs`) and shown on that card's
+Automations rail, with the existing retry and per-card skip endpoints. The lane panel
+lists no runs: `GET /board/columns/{column}/launches/activity`, which returned every
+card's current entries for a lane, was removed with its "Card runs" list (VIBE-372).
+These routes use normal root authentication and no schema migration or legacy-data
+conversion.

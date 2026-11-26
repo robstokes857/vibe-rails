@@ -24,9 +24,6 @@ public static class BoardLaunchRoutes
             await store.GetLaunchLaneAsync(await projects.ResolveAsync(ct), column, ct) is { } lane ? Results.Ok(lane) : Results.NotFound());
         api.MapPut("/columns/{column}/launches", async (string column, BoardLaunchLane request, BoardLaunchWorkflow workflow, IBoardProjectResolver projects, CancellationToken ct) =>
             await workflow.SaveAsync(await projects.ResolveAsync(ct), column, request, ct) is { } lane ? Results.Ok(lane) : Results.NotFound());
-        api.MapGet("/columns/{column}/launches/activity", async (string column, BoardLaunchWorkflow workflow, IBoardProjectResolver projects, CancellationToken ct) =>
-            await workflow.GetLaneActivityAsync(await projects.ResolveAsync(ct), column, ct) is { } activity
-                ? Results.Ok(activity) : Results.NotFound());
         api.MapGet("/cards/{card}/launches", async (string card, IBoardStore store, IBoardProjectResolver projects, CancellationToken ct) =>
         {
             var project = await projects.ResolveAsync(ct);

@@ -55,10 +55,12 @@ public sealed partial class BoardReviewsTests
     {
         var f = await NewWorkflow();
         var request = new LaunchRequest(f.Run.DefinitionId, OccurrenceId: "manual-card-test");
-        var activity = await f.Workflow.GetLaneActivityAsync(repo, f.Lane, Ct);
-        Assert.Equal(2, activity!.Count);
-        Assert.Contains(activity, item => item.Run?.Id == f.Run.Id && item.Entry.Gate == "review");
-        Assert.Null(await f.Workflow.GetLaneActivityAsync(Path.Combine(root, "foreign"), f.Lane, Ct));
+        // The card's own entries, as its Automations rail reads them. The lane-wide list of every
+        // card's runs is gone (VIBE-372).
+        var entries = (await store.GetLaunchEventsAsync(repo, card.Id, Ct)).Where(entry => entry.Current).ToList();
+        Assert.Equal(2, entries.Count);
+        Assert.Contains(entries, entry => entry.RunId == f.Run.Id && entry.Gate == "review");
+        Assert.Empty(await store.GetLaunchEventsAsync(Path.Combine(root, "foreign"), card.Id, Ct));
         var run = await f.Workflow.EnqueueCardAsync(repo, card.Id, request, Ct);
         Assert.NotNull(run);
         Assert.Equal(card.Id, run.Snapshot.Context.CardId);

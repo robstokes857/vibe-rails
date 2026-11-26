@@ -187,11 +187,13 @@ events. Its switches save `PUT /api/v1/lane-picker/preferences { key, hidden }` 
 leave the picker (so they are not searchable) and nothing else: lanes, definitions, Quick actions
 and AI Agents are untouched. A preference load failure shows every entry. A switch save only
 rebuilds the picker (`renderPicker`), so focus and the run order survive.
-`board-lane-agent-body.js` polls current per-card lane progress, with explicit verdicts,
-retry, skip and session links. Card runs keep names, status and actions visible, with
-regular-weight muted report text inside a native Report disclosure, collapsed initially.
-Omit empty disclosures; preserve expanded reports and disclosure focus across polling.
-`board-card-automations.js` queues definitions with the
+`board-lane-agent-body.js` mounts the lane's run order and nothing else. The lane panel
+lists no runs (VIBE-372): a run belongs to the card it ran for. Its former "Card runs"
+list repeated every card's steps and grew with each card that stayed in the lane; do not
+bring it back, in the panel or elsewhere on the board. `board-card-automations.js` shows a
+card's own lane steps on its Automations rail, each with its state, report, Skip or Stop
+and skip, and Retry once its run has finished without a pass (`board-step-runs.js`), and
+queues definitions with the
 saved card context. Managers and ordinary Start work use their existing Board contracts.
 Retired selections remain visibly unavailable; do not resolve them by label.
 
@@ -1458,8 +1460,6 @@ Rendering → Auto-reconnect (`viberails_terminal_autoReconnect` = `off`). Tests
 (the fake CLI echoes its command line, so assert replay fidelity as text equality, never as a
 marker count).
 
-## Console host and terminal queries (VIBE-354)
-
 ## Terminal attach width (VIBE-372)
 
 A connecting tab measures its panel and sends that grid in the WebSocket URL. The server resizes
@@ -1476,6 +1476,8 @@ mounted, after the bind: every visit attached 220 px too narrow and then sent tw
 while the rail animated shut. A new rail, panel or animated width beside the terminal needs the
 same treatment. Tests: `UITests/tests/terminal-automations.spec.js` ("a tab attaches at the width
 the Terminals view settles to"), `Tests/wwwroot/js/chat-history-sidebar.test.mjs`.
+
+## Console host and terminal queries (VIBE-354)
 
 A session on the bundled Windows console host (App settings > **Modern Windows console host**) has
 its terminal queries answered by the server and gets no repaint after a resize. The contract is in

@@ -28,7 +28,5 @@ public sealed record LaunchCatalogItem(string Id, string DefinitionType, string 
 public sealed record LaunchCatalogScript(string Path, JobScriptRuntime Runtime);
 public sealed record LaunchProject(string Id, string Name, string Path, bool IsCurrent);
 public sealed record LaunchCatalog(IReadOnlyList<LaunchCatalogItem> Items);
-public sealed record LaunchLaneEntry(VibeRails.Services.Board.BoardLaunchEvent Entry, string CardLabel,
-    string DefinitionName, LaunchRun? Run);
 public sealed record SavedPreset(LaunchPreset Preset, IReadOnlyList<LaunchTriggerBinding> AffectedBindings);
 public sealed record LaunchAttachmentRequest(string Name, string DataUrl);

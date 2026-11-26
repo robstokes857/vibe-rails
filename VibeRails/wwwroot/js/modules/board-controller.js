@@ -177,7 +177,7 @@ export class BoardController {
         this.collapsedLaneIds = this.readCollapsedLaneIds();
         this._laneScrollTops = new Map();
         BoardApi.attach(app);
-        this.laneAgents = new BoardLaneAgents(app, agent => this.goToCardAutomation(agent.cardId, agent.terminalSessionId || agent.sessionId));
+        this.laneAgents = new BoardLaneAgents(app);
         // The lane card's assignee menu (VIBE-145): rows wear the same brand marks as the chips.
         this.cardAssign = new BoardCardAssign(app, {
             avatar: row => this.avatarHtml(this.assigneeInfo(row.key), 18),

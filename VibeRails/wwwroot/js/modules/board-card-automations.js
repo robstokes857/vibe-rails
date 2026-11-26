@@ -35,7 +35,11 @@ export function bindCardAutomations(editor, card, { app, onQueued, onRuns }) {
             // Readable rows (VIBE-338): a status pill per step, the report only when it says more
             // than the pill, and an agent's open skip with its reason until a person dismisses it.
             const laneEntries=(entries||[]).filter(entry=>entry.current);
-            const steps=laneEntries.map(entry=>laneEntryRowMarkup(entry, catalog.items.find(item=>item.id===entry.definitionId)?.name || 'Unavailable definition')).join('');
+            // Each step with its run, when this card's run list has it: the step then shows the run's
+            // own state and error and offers Retry. This rail is the one place a card's lane runs are
+            // managed; the lane panel used to list them for every card in the lane (VIBE-372).
+            const runsById=new Map(runs.map(run=>[run.id,run]));
+            const steps=laneEntries.map(entry=>laneEntryRowMarkup(entry, catalog.items.find(item=>item.id===entry.definitionId)?.name || 'Unavailable definition', runsById.get(entry.runId) || null)).join('');
             const history=runs.map(cardRunRowMarkup).join('');
             const next=agentSkipNoticeMarkup(editor._boardCard?.agentSkip ?? card.agentSkip)
                 +(steps?`<h4 class="board-step-runs-heading">This lane</h4>${steps}`:'')
@@ -70,10 +74,14 @@ export function bindCardAutomations(editor, card, { app, onQueued, onRuns }) {
             finally{busy=false;void refresh();}
             return;
         }
-        const target=event.target.closest('[data-launch-skip], [data-launch-replay]');if(!target || busy)return;
+        const target=event.target.closest('[data-launch-skip], [data-launch-retry], [data-launch-replay]');if(!target || busy)return;
         if(target.dataset.launchReplay){const viewer = await showReplayModal(target.dataset.launchReplay);if(current())previews.add(viewer.close);else viewer.close();return;}
         busy=true;target.disabled=true;
-        try{await api.call(`board/cards/${encodeURIComponent(card.id)}/launches/${encodeURIComponent(target.dataset.launchSkip)}/skip`,'POST');if(current())onQueued?.();}catch(error){if(current())message.textContent=error.message;}finally{busy=false;void refresh();}
+        try{
+            if(target.dataset.launchRetry)await api.runAction(target.dataset.launchRetry,'retry');
+            else await api.call(`board/cards/${encodeURIComponent(card.id)}/launches/${encodeURIComponent(target.dataset.launchSkip)}/skip`,'POST');
+            if(current())onQueued?.();
+        }catch(error){if(current())message.textContent=error.message;}finally{busy=false;void refresh();}
     },{signal:abort.signal});
     void refresh();
     return {refresh,dispose(){abort.abort();previews.forEach(close=>close());}};

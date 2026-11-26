@@ -1,4 +1,5 @@
 import { escapeHtml } from './utils.js';
+import { isRunFinished } from './launch-api.js';
 
 /**
  * One readable state for a lane step (VIBE-338): the card rail used to print
@@ -46,16 +47,25 @@ export function stepSummaryMarkup(text, id) {
         + (long ? `<button type="button" class="btn btn-link btn-sm board-step-run-more" data-step-more="${escapeHtml(id)}" aria-expanded="false">Show more</button>` : '');
 }
 
-/** The rail row for one current lane entry. */
-export function laneEntryRowMarkup(entry, name) {
-    const state = stepRunState(entry);
+/**
+ * The rail row for one current lane entry. `run` is the entry's run when the card's run list has
+ * it: the row then shows the run's own state and error, and offers Retry once the run has
+ * finished without a pass. A run is managed here, on the card it ran for; the lane panel no
+ * longer lists every card's runs (VIBE-372).
+ */
+export function laneEntryRowMarkup(entry, name, run = null) {
+    const state = stepRunState(entry, run);
     const canSkip = !entry.skipRequested && !['passed', 'skipped'].includes(entry.verdict);
     // The same wording as the lane panel's legacy steps: a queued or running step is stopped first.
-    const running = ['queued', 'claimed', 'running', 'uncertain'].includes(entry.processStatus);
+    const running = ['queued', 'claimed', 'running', 'uncertain'].includes(run?.status || entry.processStatus);
+    const canRetry = !!run && isRunFinished(run) && !entry.skipRequested
+        && (run.status !== 'succeeded' || entry.verdict !== 'passed');
+    const actions = (canSkip ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-launch-skip="${escapeHtml(entry.id)}">${running ? 'Stop and skip' : 'Skip'}</button>` : '')
+        + (canRetry ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-launch-retry="${escapeHtml(run.id)}">Retry</button>` : '');
     return `<article class="board-step-run">
         <div class="board-step-run-head"><span class="board-step-run-name">${escapeHtml(name)}</span>${stepPillMarkup(state)}</div>
-        ${stepSummaryMarkup(stepSummaryText(entry), entry.id)}
-        ${canSkip ? `<div class="board-step-run-actions"><button type="button" class="btn btn-sm btn-outline-secondary" data-launch-skip="${escapeHtml(entry.id)}">${running ? 'Stop and skip' : 'Skip'}</button></div>` : ''}
+        ${stepSummaryMarkup(stepSummaryText(entry, run), entry.id)}
+        ${actions ? `<div class="board-step-run-actions">${actions}</div>` : ''}
     </article>`;
 }
 

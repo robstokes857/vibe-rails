@@ -187,17 +187,19 @@ test('card checks pause and refresh on reveal, then release their subscription',
     assert.equal(f.visibility.listeners.size, 0);
 });
 
-test('lane activity pauses and refreshes on reveal, then releases its subscription', async t => {
+test('the lane panel lists no card runs: it reads no lane activity and keeps no poll', async t => {
+    // VIBE-372. A run belongs to the card it ran for, and that card's Automations rail lists it.
+    // The lane panel used to read every card's entries for the lane every ten seconds and on
+    // each reveal, and list them under "Card runs".
     const f = fixture(t);
     installGlobals(t, { window: f.host, document: f.page });
     const clock = timers(t, f.host);
     const content = surface({ isConnected: true, removeAttribute() {}, querySelector: () => null, querySelectorAll: () => [] });
-    const running = {};
     const panel = surface({ isConnected: true, classList: { toggle() {} },
-        querySelector: selector => selector === '[data-lane-agents-content]' ? content : running });
-    let reads = 0;
+        querySelector: selector => selector === '[data-lane-agents-content]' ? content : null });
+    const reads = [];
     f.app.apiCall = async url => {
-        if (url.endsWith('/launches/activity')) { reads++; return []; }
+        reads.push(url);
         if (url.endsWith('/launch-catalog')) return { items: [] };
         return { selections: [], revision: 0 };
     };
@@ -205,14 +207,14 @@ test('lane activity pauses and refreshes on reveal, then releases its subscripti
     const dispose = mountLaneAgentBody({ app: f.app, panel, column: { id: 'lane' },
         signal: new AbortController().signal, position() {}, updateCount() {} });
     await settle();
-    f.show(false); clock.tick();
-    assert.equal(reads, 1);
-    f.show(true);
-    await settle();
-    assert.equal(reads, 2);
-    dispose();
+    assert.ok(reads.some(url => url.endsWith('/board/columns/lane/launches')), 'the run order still loads');
+    const loaded = reads.length;
     f.show(false); f.show(true); clock.tick();
-    assert.equal(reads, 2);
+    await settle();
+    assert.equal(reads.length, loaded, 'nothing polls and a reveal reads nothing');
+    assert.deepEqual(reads.filter(url => url.includes('/launches/activity')), []);
+    assert.equal(clock.callbacks.size, 0);
+    dispose();
     assert.equal(f.visibility.listeners.size, 0);
 });
 

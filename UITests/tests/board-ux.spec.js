@@ -4843,7 +4843,6 @@ async function installLaunchFixture(page, { conflict = false } = {}) {
         }
         return route.fulfill({json:{selections:state.selections,revision:state.revision}});
     });
-    await page.route('**/api/v1/board/columns/*/launches/activity',route=>route.fulfill({json:state.activity}));
     await page.route('**/api/v1/board/cards/card_test/launches',async route=>{
         if(route.request().method()==='POST'){
             state.posts++;state.lastRun=route.request().postDataJSON();
@@ -5022,77 +5021,42 @@ for (const width of [320, 375, 768, 1024]) test(`lane picker explains choices an
     await page.screenshot({ path: testInfo.outputPath(`lane-picker-menu-${width}.png`) });
 });
 
-test('unified lane progress distinguishes process and review, retries and skips exact card entries',async({page})=>{
-    await openBoard(page);const state=await installLaunchFixture(page);
-    state.activity=[{cardLabel:'VIBE-1',definitionName:'Review',entry:{id:'entry_1',cardId:'card_test',definitionId:'preset_review',current:true,processStatus:'succeeded',verdict:null,gate:'review',summary:'Review not reported'},run:{id:'run_1',status:'succeeded'}}];
+test("a card's rail retries and skips its own lane entries, and the lane panel lists no card runs",async({page})=>{
+    // VIBE-372. The lane panel listed every card's lane runs under "Card runs", a list that grew
+    // with each card that stayed in the lane. A run belongs to the card it ran for: Retry, Stop and
+    // skip and the report are on that card's Automations rail, and the lane panel shows the run
+    // order only.
+    const requests=await openBoard(page);const state=await installLaunchFixture(page);
+    const run={id:'run_1',status:'failed',error:'The build could not start.',snapshot:{preset:{name:'Review'},context:{cardId:'card_test'}}};
+    state.runs=[run];
+    state.activity=[{entry:{id:'entry_1',cardId:'card_test',definitionId:'preset_review',current:true,runId:'run_1',processStatus:'failed',verdict:null,gate:'review'},run}];
+
     await page.getByRole('button',{name:'Agents and Actions on entry to Ready',exact:true}).click();
     const panel=page.locator('.board-lane-agents-panel');
-    await expect(panel).toContainText('Process: succeeded · Result: Not reported');
-    await panel.getByRole('button',{name:'Retry',exact:true}).click();await expect.poll(()=>state.retries).toBe(1);
-    await expect(panel).toContainText('Process: queued');await panel.getByRole('button',{name:'Stop and skip',exact:true}).click();
-    await expect.poll(()=>state.skips).toBe(1);await expect(panel.getByRole('button',{name:'Stop and skip'})).toHaveCount(0);
-});
+    await expect(panel.locator('[data-lane-selection-list] strong')).toHaveText(['Review','Check']);
+    await expect(panel).not.toContainText('Card runs');
+    await expect(panel.locator('[data-lane-running], .board-lane-run')).toHaveCount(0);
+    await expect(panel.getByRole('button',{name:/^(Retry|Stop and skip|Skip|Open session)$/})).toHaveCount(0);
+    await panel.getByRole('button',{name:'Close lane panel'}).click();
+    await expect(panel).toHaveCount(0);
+    expect(requests.filter(request=>request.path.endsWith('/launches/activity'))).toEqual([]);
 
-for (const width of [320, 375, 768, 1024]) test(`lane reports collapse independently and survive activity refresh at ${width}px`, async ({ page }, testInfo) => {
-    await page.setViewportSize({ width, height: 900 });
-    await page.clock.install();
-    await openBoard(page);
-    const state = await installLaunchFixture(page);
-    const report = 'Review completed. Please rerun against the latest changes.\n' +
-        'A long reference: ' + 'abcdef0123456789'.repeat(12) + '\n<img src=x onerror="window.__reportInjected=true">';
-    state.activity = [
-        { cardLabel: 'VIBE-1', definitionName: 'Code review', entry: { id: 'entry_1', cardId: 'card_test', processStatus: 'succeeded', verdict: 'failed', summary: report }, run: { id: 'run_1', status: 'succeeded', sessionId: 'session_1' } },
-        { cardLabel: 'VIBE-2', definitionName: 'Code review', entry: { id: 'entry_2', processStatus: 'succeeded', verdict: 'passed', summary: 'No findings in the reviewed changes.' }, run: { id: 'run_2', status: 'succeeded' } },
-        { cardLabel: 'VIBE-3', definitionName: 'Build', entry: { id: 'entry_3', processStatus: 'failed', skipRequested: true }, run: { id: 'run_3', status: 'failed', error: 'The build could not start.' } },
-        { cardLabel: 'VIBE-4', definitionName: 'Check', entry: { id: 'entry_4', processStatus: 'running' }, run: { id: 'run_4', status: 'running' } }
-    ];
-    const trigger = page.getByRole('button', { name: 'Agents and Actions on entry to Ready', exact: true });
-    await trigger.click();
-    const panel = page.locator('.board-lane-agents-panel');
-    const rows = panel.locator('.board-lane-run');
-    const firstReport = rows.nth(0).locator('details');
-    const firstToggle = firstReport.locator('summary');
-    await expect(rows).toHaveCount(4);
-    await expect(panel.locator('[data-lane-report]')).toHaveCount(3);
-    await expect(panel.locator('[data-lane-report][open]')).toHaveCount(0);
-    await expect(firstReport.locator('p')).toBeHidden();
-    await expect(rows.nth(0).locator('.board-lane-run-status')).toBeVisible();
-    for (const name of ['Open session', 'Stop and skip', 'Retry'])
-        await expect(rows.nth(0).getByRole('button', { name, exact: true })).toBeVisible();
-    await expect(rows.nth(0).locator('.board-lane-run-title')).toHaveCSS('font-weight', '600');
-    await expect(rows.nth(0).locator('.board-lane-run-status')).toHaveCSS('font-weight', '400');
-    await panel.locator('[data-lane-running]').scrollIntoViewIfNeeded();
-    await page.screenshot({ path: testInfo.outputPath('lane-reports-collapsed.png') });
-    await firstToggle.focus();
-    await firstToggle.press('Enter');
-    await expect(firstReport.locator('p')).toBeVisible();
-    await expect(firstReport.locator('p')).toHaveText(report);
-    await expect(firstReport.locator('p')).toHaveCSS('font-weight', '400');
-    await expect(firstReport.locator('p')).toHaveCSS('font-size', '14px');
-    await expect(firstReport.locator('img')).toHaveCount(0);
-    await expect(rows.nth(1).locator('details')).not.toHaveAttribute('open');
-    expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-    await firstReport.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: testInfo.outputPath('lane-reports-expanded.png') });
-
-    state.activity[0].entry.summary = report + '\nAdditional review context.';
-    state.activity[3].run.status = 'succeeded';
-    await page.clock.fastForward(10000);
-    await expect(firstReport.locator('p')).toContainText('Additional review context.');
-    await expect(firstReport).toHaveAttribute('open');
-    await expect(firstToggle).toBeFocused();
-    await expect(rows.nth(1).locator('details')).not.toHaveAttribute('open');
-    await firstToggle.press('Space');
-    await expect(firstReport.locator('p')).toBeHidden();
-    await rows.nth(2).locator('summary').click();
-    await expect(rows.nth(2).locator('details p')).toHaveText('The build could not start.');
-    await expect(rows.nth(2).locator('details p')).toBeVisible();
-
-    await page.keyboard.press('Escape');
-    await expect(trigger).toBeFocused();
-    await trigger.click();
-    await expect(panel.locator('[data-lane-report]')).toHaveCount(3);
-    await expect(panel.locator('[data-lane-report][open]')).toHaveCount(0);
+    await page.getByText('Description images',{exact:true}).click();
+    const step=page.locator('[data-board-card-editor] [data-board-automation-runs] .board-step-run:not(.is-history)');
+    await expect(step).toHaveCount(1);
+    await expect(step.locator('.board-step-run-name')).toHaveText('Review');
+    await expect(step.locator('.board-step-pill')).toHaveText('Failed');
+    await expect(step.locator('.board-step-run-summary')).toHaveText('The build could not start.');
+    await step.getByRole('button',{name:'Retry',exact:true}).click();
+    await expect.poll(()=>state.retries).toBe(1);
+    // The run is queued again: it can be stopped, not retried.
+    await expect(step.locator('.board-step-pill')).toHaveText('Queued');
+    await expect(step.getByRole('button',{name:'Retry'})).toHaveCount(0);
+    await step.getByRole('button',{name:'Stop and skip',exact:true}).click();
+    await expect.poll(()=>state.skips).toBe(1);
+    await expect(step.locator('.board-step-pill')).toHaveText('Skipped');
+    await expect(step.getByRole('button')).toHaveCount(0);
+    expect(requests.filter(request=>request.path.endsWith('/launches/activity'))).toEqual([]);
 });
 
 test('unified manual card launch preserves title and comment drafts and prevents duplicate starts',async({page})=>{

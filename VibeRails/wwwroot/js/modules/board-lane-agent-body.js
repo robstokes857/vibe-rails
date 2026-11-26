@@ -1,8 +1,13 @@
 import { mountLaunchLane } from './launch-lane-editor.js';
-import { escapeHtml } from './utils.js';
-import { LaunchApi, isRunFinished } from './launch-api.js';
 
-/** Lane selection drafts and per-card progress have independent lifetimes. */
+/**
+ * The lane panel's body: the lane's on-entry Agents and Actions in run order.
+ *
+ * It lists no runs. A run belongs to the card it ran for, and each card's Automations rail shows
+ * its lane steps with their state, report, Skip and Retry (board-card-automations.js). The panel
+ * used to repeat that for every card in the lane under "Card runs", a list that grew with each
+ * card that stayed in the lane (VIBE-372).
+ */
 export function mountLaneAgentBody({
     app,
     panel,
@@ -10,134 +15,26 @@ export function mountLaneAgentBody({
     signal,
     updateCount,
     position,
-    close,
-    openRunningAgent
+    close
 }) {
     const host = panel.querySelector('[data-lane-agents-content]');
     const disposeLane = mountLaunchLane(app, host, column.id, (settings) => {
         updateCount(settings);
         position();
     });
-    const abort = new AbortController(),
-        api = new LaunchApi(app);
-    const activity = panel.querySelector('[data-lane-running]');
-    let loading = false,
-        entries = [],
-        markup = '',
-        busy = false;
-    const current = () => !abort.signal.aborted && panel.isConnected;
-    const refresh = async () => {
-        if (loading || busy || !current() || app.isUiHidden?.()) return;
-        loading = true;
-        try {
-            entries = await api.call(
-                `board/columns/${encodeURIComponent(column.id)}/launches/activity`,
-                'GET',
-                null,
-                { signal: abort.signal }
-            );
-            if (!current()) return;
-            const next = entries.length ?
-                '<h3 class="h6">Card runs</h3>' +
-                (entries
-                    .map(
-                        ({ entry, run, cardLabel, definitionName }) => `
-                <article class="board-automation-run board-lane-run">
-                    <strong class="board-lane-run-title">${escapeHtml(cardLabel)} · ${escapeHtml(definitionName)}</strong>
-                    ${entry.skippedByAgent
-                        // VIBE-338: an agent's skip reads as its own state, with the agent's reason.
-                        ? `<span class="board-lane-run-status is-agent-skip"><i class="fa-solid fa-forward-step" aria-hidden="true"></i> ${escapeHtml(entry.summary || 'Skipped by agent')} <span class="board-lane-run-by">· ${escapeHtml(entry.skippedByAgent)}</span></span>`
-                        : `<span class="board-lane-run-status">Process: ${escapeHtml(run?.status || entry.processStatus)} · Result: ${escapeHtml(entry.verdict || run?.verdict || 'Not reported')}</span>`}
-                    ${!entry.skippedByAgent && (entry.summary || run?.error) ? `<details class="board-lane-run-report" data-lane-report="${escapeHtml(entry.id)}">
-                        <summary>Report<span class="visually-hidden"> for ${escapeHtml(cardLabel)} · ${escapeHtml(definitionName)}</span></summary>
-                        <p>${escapeHtml(entry.summary || run.error)}</p>
-                    </details>` : ''}
-                    <div class="launch-run-actions">
-                        ${run?.sessionId ? `<button type="button" class="btn btn-sm btn-link" data-lane-running-id="${escapeHtml(entry.id)}">Open session</button>` : ''}
-                        ${!entry.skipRequested && entry.verdict !== 'passed' ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-lane-skip="${escapeHtml(entry.id)}">Stop and skip</button>` : ''}
-                        ${run && isRunFinished(run) && !entry.skipRequested && (run.status !== 'succeeded' || entry.verdict !== 'passed') ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-lane-retry="${escapeHtml(entry.id)}">Retry</button>` : ''}
-                    </div>
-                </article>`
-                    )
-                    .join('') ||
-                    '') : '';
-            if (markup !== next) {
-                const expanded = new Set([...activity.querySelectorAll('[data-lane-report][open]')]
-                    .map(report => report.dataset.laneReport));
-                const focused = activity.querySelector('[data-lane-report] > summary:focus')
-                    ?.parentElement.dataset.laneReport;
-                activity.innerHTML = markup = next;
-                for (const report of activity.querySelectorAll('[data-lane-report]')) {
-                    report.open = expanded.has(report.dataset.laneReport);
-                    if (report.dataset.laneReport === focused)
-                        report.querySelector('summary').focus({ preventScroll: true });
-                }
-            }
-        } catch (error) {
-            if (current()) { activity.textContent = error.message; markup = ''; }
-        } finally {
-            loading = false;
-        }
-    };
+    const abort = new AbortController();
     panel.addEventListener(
         'click',
-        async (event) => {
-            if (event.target.closest('[data-agent-action="close"]')) {
-                close?.();
-                return;
-            }
-            const button = event.target.closest(
-                '[data-lane-running-id], [data-lane-skip], [data-lane-retry]'
-            );
-            if (!button || busy) return;
-            const item = entries.find(
-                (item) =>
-                    item.entry.id ===
-                    (button.dataset.laneRunningId ||
-                        button.dataset.laneSkip ||
-                        button.dataset.laneRetry)
-            );
-            if (!item) return;
-            if (button.dataset.laneRunningId) {
-                if (close?.(false) === false) return;
-                openRunningAgent?.({
-                    cardId: item.entry.cardId,
-                    sessionId: item.run.sessionId
-                });
-                return;
-            }
-            busy = true;
-            button.disabled = true;
-            try {
-                if (button.dataset.laneRetry)
-                    await api.runAction(item.run.id, 'retry');
-                else
-                    await api.call(
-                        `board/cards/${encodeURIComponent(item.entry.cardId)}/launches/${encodeURIComponent(item.entry.id)}/skip`,
-                        'POST'
-                    );
-            } catch (error) {
-                if (current()) app.showToast('Board', error.message, 'error');
-            } finally {
-                busy = false;
-                if (current()) {
-                    button.disabled = false;
-                    void refresh();
-                }
-            }
+        (event) => {
+            if (event.target.closest('[data-agent-action="close"]')) close?.();
         },
         { signal: abort.signal }
     );
-    const timer = setInterval(refresh, 10000);
-    const visible = app.onUiVisible?.(refresh);
     const dispose = () => {
         abort.abort();
         disposeLane();
-        clearInterval(timer);
-        visible?.();
     };
     dispose.beforeClose = disposeLane.beforeClose;
     signal.addEventListener('abort', dispose, { once: true });
-    void refresh();
     return dispose;
 }
