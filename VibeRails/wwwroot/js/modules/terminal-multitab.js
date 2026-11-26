@@ -3736,10 +3736,19 @@ export class TerminalController {
         // Paint the workspace shell before any data fetch so the view switch is
         // instant even when the backend is slow; the refresh below fills in the
         // LLM picker and tab strip once it lands.
+        //
+        // The history rail is drawn in its saved state here, not when the sidebar mounts
+        // after the bind below. The bind connects the active tab, and a connecting tab
+        // measures its width and sends it to the server, which resizes the PTY to it
+        // before it sends the screen. Drawn open and collapsed afterwards, the rail made
+        // every visit connect 220 px too narrow and then widen twice while it animated
+        // shut. The server's copy of the screen drops what a narrower grid cuts off, so
+        // each visit cut the end off every line longer than that narrow width (VIBE-372).
+        const historyOpen = ChatHistorySidebar.initiallyOpen();
         content.innerHTML = `
             <div class="view vb-terminal-focus-view" data-view="terminal-focus">
-                <div class="vb-terminal-focus-layout">
-                    ${ChatHistorySidebar.renderHtml()}
+                <div class="vb-terminal-focus-layout${historyOpen ? '' : ' vb-history-under'}">
+                    ${ChatHistorySidebar.renderHtml({ open: historyOpen })}
                     <div class="vb-terminal-focus-body" data-terminal-focus-content></div>
                 </div>
             </div>

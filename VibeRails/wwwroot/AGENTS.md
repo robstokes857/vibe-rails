@@ -1460,6 +1460,23 @@ marker count).
 
 ## Console host and terminal queries (VIBE-354)
 
+## Terminal attach width (VIBE-372)
+
+A connecting tab measures its panel and sends that grid in the WebSocket URL. The server resizes
+the PTY to it before it sends the screen, and the screen it sends is cut at that width: history
+rows keep their own width on the server, and a snapshot cuts each one at the viewer's. Nothing
+repaints history afterwards, so a tab that attaches narrower than it settles shows long lines
+with their ends missing until its next attach, whatever is resized later.
+
+Everything that sets the terminal's width must therefore be in its final state before
+`bindTerminalActions` runs, because the bind connects the active tab. `loadTerminalFocusView`
+draws the history rail in its saved state (`ChatHistorySidebar.initiallyOpen()`) into the view's
+first markup for that reason. It used to draw the rail open and collapse it when the sidebar
+mounted, after the bind: every visit attached 220 px too narrow and then sent two wider sizes
+while the rail animated shut. A new rail, panel or animated width beside the terminal needs the
+same treatment. Tests: `UITests/tests/terminal-automations.spec.js` ("a tab attaches at the width
+the Terminals view settles to"), `Tests/wwwroot/js/chat-history-sidebar.test.mjs`.
+
 A session on the bundled Windows console host (App settings > **Modern Windows console host**) has
 its terminal queries answered by the server and gets no repaint after a resize. The contract is in
 the [Terminal guide](../Services/Terminal/AGENTS.md#windows-console-host-vibe-354). In the browser:

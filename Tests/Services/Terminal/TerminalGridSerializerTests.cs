@@ -374,6 +374,38 @@ public sealed class TerminalGridSerializerTests
         Assert.Equal(Serialize(server, scrollback: []), Serialize(server, maxBytes: 10));
     }
 
+    [Fact]
+    public void SnapshotReplay_CutsAHistoryRowAtTheWidthItIsSentAt_AndTheServerKeepsTheRowWhole()
+    {
+        // VIBE-372. A history row keeps the width it was written at. A snapshot cuts it at the
+        // width of the viewer it is made for, and nothing repaints history afterwards, so a
+        // viewer that attaches narrower than it settles shows long lines cut off until its next
+        // attach. The Terminals view did that on every visit, by measuring before its history
+        // rail had collapsed. The cure is on the viewer's side (attach at the settled width):
+        // the next snapshot at the full width has the whole row again.
+        const string line = "the end of this line is past column twenty";
+        var server = new TerminalEmulator.Terminal(cols: 60, rows: 3, scrollbackSize: 100);
+        server.Write(line + "\r\ntwo\r\nthree\r\nfour");
+
+        server.Resize(20, 3);
+        Assert.Equal(["the end of this line"], HistoryAfterReplay(server));
+
+        server.Resize(60, 3);
+        Assert.Equal([line], HistoryAfterReplay(server));
+    }
+
+    private static string[] HistoryAfterReplay(TerminalEmulator.Terminal server)
+    {
+        var client = new TerminalEmulator.Terminal(server.Cols, server.Rows, scrollbackSize: 100);
+        client.Write(Serialize(server).AsSpan());
+        return [.. client.GetScrollback().Select(row =>
+        {
+            var text = new StringBuilder();
+            foreach (var cell in row) cell.AppendText(text);
+            return text.ToString().TrimEnd();
+        })];
+    }
+
     private static string Label(TerminalCell[] row)
     {
         var text = new StringBuilder();

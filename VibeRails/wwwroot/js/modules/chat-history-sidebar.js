@@ -62,9 +62,27 @@ export class ChatHistorySidebar {
         this._softRefreshInFlight = false;
     }
 
-    static renderHtml() {
+    /**
+     * Whether the sidebar starts expanded: collapsed on a first visit (the terminal gets the
+     * full width), otherwise as the user left it. Only a user's own toggle is saved.
+     */
+    static initiallyOpen() {
+        try {
+            return localStorage.getItem(HISTORY_SEEN_STORAGE_KEY) === '1'
+                && localStorage.getItem(HISTORY_OPEN_STORAGE_KEY) === '1';
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * The sidebar's markup. Pass `open: false` to draw the collapsed rail from the first paint;
+     * the host then also puts `vb-history-under` on its `.vb-terminal-focus-layout`. A view that
+     * holds a terminal has to do that, see TerminalController.loadTerminalFocusView.
+     */
+    static renderHtml({ open = true } = {}) {
         return `
-            <div class="ch-sidebar" id="ch-sidebar">
+            <div class="ch-sidebar${open ? '' : ' ch-sidebar-collapsed'}" id="ch-sidebar">
                 <span class="ch-sidebar-rail-label" aria-hidden="true">History</span>
                 <div class="ch-sidebar-header">
                     <span class="ch-sidebar-title">
@@ -387,12 +405,9 @@ export class ChatHistorySidebar {
         // Initial state: first-time visitors get a collapsed sidebar (so the
         // terminal gets full width); returning users get whatever they last
         // had open. We propagate via onToggle without writing to storage —
-        // only actual user toggles persist.
-        let initialOpen = false;
-        if (!isFirstVisit) {
-            try { initialOpen = localStorage.getItem(HISTORY_OPEN_STORAGE_KEY) === '1'; } catch {}
-        }
-        onToggle?.(initialOpen);
+        // only actual user toggles persist. The Terminals view has already drawn
+        // this state (initiallyOpen), so there this call changes no class.
+        onToggle?.(ChatHistorySidebar.initiallyOpen());
         void this._load();
     }
 

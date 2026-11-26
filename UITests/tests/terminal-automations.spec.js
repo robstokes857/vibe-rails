@@ -154,6 +154,9 @@ async function openFixture(page, total = 35, presets = []) {
         tabs.set(tab.tabId, tab);
     }
     const connections = [];
+    // The grid each viewer asked for when it attached, and every later resize it sent.
+    const attaches = [];
+    const resizes = [];
     const deleted = [];
     const launches = [];
     let eventSocket;
@@ -164,8 +167,13 @@ async function openFixture(page, total = 35, presets = []) {
     });
     await page.routeWebSocket('**/api/v1/events/ws*', socket => { eventSocket = socket; });
     await page.routeWebSocket('**/api/v1/terminal/tabs/*/ws*', socket => {
-        const tabId = new URL(socket.url()).pathname.split('/')[5];
+        const url = new URL(socket.url());
+        const tabId = url.pathname.split('/')[5];
         connections.push(tabId);
+        attaches.push({ tabId, cols: Number(url.searchParams.get('cols')), rows: Number(url.searchParams.get('rows')) });
+        socket.onMessage(message => {
+            if (typeof message === 'string' && message.startsWith('__resize__:')) resizes.push({ tabId, size: message.slice(11) });
+        });
         socket.send(Buffer.from(`Output from ${tabId}\r\n`));
     });
     await page.route('**/api/v1/**', route => {
@@ -259,7 +267,8 @@ async function openFixture(page, total = 35, presets = []) {
     )).toBe(false);
     // The terminal's documented initial focus retry runs180ms after connect.
     await page.waitForTimeout(220);
-    return { tabs, connections, deleted, launches, emit: (type, payload) => eventSocket.send(JSON.stringify({ type, payload })) };
+    return { tabs, connections, attaches, resizes, deleted, launches,
+        emit: (type, payload) => eventSocket.send(JSON.stringify({ type, payload })) };
 }
 
 for (const width of [1280, 390]) test(`terminal picker opens a regular Agent tab with controls and restores it at ${width}px`, async ({ page }, testInfo) => {
@@ -737,6 +746,56 @@ test('a shorter window refits the terminal instead of cutting off its last rows'
     await expect.poll(async () => (await layout()).overflow).toBeLessThanOrEqual(0);
     await expect.poll(async () => (await layout()).rows).toBeLessThan(tallRows);
 });
+
+for (const railOpen of [false, true]) {
+    test(`a tab attaches at the width the Terminals view settles to, history rail ${railOpen ? 'open' : 'collapsed'}`, async ({ page }) => {
+        // A connecting tab sends its width in the socket URL and the server resizes the PTY to
+        // it before it sends the screen. The history rail used to be drawn open and collapsed
+        // only after the tab had connected, so every visit attached 220 px too narrow and then
+        // sent wider sizes while the rail animated shut. The server's copy of the screen drops
+        // what a narrower grid cuts off, so each visit cut the ends off long lines (VIBE-372).
+        await page.setViewportSize({ width: 1500, height: 820 });
+        await page.addInitScript(open => {
+            localStorage.setItem('viberails_history_sidebar_seen', '1');
+            localStorage.setItem('viberails_history_sidebar_open', open ? '1' : '0');
+        }, railOpen);
+        const fixture = await openFixture(page, 1);
+        const view = () => page.evaluate(() => {
+            const sidebar = document.getElementById('ch-sidebar');
+            return {
+                cols: window.app.terminalController.manager.getActiveTab().instance.vibeTerminal.cols,
+                railCollapsed: sidebar.classList.contains('ch-sidebar-collapsed'),
+                railUnder: sidebar.closest('.vb-terminal-focus-layout').classList.contains('vb-history-under'),
+                railWidth: Math.round(sidebar.getBoundingClientRect().width)
+            };
+        });
+        const attachedAtTheSettledWidth = async (visit) => {
+            // Longer than the rail's 0.55 s animation plus the fit and resize debounces.
+            await page.waitForTimeout(1200);
+            const settled = await view();
+            expect(settled.railCollapsed, visit).toBe(!railOpen);
+            expect(settled.railUnder, visit).toBe(!railOpen);
+            expect(settled.railWidth, visit).toBe(railOpen ? 268 : 44);
+            const attaches = fixture.attaches.filter(attach => attach.tabId === 'ordinary');
+            expect(attaches.at(-1).cols, visit).toBe(settled.cols);
+            const otherWidths = fixture.resizes
+                .filter(resize => resize.tabId === 'ordinary' && Number(resize.size.split(',')[0]) !== settled.cols);
+            expect(otherWidths, visit).toEqual([]);
+            return attaches.length;
+        };
+
+        const first = await attachedAtTheSettledWidth('first load');
+
+        // Leaving destroys the manager and its sockets; coming back builds the view again.
+        await page.evaluate(() => window.app.navigate('settings', {}, { resetStack: true }));
+        await expect(page.locator('.view[data-view="terminal-focus"]')).toHaveCount(0);
+        await page.evaluate(() => window.app.navigate('terminal-focus', {}, { resetStack: true }));
+        await expect.poll(() => page.evaluate(() =>
+            window.app.terminalController?.manager?.getActiveTab()?.instance?.hasOpenSocket() === true
+        )).toBe(true);
+        expect(await attachedAtTheSettledWidth('after returning from another view')).toBeGreaterThan(first);
+    });
+}
 
 test('robot menu stays inside a narrow viewport and supports keyboard dismissal', async ({ page }) => {
     await page.setViewportSize({ width: 460, height: 720 });

@@ -58,6 +58,48 @@ test('Terminal manager destruction tears down its history sidebar', () => {
     assert.match(terminalSource, /this\.manager\.historySidebar = historySidebar/);
 });
 
+test('the sidebar starts collapsed on a first visit and otherwise as the user left it', (t) => {
+    const originalLocalStorage = globalThis.localStorage;
+    t.after(() => { globalThis.localStorage = originalLocalStorage; });
+    const stored = (values) => { globalThis.localStorage = { getItem: key => values[key] ?? null, setItem() {} }; };
+
+    stored({});
+    assert.equal(ChatHistorySidebar.initiallyOpen(), false, 'first visit');
+    stored({ viberails_history_sidebar_open: '1' });
+    assert.equal(ChatHistorySidebar.initiallyOpen(), false, 'an open flag without a visit is still a first visit');
+    stored({ viberails_history_sidebar_seen: '1', viberails_history_sidebar_open: '0' });
+    assert.equal(ChatHistorySidebar.initiallyOpen(), false, 'left collapsed');
+    stored({ viberails_history_sidebar_seen: '1', viberails_history_sidebar_open: '1' });
+    assert.equal(ChatHistorySidebar.initiallyOpen(), true, 'left open');
+    globalThis.localStorage = { getItem() { throw new Error('storage is blocked'); } };
+    assert.equal(ChatHistorySidebar.initiallyOpen(), false, 'blocked storage');
+});
+
+test('the sidebar markup can be drawn collapsed from the first paint', () => {
+    const rootClasses = html => /<div class="([^"]*)" id="ch-sidebar">/.exec(html)?.[1].split(' ');
+    assert.deepEqual(rootClasses(ChatHistorySidebar.renderHtml()), ['ch-sidebar']);
+    assert.deepEqual(rootClasses(ChatHistorySidebar.renderHtml({ open: true })), ['ch-sidebar']);
+    assert.deepEqual(rootClasses(ChatHistorySidebar.renderHtml({ open: false })), ['ch-sidebar', 'ch-sidebar-collapsed']);
+});
+
+test('the Terminals view draws the history rail in its saved state before a tab connects', () => {
+    // A connecting tab sends its measured width to the server, which resizes the PTY to it before
+    // sending the screen. Collapsing the rail only when the sidebar mounts, after the bind, made
+    // every visit attach 220 px too narrow (VIBE-372). The browser test is in
+    // UITests/tests/terminal-automations.spec.js; this pins the order in the source.
+    const source = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/terminal-multitab.js'), 'utf8');
+    const load = source.slice(source.indexOf('async loadTerminalFocusView('), source.indexOf('_initChatHistorySidebar(root) {'));
+    const drawn = load.indexOf('const historyOpen = ChatHistorySidebar.initiallyOpen();');
+    const bind = load.indexOf('await this.bindTerminalActions(');
+    assert.ok(drawn > 0 && bind > drawn, 'the saved state is read before the manager binds and connects');
+    assert.match(load, /class="vb-terminal-focus-layout\$\{historyOpen \? '' : ' vb-history-under'\}"/);
+    assert.match(load, /ChatHistorySidebar\.renderHtml\(\{ open: historyOpen \}\)/);
+
+    const sidebar = readFileSync(modulePath, 'utf8');
+    assert.match(sidebar, /onToggle\?\.\(ChatHistorySidebar\.initiallyOpen\(\)\);/,
+        'mount applies the same rule the view drew');
+});
+
 test('ChatHistorySidebar only emits allowlisted inline logo filters', () => {
     const sidebar = new ChatHistorySidebar({});
     const valid = sidebar._renderBrandLogo({
