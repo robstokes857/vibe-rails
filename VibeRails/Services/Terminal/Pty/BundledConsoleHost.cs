@@ -9,8 +9,9 @@ namespace VibeRails.Services.Terminal;
 /// beside the executable; the build copies both from the Microsoft.Windows.Console.ConPTY package.
 ///
 /// <para>
-/// Off unless the user turns on <see cref="Settings.ModernConsoleHost"/>. With it off nothing here
-/// runs and every terminal uses the ConPTY built into Windows, as before.
+/// The default for a terminal tab on Windows x64 (VIBE-372; it was opt-in until then). With
+/// <see cref="Settings.BuiltInConsoleHost"/> on nothing here runs and every terminal uses the
+/// ConPTY built into Windows.
 /// </para>
 /// </summary>
 internal static class BundledConsoleHost
@@ -40,7 +41,7 @@ internal static class BundledConsoleHost
     {
         if (!supportedPlatform)
         {
-            unavailableReason = "The modern console host is only available on Windows x64.";
+            unavailableReason = "The bundled console host is only available on Windows x64.";
             return false;
         }
 
@@ -72,5 +73,5 @@ internal static class BundledConsoleHost
 
     internal static string? ResolveForNewTerminal(
         Settings settings, bool nativeConsole, bool supportedPlatform, string libraryPath) =>
-        settings.ModernConsoleHost && !nativeConsole && supportedPlatform ? libraryPath : null;
+        !settings.BuiltInConsoleHost && !nativeConsole && supportedPlatform ? libraryPath : null;
 }

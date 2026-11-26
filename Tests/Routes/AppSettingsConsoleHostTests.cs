@@ -8,20 +8,25 @@ using Xunit;
 namespace Tests.Routes;
 
 /// <summary>
-/// VIBE-354: the opt-in setting for the bundled Windows console host. It must stay off unless the
-/// user turns it on, survive a save from a client that does not know the field, and never need
-/// more than an ordinary settings save.
+/// VIBE-354, VIBE-372: the bundled Windows console host is the default for terminal tabs, and
+/// "Windows built-in console host" is the setting that opts out. It must stay off unless the user
+/// turns it on, survive a save from a client that does not know the field, and never need more
+/// than an ordinary settings save.
 /// </summary>
 [Collection("ProcessEnvIsolation")]
-public sealed class AppSettingsModernConsoleHostTests
+public sealed class AppSettingsConsoleHostTests
 {
     [Fact]
-    public void NewAndOlderSettingsLeaveItOff()
+    public void NewAndOlderSettingsLeaveTheOptOutOff()
     {
-        Assert.False(new Settings().ModernConsoleHost);
-        Assert.False(JsonSerializer.Deserialize("{}", ConfigJsonContext.Default.Settings)!.ModernConsoleHost);
+        Assert.False(new Settings().BuiltInConsoleHost);
+        Assert.False(JsonSerializer.Deserialize("{}", ConfigJsonContext.Default.Settings)!.BuiltInConsoleHost);
         // An older or cached client that omits the field must not change the saved choice.
-        Assert.Null(JsonSerializer.Deserialize("{}", AppJsonSerializerContext.Default.AppSettingsDto)!.ModernConsoleHost);
+        Assert.Null(JsonSerializer.Deserialize("{}", AppJsonSerializerContext.Default.AppSettingsDto)!.BuiltInConsoleHost);
+        // The retired switch's field is no longer part of the settings API: a cached page that
+        // still posts it changes nothing.
+        var stale = JsonSerializer.Deserialize("{\"modernConsoleHost\":true}", AppJsonSerializerContext.Default.AppSettingsDto)!;
+        Assert.Null(stale.BuiltInConsoleHost);
     }
 
     [Theory]
@@ -40,23 +45,26 @@ public sealed class AppSettingsModernConsoleHostTests
         try
         {
             using var store = new SettingsFile(Path.Combine(directory, "settings.json"));
-            store.Save(new Settings { ModernConsoleHost = stored });
+            // The retired opt-in rides along untouched, whatever is saved here.
+            store.Save(new Settings { BuiltInConsoleHost = stored, ModernConsoleHost = true });
             var read = AppSettingsRoutes.UpdateComputerName(new UpdateComputerNameDto("Fixture"), store);
-            Assert.Equal(stored, read.ModernConsoleHost);
+            Assert.Equal(stored, read.BuiltInConsoleHost);
 
-            var saved = AppSettingsRoutes.UpdateSettings(read with { ModernConsoleHost = requested }, store);
-            Assert.Equal(expected, saved.ModernConsoleHost);
+            var saved = AppSettingsRoutes.UpdateSettings(read with { BuiltInConsoleHost = requested }, store);
+            Assert.Equal(expected, saved.BuiltInConsoleHost);
             using var reopened = new SettingsFile(Path.Combine(directory, "settings.json"));
-            Assert.Equal(expected, reopened.LoadFresh().ModernConsoleHost);
+            Assert.Equal(expected, reopened.LoadFresh().BuiltInConsoleHost);
+            Assert.True(reopened.LoadFresh().ModernConsoleHost);
 
             using var json = JsonDocument.Parse(JsonSerializer.Serialize(saved, AppJsonSerializerContext.Default.AppSettingsDto));
-            Assert.Equal(expected, json.RootElement.GetProperty("modernConsoleHost").GetBoolean());
+            Assert.Equal(expected, json.RootElement.GetProperty("builtInConsoleHost").GetBoolean());
+            Assert.False(json.RootElement.TryGetProperty("modernConsoleHost", out _));
             // It changes how new local terminals are hosted and nothing else, so it needs no
             // password, PIN or dashboard code.
-            Assert.False(AppSettingsRoutes.RequiresPresence(read with { ModernConsoleHost = !stored }, store.LoadFresh()));
-            // The choice a terminal start reads is the saved one.
+            Assert.False(AppSettingsRoutes.RequiresPresence(read with { BuiltInConsoleHost = !stored }, store.LoadFresh()));
+            // The choice a terminal start reads is the saved one: the bundled host unless opted out.
             Assert.Equal(
-                expected ? @"C:\app\conpty\conpty.dll" : null,
+                expected ? null : @"C:\app\conpty\conpty.dll",
                 BundledConsoleHost.ResolveForNewTerminal(
                     reopened.LoadFresh(), nativeConsole: false, supportedPlatform: true, @"C:\app\conpty\conpty.dll"));
         }
@@ -84,14 +92,14 @@ public sealed class AppSettingsModernConsoleHostTests
             if (BundledConsoleHost.IsSupportedPlatform)
             {
                 // Windows x64: an explicit answer, and a reason exactly when the answer is no.
-                Assert.NotNull(read.ModernConsoleHostAvailable);
-                Assert.Equal(read.ModernConsoleHostAvailable == false, read.ModernConsoleHostUnavailableReason is not null);
+                Assert.NotNull(read.BundledConsoleHostAvailable);
+                Assert.Equal(read.BundledConsoleHostAvailable == false, read.BundledConsoleHostUnavailableReason is not null);
             }
             else
             {
                 // Anywhere else the page hides the switch, which it does on a missing value.
-                Assert.Null(read.ModernConsoleHostAvailable);
-                Assert.Null(read.ModernConsoleHostUnavailableReason);
+                Assert.Null(read.BundledConsoleHostAvailable);
+                Assert.Null(read.BundledConsoleHostUnavailableReason);
             }
         }
         finally

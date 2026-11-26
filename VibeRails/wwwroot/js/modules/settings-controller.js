@@ -123,7 +123,7 @@ export class SettingsController {
             const useVsCodeThemeRow = root.querySelector('#setting-use-vscode-theme-row');
             const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
             const vsCodeSpellCheckToggle = root.querySelector('#setting-vscode-spell-check');
-            const modernConsoleHostToggle = root.querySelector('#setting-modern-console-host');
+            const builtInConsoleHostToggle = root.querySelector('#setting-built-in-console-host');
             const mcpEnabledToggle = root.querySelector('#setting-enable-mcp');
             const computerNameInput = root.querySelector('#setting-computer-name');
             const codexEnterpriseNetworkProxyInput = root.querySelector('#setting-codex-enterprise-network-proxy');
@@ -164,7 +164,7 @@ export class SettingsController {
                 useVsCodeThemeToggle.checked = settings.useVsCodeTheme || false;
             }
             if (vsCodeSpellCheckToggle) vsCodeSpellCheckToggle.checked = settings.vsCodeSpellCheck === true;
-            this._applyModernConsoleHost(root, settings);
+            this._applyConsoleHost(root, settings);
             if (mcpEnabledToggle) {
                 mcpEnabledToggle.checked = true;
                 mcpEnabledToggle.disabled = true;
@@ -261,9 +261,9 @@ export class SettingsController {
                             gatewayCredentialEdits(root),
                             vsCodeSpellCheckToggle?.checked ?? false,
                             // Sent only where the row is shown; elsewhere the saved choice is kept.
-                            modernConsoleHostToggle
-                                && root.querySelector('#setting-modern-console-host-row')?.hidden !== true
-                                ? modernConsoleHostToggle.checked : null,
+                            builtInConsoleHostToggle
+                                && root.querySelector('#setting-built-in-console-host-row')?.hidden !== true
+                                ? builtInConsoleHostToggle.checked : null,
                             antigravityApiKeyInput ? antigravityApiKeyInput.value : null,
                             antigravityApiKeyClear ? antigravityApiKeyClear.checked === true : null
                         );
@@ -317,7 +317,7 @@ export class SettingsController {
         this._updateDirtyState(root);
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexEnterpriseNetworkProxy, codexLlmProxyMode, claudeEnterpriseNetworkProxy, openCodeEnterpriseNetworkProxy, grokEnterpriseNetworkProxy, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, gatewayCredentials = {}, vsCodeSpellCheck = false, modernConsoleHost = null, antigravityApiKey = null, clearAntigravityApiKey = null) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexEnterpriseNetworkProxy, codexLlmProxyMode, claudeEnterpriseNetworkProxy, openCodeEnterpriseNetworkProxy, grokEnterpriseNetworkProxy, grokLlmProxyMode, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, grokTokenSaverEnabled, clearApiKey = false, gatewayCredentials = {}, vsCodeSpellCheck = false, builtInConsoleHost = null, antigravityApiKey = null, clearAntigravityApiKey = null) {
         try {
             const previous = this.app.appSettings || {};
             // A new gateway receives that CLI's traffic and credentials; clearing one does not
@@ -339,7 +339,7 @@ export class SettingsController {
                 useVsCodeTheme: useVsCodeTheme,
                 vsCodeSpellCheck,
                 // Omitted unless the page shows the switch: the server keeps an omitted value.
-                ...(typeof modernConsoleHost === 'boolean' ? { modernConsoleHost } : {}),
+                ...(typeof builtInConsoleHost === 'boolean' ? { builtInConsoleHost } : {}),
                 ...(typeof antigravityApiKey === 'string' ? { antigravityApiKey } : {}),
                 ...(typeof clearAntigravityApiKey === 'boolean' ? { clearAntigravityApiKey } : {}),
                 mcpEnabled: mcpEnabled,
@@ -601,7 +601,7 @@ export class SettingsController {
             '#setting-api-key',
             '#setting-use-vscode-theme',
             '#setting-vscode-spell-check',
-            '#setting-modern-console-host',
+            '#setting-built-in-console-host',
             '#setting-computer-name',
             '#setting-codex-gateway-auth-mode',
             '#setting-codex-gateway-api-key-header',
@@ -637,7 +637,7 @@ export class SettingsController {
             apiKey: valueOf('#setting-api-key'),
             useVsCodeTheme: isChecked('#setting-use-vscode-theme'),
             vsCodeSpellCheck: isChecked('#setting-vscode-spell-check'),
-            modernConsoleHost: isChecked('#setting-modern-console-host'),
+            builtInConsoleHost: isChecked('#setting-built-in-console-host'),
             computerName: valueOf('#setting-computer-name'),
             codexEnterpriseNetworkProxy: (root.querySelector('#setting-codex-enterprise-network-proxy')?.value || '').trim(),
             codexLlmProxyMode: this._getCodexLlmProxyMode(root),
@@ -740,26 +740,27 @@ export class SettingsController {
         }
     }
 
-    // The modern Windows console host switch (VIBE-354). The row is shown only where the server
-    // says the host can apply (Windows x64 reports true or false; other platforms report nothing).
-    // A build without the two files keeps the row and says why. There the switch can only turn a
-    // saved "on" back off: terminals already use the built-in host.
-    _applyModernConsoleHost(root, settings) {
-        const toggle = root.querySelector('#setting-modern-console-host');
+    // The Windows built-in console host switch (VIBE-354, VIBE-372). New terminal tabs run on the
+    // bundled console host by default; this switch is the way back to the one built into Windows.
+    // The row is shown only where the server says the bundled host can apply (Windows x64 reports
+    // true or false; other platforms report nothing). A build without the two files keeps the row,
+    // says why, and disables the switch: terminals already use the built-in host there.
+    _applyConsoleHost(root, settings) {
+        const toggle = root.querySelector('#setting-built-in-console-host');
         if (!toggle) return;
 
-        const applies = typeof settings.modernConsoleHostAvailable === 'boolean';
-        const available = settings.modernConsoleHostAvailable === true;
-        toggle.checked = settings.modernConsoleHost === true;
-        toggle.disabled = applies && !available && !toggle.checked;
+        const applies = typeof settings.bundledConsoleHostAvailable === 'boolean';
+        const available = settings.bundledConsoleHostAvailable === true;
+        toggle.checked = settings.builtInConsoleHost === true;
+        toggle.disabled = applies && !available;
 
-        const row = root.querySelector('#setting-modern-console-host-row');
+        const row = root.querySelector('#setting-built-in-console-host-row');
         if (row) row.hidden = !applies;
-        const unavailable = root.querySelector('#setting-modern-console-host-unavailable');
+        const unavailable = root.querySelector('#setting-built-in-console-host-unavailable');
         if (unavailable) {
             unavailable.hidden = !applies || available;
             unavailable.textContent = applies && !available
-                ? `${settings.modernConsoleHostUnavailableReason || 'This build does not include it.'} Terminals use the built-in console host.`
+                ? `${settings.bundledConsoleHostUnavailableReason || 'This build does not include the bundled console host.'} Terminals use the console host built into Windows.`
                 : '';
         }
     }
@@ -788,7 +789,7 @@ export class SettingsController {
         }
         if (useVsCodeThemeToggle) useVsCodeThemeToggle.checked = settings.useVsCodeTheme === true;
         if (vsCodeSpellCheckToggle) vsCodeSpellCheckToggle.checked = settings.vsCodeSpellCheck === true;
-        this._applyModernConsoleHost(root, settings);
+        this._applyConsoleHost(root, settings);
         if (computerNameInput) {
             computerNameInput.value = settings.computerName || '';
             if (settings.machineName) computerNameInput.placeholder = settings.machineName;

@@ -149,7 +149,8 @@ public class TerminalRunner
         var initialSize = isNativeCli && NativeConsoleGeometry.TryGetSize(out var nativeSize)
             ? nativeSize
             : new NativeConsoleSize(Terminal.DefaultCols, Terminal.DefaultRows);
-        // Opt-in (Settings > Modern Windows console host). Null keeps the ConPTY built into Windows.
+        // The bundled console host unless App settings > Windows built-in console host is on, or
+        // this is a native console session. Null keeps the ConPTY built into Windows.
         // Resolved before the session exists because creating it sends the relay registration,
         // and a remote viewer has to know the host before it reads any output (VIBE-171). If
         // Windows then falls back to the built-in host, the registration still says "bundled":
@@ -391,7 +392,8 @@ public class TerminalRunner
 
     /// <summary>
     /// The bundled console host for a new terminal, or null for the one built into Windows.
-    /// A settings file that cannot be read means the default, never a failed launch.
+    /// A settings file that cannot be read means the default (the bundled host), never a failed
+    /// launch.
     /// </summary>
     internal string? ResolveBundledConsoleHost(bool isNativeCli)
     {
@@ -404,8 +406,8 @@ public class TerminalRunner
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "[Terminal] Could not read the console host setting; using the built-in console host");
-            return null;
+            Log.Warning(ex, "[Terminal] Could not read the console host setting; using the default console host");
+            return BundledConsoleHost.ResolveForNewTerminal(new Settings(), isNativeCli);
         }
     }
 

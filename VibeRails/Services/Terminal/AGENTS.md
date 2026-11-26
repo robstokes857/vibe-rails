@@ -401,13 +401,18 @@ Changes still require Windows Native AOT validation and live provider/VS Code ch
 
 ### Windows console host (VIBE-354)
 
-App settings > **Modern Windows console host** (`Settings.ModernConsoleHost`, default off) starts
-new terminals on the console host shipped with VibeRails (`conpty\conpty.dll` and
-`conpty\OpenConsole.exe` beside the executable, from the `Microsoft.Windows.Console.ConPTY`
-package) instead of the one built into Windows. Off is the `kernel32` path with nothing changed.
-The setting is read when a terminal starts (`TerminalRunner.ResolveBundledConsoleHost`), so a
-running terminal keeps the host it has. It is experimental and Windows x64 only; elsewhere the
-Settings page does not show the switch.
+New terminal tabs on Windows x64 start on the console host shipped with VibeRails
+(`conpty\conpty.dll` and `conpty\OpenConsole.exe` beside the executable, from the
+`Microsoft.Windows.Console.ConPTY` package) instead of the one built into Windows. That has been
+the default since VIBE-372 (2026-11-26); from VIBE-354 until then it was an opt-in switch,
+**Modern Windows console host**. App settings > **Windows built-in console host**
+(`Settings.BuiltInConsoleHost`, default off) is the way back: on is the `kernel32` path with
+nothing changed. The setting is read when a terminal starts
+(`TerminalRunner.ResolveBundledConsoleHost`), so a running terminal keeps the host it has, and a
+settings file that cannot be read means the default. The Settings page shows the switch on
+Windows x64 only. `Settings.ModernConsoleHost`, the retired opt-in, is still in the settings file
+and is not read: a saved `false` there is every user who never touched it, so it cannot mean
+"keep the built-in host". It is written back unchanged for older versions on the same computer.
 
 - **Load by absolute path, fall back, and say so.** `Pty/BundledConsoleHost.cs` builds the path
   from `AppContext.BaseDirectory`. `Pty.Net/Windows/ConPtyApi.cs` loads it with `NativeLibrary` and
@@ -452,7 +457,9 @@ Settings page does not show the switch.
   emulator's input and therefore only between two sequences. The host is told the
   emulator's cursor. Code that relies on a repaint after a resize must check the host first.
 
-Known limits. One card owns them all, VB-G9STX-427; each limit names its part of that card:
+Known limits. One card owns them all, VB-G9STX-427; each limit names its part of that card.
+They were written while the host was opt-in. It is the default now, so they apply to every new
+terminal tab on Windows x64 unless the built-in host is chosen in App settings:
 
 - A remote viewer is silent only on a hosted site that has VIBE-171 (VibeRails-Front, with its
   `ActiveTerminalConsoleHost` migration). An older site ignores the member and its viewer still
@@ -479,10 +486,10 @@ Known limits. One card owns them all, VB-G9STX-427; each limit names its part of
   `OpenConsole.exe` (part E).
 
 Tests: `BundledConsoleHostTests` (the real host and a throwaway child), `BundledHostResizeTests`,
-`EmulatorParseBoundaryTests`, `TerminalQueryScannerTests`, `TerminalQueryResponderTests`, `AppSettingsModernConsoleHostTests`,
+`EmulatorParseBoundaryTests`, `TerminalQueryScannerTests`, `TerminalQueryResponderTests`, `AppSettingsConsoleHostTests`,
 `RemoteTerminalRegistrationConsoleHostTests` (the registration's bytes with and without the host),
 `ConsoleHostPackagingTests`, `terminal-device-queries.test.mjs`,
-`settings-modern-console-host.test.mjs` and `UITests/tests/xterm-device-queries.spec.js` (the real
+`settings-console-host.test.mjs` and `UITests/tests/xterm-device-queries.spec.js` (the real
 xterm.js; `npm run test:node`). The resize tables in that spec and in
 `TerminalQueryResponderTests` state one rule: change them together.
 

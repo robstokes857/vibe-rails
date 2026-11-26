@@ -33,38 +33,54 @@ public sealed class BundledConsoleHostTests
     // ---- The setting ---------------------------------------------------------------------
 
     [Fact]
-    public void NewAndOlderSettingsLeaveTheBuiltInHostOn()
+    public void NewAndOlderSettingsUseTheBundledHost()
     {
-        Assert.False(new Settings().ModernConsoleHost);
-        Assert.False(System.Text.Json.JsonSerializer.Deserialize("{}", ConfigJsonContext.Default.Settings)!.ModernConsoleHost);
+        // VIBE-372: the bundled host is the default. The built-in host is the opt-out.
+        Assert.False(new Settings().BuiltInConsoleHost);
+        Assert.False(System.Text.Json.JsonSerializer.Deserialize("{}", ConfigJsonContext.Default.Settings)!.BuiltInConsoleHost);
     }
 
     [Theory]
-    [InlineData(false, false, true, false)]  // Off: the built-in host, whatever else is true.
-    [InlineData(true, false, true, true)]    // On, a tab, Windows x64: the bundled host.
-    [InlineData(true, true, true, false)]    // A native console session would answer queries twice.
-    [InlineData(true, false, false, false)]  // Not Windows x64.
-    public void OnlyATabTerminalOnWindowsWithTheSettingOnAsksForTheBundledHost(
-        bool settingOn, bool nativeConsole, bool supportedPlatform, bool expectBundled)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TheRetiredOptInIsNotReadAndSurvivesASave(bool saved)
+    {
+        // Every settings file has ModernConsoleHost, false unless its owner tried the host early.
+        // It no longer decides anything, and it is written back for older versions that read it.
+        var settings = System.Text.Json.JsonSerializer.Deserialize(
+            $"{{\"ModernConsoleHost\":{(saved ? "true" : "false")}}}", ConfigJsonContext.Default.Settings)!;
+        Assert.Equal(@"C:\app\conpty\conpty.dll",
+            BundledConsoleHost.ResolveForNewTerminal(settings, nativeConsole: false, supportedPlatform: true, @"C:\app\conpty\conpty.dll"));
+        Assert.Contains($"\"ModernConsoleHost\":{(saved ? "true" : "false")}",
+            System.Text.Json.JsonSerializer.Serialize(settings, ConfigJsonContext.Default.Settings));
+    }
+
+    [Theory]
+    [InlineData(false, false, true, true)]   // The default, a tab, Windows x64: the bundled host.
+    [InlineData(true, false, true, false)]   // Opted out: the built-in host, whatever else is true.
+    [InlineData(false, true, true, false)]   // A native console session would answer queries twice.
+    [InlineData(false, false, false, false)] // Not Windows x64.
+    public void ATabTerminalOnWindowsAsksForTheBundledHostUnlessTheBuiltInHostIsChosen(
+        bool builtInChosen, bool nativeConsole, bool supportedPlatform, bool expectBundled)
     {
         var path = BundledConsoleHost.ResolveForNewTerminal(
-            new Settings { ModernConsoleHost = settingOn }, nativeConsole, supportedPlatform, @"C:\app\conpty\conpty.dll");
+            new Settings { BuiltInConsoleHost = builtInChosen }, nativeConsole, supportedPlatform, @"C:\app\conpty\conpty.dll");
         Assert.Equal(expectBundled ? @"C:\app\conpty\conpty.dll" : null, path);
     }
 
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
-    [InlineData(true, true)]
+    [InlineData(false, true)]
     public void TheRunnerReadsTheSettingWhenATerminalStartsAndKeepsNativeSessionsOnTheBuiltInHost(
-        bool settingOn, bool nativeConsole)
+        bool builtInChosen, bool nativeConsole)
     {
         var reads = 0;
-        var runner = Runner(() => { reads++; return new Settings { ModernConsoleHost = settingOn }; });
+        var runner = Runner(() => { reads++; return new Settings { BuiltInConsoleHost = builtInChosen }; });
 
         var path = runner.ResolveBundledConsoleHost(nativeConsole);
 
-        var expectBundled = settingOn && !nativeConsole && IsWindowsX64;
+        var expectBundled = !builtInChosen && !nativeConsole && IsWindowsX64;
         Assert.Equal(expectBundled ? BundledConsoleHost.LibraryPath : null, path);
         // Read per start, never cached: the choice follows the shared settings file.
         runner.ResolveBundledConsoleHost(nativeConsole);
@@ -72,10 +88,11 @@ public sealed class BundledConsoleHostTests
     }
 
     [Fact]
-    public void AnUnreadableSettingsFileMeansTheBuiltInHostNotAFailedLaunch()
+    public void AnUnreadableSettingsFileMeansTheDefaultHostNotAFailedLaunch()
     {
         var runner = Runner(() => throw new IOException("settings.json is locked"));
-        Assert.Null(runner.ResolveBundledConsoleHost(isNativeCli: false));
+        Assert.Equal(IsWindowsX64 ? BundledConsoleHost.LibraryPath : null, runner.ResolveBundledConsoleHost(isNativeCli: false));
+        Assert.Null(runner.ResolveBundledConsoleHost(isNativeCli: true));
     }
 
     [Fact]
@@ -127,7 +144,7 @@ public sealed class BundledConsoleHostTests
         // The terminal works after a fallback, so this warning is the only sign of one.
         var fallback = TerminalPty.DescribeConsoleHost(PtyConsoleHost.Inbox, 7, path, reason)!.Value;
         Assert.Equal(Serilog.Events.LogEventLevel.Warning, fallback.Level);
-        Assert.Contains("built-in console host although the modern host is turned on: {Reason}", fallback.Template);
+        Assert.Contains("built-in console host although the bundled host was asked for: {Reason}", fallback.Template);
         Assert.Equal([7, reason], fallback.Values);
 
         var settingOff = TerminalPty.DescribeConsoleHost(PtyConsoleHost.Inbox, 7, null, null)!.Value;

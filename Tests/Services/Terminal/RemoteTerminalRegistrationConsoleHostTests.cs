@@ -133,10 +133,10 @@ public sealed class RemoteTerminalRegistrationConsoleHostTests : IAsyncDisposabl
     // ---- Known before the PTY exists ---------------------------------------------------------
 
     [Theory]
-    [InlineData(true, false)]   // The setting on, a terminal tab.
-    [InlineData(false, false)]  // The setting off.
-    [InlineData(true, true)]    // A native console session stays on the built-in host.
-    public async Task TheRunnerNamesTheConsoleHostWhenItCreatesTheSession(bool settingOn, bool nativeConsole)
+    [InlineData(false, false)]  // The default, a terminal tab: the bundled host.
+    [InlineData(true, false)]   // The built-in host chosen in App settings.
+    [InlineData(false, true)]   // A native console session stays on the built-in host.
+    public async Task TheRunnerNamesTheConsoleHostWhenItCreatesTheSession(bool builtInChosen, bool nativeConsole)
     {
         // Creating the session is what sends the first registration, so the host has to be
         // resolved by then. The runner stops here: no PTY is started.
@@ -149,12 +149,12 @@ public sealed class RemoteTerminalRegistrationConsoleHostTests : IAsyncDisposabl
         var runner = new TerminalRunner(state.Object, Mock.Of<ICommandService>(), Mock.Of<ILocalToolApiContext>(),
             Mock.Of<ILlmProxySessionState>(), Mock.Of<IAutomationConsumer>(), Mock.Of<IRepository>(),
             Mock.Of<IEnvironmentStepRunner>(), Mock.Of<IAppEventBus>(),
-            loadSettings: () => new Settings { ModernConsoleHost = settingOn });
+            loadSettings: () => new Settings { BuiltInConsoleHost = builtInChosen });
 
         await Assert.ThrowsAsync<SessionWasAskedFor>(() => runner.CreateSessionAsync(
             LLM.Codex, Path.GetTempPath(), null, null, Ct, isNativeCli: nativeConsole));
 
-        var expectBundled = settingOn && !nativeConsole && BundledConsoleHostTests.IsWindowsX64;
+        var expectBundled = !builtInChosen && !nativeConsole && BundledConsoleHostTests.IsWindowsX64;
         Assert.Equal(expectBundled ? "bundled" : null, named);
         // The name the desktop's own start, status and tab-list responses use.
         Assert.Equal("bundled", TerminalSessionService.BundledConsoleHostWireName);

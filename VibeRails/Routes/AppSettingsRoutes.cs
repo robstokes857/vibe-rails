@@ -203,8 +203,8 @@ public static class AppSettingsRoutes
             if (settingsDto.VsCodeSpellCheck.HasValue)
                 settings.VsCodeSpellCheck = settingsDto.VsCodeSpellCheck.Value;
             // Read when a terminal starts (BundledConsoleHost), so nothing running is touched.
-            if (settingsDto.ModernConsoleHost.HasValue)
-                settings.ModernConsoleHost = settingsDto.ModernConsoleHost.Value;
+            if (settingsDto.BuiltInConsoleHost.HasValue)
+                settings.BuiltInConsoleHost = settingsDto.BuiltInConsoleHost.Value;
             ApplyContextNudge(settings, settingsDto.CreateVibeStoryTracking, settingsDto.CreateVibeStoryTrackingCustomEnvs);
             // MCP registration is always on. Keep the field true for old clients/settings files.
             settings.McpEnabled = true;
@@ -376,9 +376,9 @@ public static class AppSettingsRoutes
             CodexInheritedBaseBypassesRelay: InheritedBaseBypassesRelay("OPENAI_BASE_URL", null),
             ClaudeInheritedBaseBypassesRelay: InheritedBaseBypassesRelay(LlmProxyClaudeConfig.BaseUrlVariable, LlmProxyUpstream.ClaudeVariable),
             VsCodeSpellCheck: settings.VsCodeSpellCheck,
-            ModernConsoleHost: settings.ModernConsoleHost,
-            ModernConsoleHostAvailable: consoleHostAvailable,
-            ModernConsoleHostUnavailableReason: consoleHostUnavailable,
+            BuiltInConsoleHost: settings.BuiltInConsoleHost,
+            BundledConsoleHostAvailable: consoleHostAvailable,
+            BundledConsoleHostUnavailableReason: consoleHostUnavailable,
             HasAntigravityApiKey: !string.IsNullOrEmpty(settings.AntigravityApiKey)
         );
     }

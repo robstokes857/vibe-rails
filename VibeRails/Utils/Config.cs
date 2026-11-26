@@ -43,12 +43,20 @@ public class Settings : IJsonOnDeserialized, IJsonOnSerializing
     /// <summary>Opt-in offline Board spelling, including the VS Code webview. Off for new and older settings files.</summary>
     public bool VsCodeSpellCheck { get; set; } = false;
     /// <summary>
-    /// Host new Windows terminal tabs with the bundled conpty.dll and OpenConsole.exe in place of
-    /// the ConPTY built into Windows (VIBE-354). Opt-in: off for new and older settings files.
-    /// Read when a terminal starts, so it applies to terminals opened after the change. A build
-    /// without the two files, or a host that will not load, uses the built-in host and logs why.
+    /// The retired opt-in for the bundled console host (VIBE-354). This version does not read it:
+    /// the bundled host is the default and <see cref="BuiltInConsoleHost"/> is the way back. The
+    /// property stays so that a save here keeps the value for an older version on the same
+    /// computer, which still reads it.
     /// </summary>
     public bool ModernConsoleHost { get; set; } = false;
+    /// <summary>
+    /// Host new Windows terminal tabs with the ConPTY built into Windows instead of the bundled
+    /// conpty.dll and OpenConsole.exe, which are the default (VIBE-372). Off for new and older
+    /// settings files. Read when a terminal starts, so it applies to terminals opened after the
+    /// change. Without it, a build that lacks the two files, or a host that will not load, still
+    /// uses the built-in host and logs why.
+    /// </summary>
+    public bool BuiltInConsoleHost { get; set; } = false;
     /// <summary>Suggest optional Vibe Board tracking for default/base LLM launches.</summary>
     public bool CreateVibeStoryTracking { get; set; } = true;
     /// <summary>Suggest optional Vibe Board tracking for saved/custom environment launches.</summary>

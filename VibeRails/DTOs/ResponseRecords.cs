@@ -1510,13 +1510,15 @@ namespace VibeRails.DTOs
         bool ClaudeInheritedBaseBypassesRelay = false,
         // Opt-in Board spelling; omitted requests preserve the saved choice.
         bool? VsCodeSpellCheck = null,
-        // Opt-in modern Windows console host for new terminal tabs (VIBE-354). Omitted requests
-        // preserve the saved choice; responses always contain an explicit value.
-        bool? ModernConsoleHost = null,
-        // Response-only: whether this build and platform can use it, and why not when it cannot.
-        // The saved choice is kept either way; an unavailable host falls back to the built-in one.
-        bool? ModernConsoleHostAvailable = null,
-        string? ModernConsoleHostUnavailableReason = null,
+        // Opt-out of the bundled Windows console host for new terminal tabs: true keeps them on
+        // the host built into Windows (VIBE-372). Omitted requests preserve the saved choice;
+        // responses always contain an explicit value.
+        bool? BuiltInConsoleHost = null,
+        // Response-only: whether this build and platform can use the bundled host, and why not
+        // when it cannot. The saved choice is kept either way; without the host, terminals use
+        // the built-in one.
+        bool? BundledConsoleHostAvailable = null,
+        string? BundledConsoleHostUnavailableReason = null,
         // Write-only Antigravity (agy) Gemini API key. Responses return presence only, never key bytes.
         string? AntigravityApiKey = null,
         bool? ClearAntigravityApiKey = null,

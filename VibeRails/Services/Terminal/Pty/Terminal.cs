@@ -277,7 +277,7 @@ public sealed class Terminal : IAsyncDisposable
         if (requestedPath is not null)
         {
             return (Serilog.Events.LogEventLevel.Warning,
-                "[Terminal] PTY {Pid} is hosted by the built-in console host although the modern host is turned on: {Reason}",
+                "[Terminal] PTY {Pid} is hosted by the built-in console host although the bundled host was asked for: {Reason}",
                 [pid, fallbackReason ?? "this platform has no bundled console host"]);
         }
 

@@ -180,9 +180,10 @@ file; it is reference material, not instructions.
   `ICliWrapper` does it for you) or use an absolute system path. The host itself is built by
   `BackendHost`, which keeps the project's `appsettings.json` and any `Kestrel` configuration
   out of the backend. `PathExecutableTests` and `BackendHostTests` sweep for both. VIBE-310.
-- **A terminal on the bundled console host has one query responder: the server.** With
-  Settings > Modern Windows console host on (default off, VIBE-354), a terminal's output is
-  passed through, the viewer answers no terminal query and nothing repaints after a resize. Read
+- **A terminal on the bundled console host has one query responder: the server.** A terminal
+  tab on Windows x64 runs on that host by default (VIBE-354; the default since VIBE-372, and
+  App settings > Windows built-in console host goes back). Its output is passed through, the
+  viewer answers no terminal query and nothing repaints after a resize. Read
   [the Terminal guide](VibeRails/Services/Terminal/AGENTS.md#windows-console-host-vibe-354)
   before touching query replies, resize handling or the viewer's xterm.js options.
 - **Paths recorded for other programs to call `vb` back point at the install.** MCP

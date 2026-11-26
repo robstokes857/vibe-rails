@@ -1479,8 +1479,9 @@ the Terminals view settles to"), `Tests/wwwroot/js/chat-history-sidebar.test.mjs
 
 ## Console host and terminal queries (VIBE-354)
 
-A session on the bundled Windows console host (App settings > **Modern Windows console host**) has
-its terminal queries answered by the server and gets no repaint after a resize. The contract is in
+A session on the bundled Windows console host has its terminal queries answered by the server and
+gets no repaint after a resize. That host is the default for new terminal tabs on Windows x64
+(VIBE-372); App settings > **Windows built-in console host** opts out. The contract is in
 the [Terminal guide](../Services/Terminal/AGENTS.md#windows-console-host-vibe-354). In the browser:
 
 - `terminal-device-queries.js` holds the xterm.js parser handlers that keep the viewer from
@@ -1497,12 +1498,14 @@ the [Terminal guide](../Services/Terminal/AGENTS.md#windows-console-host-vibe-35
   tab-list and adoption responses all carry `consoleHost`; new code that builds tab state has to
   copy it.
 - `shouldResetDisplayBeforeResize` is false for these sessions: nothing would repaint the screen.
-- The switch is `#setting-modern-console-host` in the App settings form. Its row is shown only when
-  the server reports `modernConsoleHostAvailable` as a boolean (Windows x64). `false` keeps the row
-  and shows the reason, and the switch can then only turn a saved "on" off. The value is sent only
-  while the row is shown, so saving on another platform never changes it.
+- The switch is `#setting-built-in-console-host` in the App settings form (`builtInConsoleHost`,
+  off by default: on means new tabs use the host built into Windows). Its row is shown only when
+  the server reports `bundledConsoleHostAvailable` as a boolean (Windows x64). `false` keeps the
+  row, shows the reason and disables the switch, because terminals use the built-in host there
+  whatever it says. The value is sent only while the row is shown, so saving on another platform
+  never changes it. The retired `modernConsoleHost` field is neither read nor sent.
 
-Tests: `terminal-device-queries.test.mjs`, `settings-modern-console-host.test.mjs`,
+Tests: `terminal-device-queries.test.mjs`, `settings-console-host.test.mjs`,
 `terminal-multitab-adoption.test.mjs` and `UITests/tests/xterm-device-queries.spec.js`.
 
 ## Terminal tab card link (VIBE-36)
