@@ -26,6 +26,7 @@ export class SettingsController {
         this.performanceMode = window.VibeRailsPerformance;
         this._settingsDirty = false;
         this._settingsSaving = false;
+        this._navigationAfterSave = null;
         this._settingsSnapshot = '';
         this._removeNavigationGuard = null;
         this._beforeUnloadHandler = null;
@@ -279,8 +280,7 @@ export class SettingsController {
                             this.app.updateAccountNav?.();
                         }
                     } finally {
-                        this._settingsSaving = false;
-                        this._updateSaveBar(root);
+                        this._finishSettingsSave(root);
                     }
                 });
             }
@@ -393,8 +393,7 @@ export class SettingsController {
             // A pasted key or clear can supersede the linked identity.
             this.app.updateAccountNav?.();
         } finally {
-            this._settingsSaving = false;
-            this._updateSaveBar(root);
+            this._finishSettingsSave(root);
         }
     }
 
@@ -445,6 +444,7 @@ export class SettingsController {
 
         this._settingsDirty = false;
         this._settingsSaving = false;
+        this._navigationAfterSave = null;
         this._settingsSnapshot = '';
         this._settingsRoot = null;
         this._activeTab = '';
@@ -546,6 +546,15 @@ export class SettingsController {
         if (this._contextPanel?.isBusy()) {
             return false;
         }
+        // A settings save is in flight: its edits are being saved, not lost, so "Leave without
+        // saving?" was the wrong question, and Save followed at once by another view always got
+        // it. Hold the navigation and replay it when the save ends. A save that worked leaves
+        // the form clean and the replay goes through; one that failed leaves it dirty and the
+        // replay asks as usual.
+        if (this._settingsSaving) {
+            this._navigationAfterSave = retry || null;
+            return false;
+        }
         const contextDirty = this._contextPanel?.anyDirty() === true;
         if (!this._settingsDirty && !contextDirty) {
             return true;
@@ -555,6 +564,15 @@ export class SettingsController {
         }
         void this._confirmLeaveSettings(retry, contextDirty);
         return false;
+    }
+
+    /** Ends a save: the save bar leaves its busy state, then a navigation held for it replays. */
+    _finishSettingsSave(root) {
+        this._settingsSaving = false;
+        this._updateSaveBar(root);
+        const replay = this._navigationAfterSave;
+        this._navigationAfterSave = null;
+        replay?.();
     }
 
     async _confirmLeaveSettings(retry, contextDirty = false) {

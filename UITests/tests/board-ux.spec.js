@@ -401,7 +401,9 @@ for (const width of [1440, 390]) {
         await expect(recheck).toHaveAccessibleName("Recheck this card's code landing");
         await identity.screenshot({ path: testInfo.outputPath(`card-identity-ghost-${width}.png`) });
         await recheck.click();
-        await expect(identity.locator('[role=status]')).toHaveText('No ghost: code has landed.');
+        // The block has two status regions: this one and the permanent ID's copy status.
+        await expect(identity.locator('[data-board-ghost-status]')).toHaveText('No ghost: code has landed.');
+        await expect(identity.locator('[data-board-ghost-status]')).toHaveAttribute('role', 'status');
         await expect(recheck).toBeHidden();
         await expect(editor.locator('#board-card-title')).toHaveValue('Keep this unsaved title');
         await expect(identity.locator('#board-card-display-id')).toHaveValue('CUSTOM-225');
@@ -3120,7 +3122,14 @@ for (const width of [1440, 1024, 768, 390, 375, 320]) {
         await question.focus();
         await page.keyboard.press('Tab');
         await expect(page.locator('.ts-dropdown:visible').getByRole('textbox', { name: 'Search…', exact: true })).toBeFocused();
+        // Tom Select moves focus into its menu in a deferred pass and holds ignoreFocus until it
+        // ends. Enter pressed inside that pass, sooner than a person can, selects and closes, and
+        // the pass then opens the menu again: the next Tab only closed it and this test failed
+        // about one run in three.
+        await expect.poll(() => discussion.locator('[data-board-chat-agent]')
+            .evaluate(select => select.tomselect.ignoreFocus)).toBe(false);
         await page.keyboard.press('Enter');
+        await expect(page.locator('.ts-dropdown:visible')).toHaveCount(0);
         await expect(discussion.locator('[data-board-chat-agent]')).toHaveValue(discussionTarget);
         await page.keyboard.press('Tab');
         await expect(start).toBeFocused();

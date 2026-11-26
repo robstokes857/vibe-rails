@@ -337,6 +337,51 @@ test('a dirty settings form blocks navigation, asks in-app, and replays on yes',
     assert.equal(controller._guardSettingsNavigation({ from: 'dashboard', retry }), true);
 });
 
+test('a navigation during a settings save waits for the save instead of asking', async () => {
+    globalThis.window = { VibeRailsPerformance: null };
+    // Save, then another view straight away: the edits are being saved, so "Leave without
+    // saving?" was the wrong question. (The Board spell check browser test did exactly this and
+    // failed most runs.) The navigation is held and replayed when the save ends.
+    const controller = new SettingsController({});
+    const root = { querySelector: () => null };
+    let asked = 0;
+    controller.confirmLeave = async () => { asked += 1; return false; };
+    let retried = 0;
+    const retry = () => {
+        retried += 1;
+        return controller._guardSettingsNavigation({ from: 'settings', retry });
+    };
+
+    controller._settingsDirty = true;
+    controller._settingsSaving = true;
+    assert.equal(controller._guardSettingsNavigation({ from: 'settings', retry }), false);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(asked, 0, 'no prompt while the save is in flight');
+    assert.equal(retried, 0, 'and no navigation yet');
+
+    // The save worked: the form is clean, and the held navigation goes through once.
+    controller._settingsDirty = false;
+    controller._finishSettingsSave(root);
+    assert.equal(controller._settingsSaving, false);
+    assert.equal(retried, 1);
+    assert.equal(asked, 0);
+    controller._finishSettingsSave(root);
+    assert.equal(retried, 1, 'a later save replays nothing');
+
+    // The save failed: the form is still dirty, so the replayed navigation asks as usual.
+    controller._settingsDirty = true;
+    controller._settingsSaving = true;
+    assert.equal(controller._guardSettingsNavigation({ from: 'settings', retry }), false);
+    controller._finishSettingsSave(root);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(retried, 2);
+    assert.equal(asked, 1);
+
+    // Another view's navigation is never held.
+    controller._settingsSaving = true;
+    assert.equal(controller._guardSettingsNavigation({ from: 'board', retry }), true);
+});
+
 test('switching remote access on needs remote terminals, then a password; switching off always works', () => {
     globalThis.window = { VibeRailsPerformance: null };
     const features = available => ({ features: { remote_terminals: available } });
