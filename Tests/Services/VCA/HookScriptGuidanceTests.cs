@@ -43,7 +43,7 @@ public sealed class HookScriptGuidanceTests
         Assert.Contains(condition, preCommit, StringComparison.Ordinal);
         Assert.Contains(condition, ReadScript("commit-msg-hook.sh"), StringComparison.Ordinal);
         Assert.Contains(
-            "--vca-hook pre-commit --enqueue-automations --workdir \"$viberails_repo_root\" \"$viberails_prompt_arg\" \"$viberails_console_arg\"",
+            "--vca-hook pre-commit --enqueue-automations \"$viberails_prompt_arg\" \"$viberails_console_arg\"",
             preCommit,
             StringComparison.Ordinal);
     }

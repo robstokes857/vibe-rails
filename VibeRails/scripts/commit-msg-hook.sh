@@ -29,16 +29,18 @@ viberails_run() {
     return 127
 }
 
-viberails_repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 viberails_console_arg=
 viberails_prompt_arg=
 
+# Git runs this hook from the top of the work tree and vb finds the repository from its working
+# directory, so no --workdir is passed (see the pre-commit hook).
+#
 # Git GUI clients capture hook output into a panel the user may never look at. On Git for
-# Windows, ask the hook host to re-spawn itself in a dedicated popup console so the VCA
-# transcript stays visible. A terminal commit keeps its transcript inline; a redirected
-# commit keeps writing to its stream. CI must never open or wait on a window.
-case "$(uname -s 2>/dev/null)" in
-    MINGW*|MSYS*|CYGWIN*)
+# Windows, let the hook host open a dedicated popup console when the check blocks the commit;
+# a passing check opens no window (VIBE-374). A terminal commit keeps its transcript inline; a
+# redirected commit keeps writing to its stream. CI must never open or wait on a window.
+case "${OSTYPE:-$(uname -s 2>/dev/null)}" in
+    msys*|cygwin*|MINGW*|MSYS*|CYGWIN*)
         if [ ! -t 0 ] && [ ! -t 1 ] &&
            [ -z "${CI:-}${TF_BUILD:-}${GITHUB_ACTIONS:-}${GITLAB_CI:-}${JENKINS_URL:-}${TEAMCITY_VERSION:-}${BUILDKITE:-}${APPVEYOR:-}" ]; then
             viberails_console_arg=--console-window
@@ -60,7 +62,7 @@ fi
 # dropped because the invocation below reports any "vb not found" problem already.
 viberails_cleaned_arg=
 if [ -n "$VIBERAILS_CHAINED_HOOK" ] && [ -f "$VIBERAILS_CHAINED_HOOK" ]; then
-    viberails_run --vca-hook clean-commit-msg --commit-message "$1" --workdir "$viberails_repo_root" 2>/dev/null || true
+    viberails_run --vca-hook clean-commit-msg --commit-message "$1" 2>/dev/null || true
     viberails_cleaned_arg=--co-authors-cleaned
     "$VIBERAILS_CHAINED_HOOK" "$@"
     viberails_exit_code=$?
@@ -70,11 +72,11 @@ if [ -n "$VIBERAILS_CHAINED_HOOK" ] && [ -f "$VIBERAILS_CHAINED_HOOK" ]; then
 fi
 
 if [ -n "$viberails_console_arg" ]; then
-    viberails_run --vca-hook commit-msg --enqueue-automations $viberails_cleaned_arg --commit-message "$1" --workdir "$viberails_repo_root" "$viberails_prompt_arg" "$viberails_console_arg"
+    viberails_run --vca-hook commit-msg --enqueue-automations $viberails_cleaned_arg --commit-message "$1" "$viberails_prompt_arg" "$viberails_console_arg"
 elif [ -n "$viberails_prompt_arg" ]; then
-    viberails_run --vca-hook commit-msg --enqueue-automations $viberails_cleaned_arg --commit-message "$1" --workdir "$viberails_repo_root" "$viberails_prompt_arg"
+    viberails_run --vca-hook commit-msg --enqueue-automations $viberails_cleaned_arg --commit-message "$1" "$viberails_prompt_arg"
 else
-    viberails_run --vca-hook commit-msg --enqueue-automations $viberails_cleaned_arg --commit-message "$1" --workdir "$viberails_repo_root"
+    viberails_run --vca-hook commit-msg --enqueue-automations $viberails_cleaned_arg --commit-message "$1"
 fi
 viberails_exit_code=$?
 

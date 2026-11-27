@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Text;
 using Xunit;
 
 namespace Tests.Services.VCA;
@@ -11,14 +9,9 @@ namespace Tests.Services.VCA;
 /// </summary>
 public sealed class CommitMsgHookScriptTests : IDisposable
 {
-    private readonly string _directory = Path.Combine(Path.GetTempPath(), "vb-commit-msg-script-" + Guid.NewGuid().ToString("N"));
+    private readonly HookScriptHarness _harness = new();
 
-    public CommitMsgHookScriptTests() => Directory.CreateDirectory(_directory);
-
-    public void Dispose()
-    {
-        try { Directory.Delete(_directory, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-    }
+    public void Dispose() => _harness.Dispose();
 
     [Fact]
     public async Task WithoutAChainedHookTheValidationLaunchCleansTheMessage()
@@ -39,65 +32,27 @@ public sealed class CommitMsgHookScriptTests : IDisposable
         Assert.StartsWith("vb --vca-hook commit-msg --enqueue-automations --co-authors-cleaned --commit-message ", launches[2]);
     }
 
+    [Fact]
+    public async Task ValidationRunsInTheWorkTreeGitChoseWithoutAskingGitForIt()
+    {
+        // VIBE-374: vb resolves the repository from its working directory, which Git sets to the top of
+        // the work tree, so the script starts no git of its own and passes no --workdir.
+        var launches = await RunHookAsync(chained: false);
+        Assert.DoesNotContain(launches, launch => launch.StartsWith("git ", StringComparison.Ordinal));
+        Assert.DoesNotContain(launches, launch => launch.Contains("--workdir", StringComparison.Ordinal));
+        if (OperatingSystem.IsWindows())
+            Assert.DoesNotContain(launches, launch => launch.StartsWith("uname", StringComparison.Ordinal));
+    }
+
     private async Task<IReadOnlyList<string>> RunHookAsync(bool chained)
     {
-        var shell = OperatingSystem.IsWindows()
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Git", "bin", "bash.exe")
-            : "/bin/sh";
-        if (!File.Exists(shell)) Assert.Skip("A POSIX shell is required to run the hook script.");
-        var log = Path.Combine(_directory, "launches.log");
-        var stub = await WriteScriptAsync("vb-stub", $"#!/bin/sh\necho \"vb $*\" >> '{ToShellPath(log)}'\nexit 0\n");
         var chainedHook = chained
-            ? await WriteScriptAsync("chained-hook", $"#!/bin/sh\necho \"chained $*\" >> '{ToShellPath(log)}'\nexit 0\n")
+            ? await _harness.WriteScriptAsync(Path.Combine(_harness.Directory, "chained-hook"),
+                $"#!/bin/sh\necho \"chained $*\" >> '{HookScriptHarness.ToShellPath(_harness.LogPath)}'\nexit 0\n")
             : "";
-        var template = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "VibeRails", "scripts", "commit-msg-hook.sh"),
-            TestContext.Current.CancellationToken);
-        var hook = await WriteScriptAsync("commit-msg", template.Replace("\r\n", "\n")
-            .Replace("__VIBERAILS_HOOK_VERSION__", "1.0.0")
-            .Replace("__VIBERAILS_EXECUTABLE__", ToShellPath(stub))
-            .Replace("__VIBERAILS_EXECUTABLE_ARGUMENT__", "")
-            .Replace("__VIBERAILS_CHAINED_HOOK__", chainedHook.Length == 0 ? "" : ToShellPath(chainedHook)));
-        var message = Path.Combine(_directory, "COMMIT_EDITMSG");
+        var message = Path.Combine(_harness.Directory, "COMMIT_EDITMSG");
         await File.WriteAllTextAsync(message, "Message\n", TestContext.Current.CancellationToken);
-
-        var start = new ProcessStartInfo(shell)
-        {
-            WorkingDirectory = _directory,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        start.ArgumentList.Add(ToShellPath(hook));
-        start.ArgumentList.Add(ToShellPath(message));
-        // A CI marker keeps the Windows console-window branch from ever opening a popup here.
-        start.Environment["CI"] = "1";
-        using var process = Process.Start(start)!;
-        process.StandardInput.Close();
-        var output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
-        var error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
-        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
-        Assert.True(process.ExitCode == 0, $"hook exited {process.ExitCode}\n{await output}\n{await error}");
-        return File.Exists(log) ? await File.ReadAllLinesAsync(log, TestContext.Current.CancellationToken) : [];
-    }
-
-    private async Task<string> WriteScriptAsync(string name, string text)
-    {
-        var path = Path.Combine(_directory, name);
-        await File.WriteAllTextAsync(path, text, new UTF8Encoding(false), TestContext.Current.CancellationToken);
-        if (!OperatingSystem.IsWindows())
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        return path;
-    }
-
-    private static string ToShellPath(string path) => OperatingSystem.IsWindows() && path.Length > 2 && path[1] == ':'
-        ? "/" + char.ToLowerInvariant(path[0]) + path[2..].Replace('\\', '/')
-        : path;
-
-    private static string RepositoryRoot()
-    {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
-            if (File.Exists(Path.Combine(directory.FullName, "VibeRails.slnx"))) return directory.FullName;
-        throw new InvalidOperationException("Repository root not found.");
+        await _harness.RunAsync("commit-msg-hook.sh", [HookScriptHarness.ToShellPath(message)], _harness.RecordingVb(), chainedHook);
+        return await _harness.LaunchesAsync();
     }
 }

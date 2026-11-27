@@ -29,20 +29,25 @@ viberails_run() {
     return 127
 }
 
-viberails_repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 viberails_console_arg=
 viberails_prompt_arg=
 
+# Git runs this hook from the top of the work tree, and vb finds the repository from its working
+# directory, so no --workdir is passed: resolving it here cost a git launch on every commit, and
+# `pwd` would be an MSYS path that a Windows vb cannot use.
+#
 # Git GUI clients (VS Code SCM panel, SourceTree, etc.) capture hook output into a panel
-# the user may never look at. On Git for Windows, ask the hook host to re-spawn itself in
-# a dedicated popup console (CREATE_NEW_CONSOLE) so the VCA transcript stays visible.
+# the user may never look at. On Git for Windows, let the hook host open a dedicated popup
+# console (CREATE_NEW_CONSOLE) when the check blocks the commit, so the person sees why and
+# can answer it there. A passing check opens no window (VIBE-374).
 #
 # A GUI launch has neither terminal input nor terminal output. A terminal commit keeps
 # its transcript inline and needs no popup; a command such as `git commit >hook.log`
 # still has terminal input and should keep writing to the redirected stream. CI must
-# never open or wait on a window.
-case "$(uname -s 2>/dev/null)" in
-    MINGW*|MSYS*|CYGWIN*)
+# never open or wait on a window. Git for Windows' shell names the platform in OSTYPE,
+# which saves starting uname there.
+case "${OSTYPE:-$(uname -s 2>/dev/null)}" in
+    msys*|cygwin*|MINGW*|MSYS*|CYGWIN*)
         if [ ! -t 0 ] && [ ! -t 1 ] &&
            [ -z "${CI:-}${TF_BUILD:-}${GITHUB_ACTIONS:-}${GITLAB_CI:-}${JENKINS_URL:-}${TEAMCITY_VERSION:-}${BUILDKITE:-}${APPVEYOR:-}" ]; then
             viberails_console_arg=--console-window
@@ -58,11 +63,11 @@ if { [ -t 0 ] && [ -t 1 ]; } || [ -n "$viberails_console_arg" ]; then
 fi
 
 if [ -n "$viberails_console_arg" ]; then
-    viberails_run --vca-hook pre-commit --enqueue-automations --workdir "$viberails_repo_root" "$viberails_prompt_arg" "$viberails_console_arg"
+    viberails_run --vca-hook pre-commit --enqueue-automations "$viberails_prompt_arg" "$viberails_console_arg"
 elif [ -n "$viberails_prompt_arg" ]; then
-    viberails_run --vca-hook pre-commit --enqueue-automations --workdir "$viberails_repo_root" "$viberails_prompt_arg"
+    viberails_run --vca-hook pre-commit --enqueue-automations "$viberails_prompt_arg"
 else
-    viberails_run --vca-hook pre-commit --enqueue-automations --workdir "$viberails_repo_root"
+    viberails_run --vca-hook pre-commit --enqueue-automations
 fi
 viberails_exit_code=$?
 
