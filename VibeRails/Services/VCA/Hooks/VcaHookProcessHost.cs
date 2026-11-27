@@ -33,16 +33,26 @@ public static class VcaHookProcessHost
         CancellationToken cancellationToken = default)
         => RunCoreAsync(args, null, output, error, input, cancellationToken);
 
+    /// <summary>Opens Git Guard's window for this run; null means none could open.</summary>
+    internal delegate Task<int?> GitGuardWindow(
+        IReadOnlyList<string> args,
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken);
+
     // Tests exercise the real host with an isolated store instead of opening the current user's
-    // database. Production callers keep the same public entry point and service registrations.
+    // database, and replace the window so none opens. Production callers keep the same public entry
+    // point, service registrations and CREATE_NEW_CONSOLE window.
     internal static async Task<int> RunCoreAsync(
         string[] args,
         Action<IServiceCollection>? configureServices,
         TextWriter? output = null,
         TextWriter? error = null,
         TextReader? input = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        GitGuardWindow? openWindow = null)
     {
+        openWindow ??= VcaHookConsoleRespawn.TryRespawnAsync;
         var usesDefaultOutput = output == null;
         output ??= Console.Out;
         error ??= Console.Error;
@@ -61,10 +71,28 @@ public static class VcaHookProcessHost
         // AllocConsole can't help here: it fails when the current process already has a
         // console (every terminal commit), and even when it succeeds the window
         // auto-closes in 800ms on success so users never see it.
+        //
+        // A commit checks first without a window and opens one only when the check fails
+        // (VIBE-374): a passing commit has nothing to read or answer, and a window that
+        // flashes open and shut on every commit was all a person ever saw of it.
         if (invocation.ShowConsoleWindow && !invocation.ConsoleWindowAttached)
         {
-            var respawnResult = await VcaHookConsoleRespawn.TryRespawnAsync(
-                args, output, error, cancellationToken);
+            WindowlessCheck? checkedFirst = null;
+            if (OpensWindowOnlyWhenNeeded(invocation))
+            {
+                checkedFirst = await RunWithoutWindowAsync(invocation, configureServices, cancellationToken);
+                if (checkedFirst.ExitCode == 0)
+                {
+                    // A clean pass says so in one line; a pass with something to read keeps all of it.
+                    await output.WriteAsync(checkedFirst.HasFindings
+                        ? checkedFirst.Transcript
+                        : PassedLine(invocation.Kind) + Environment.NewLine);
+                    await output.FlushAsync(cancellationToken);
+                    return 0;
+                }
+            }
+
+            var respawnResult = await openWindow(args, output, error, cancellationToken);
             if (respawnResult.HasValue)
             {
                 return respawnResult.Value;
@@ -74,6 +102,14 @@ public static class VcaHookProcessHost
             // but don't try to prompt for acknowledgments if there's no interactive stdin.
             if (!VcaHookProcessLaunch.CanPromptInCurrentConsole())
             {
+                // Nobody can answer here, so a check already made without a window is the result.
+                if (checkedFirst is { } result)
+                {
+                    await output.WriteAsync(result.Transcript);
+                    await output.FlushAsync(cancellationToken);
+                    return result.ExitCode;
+                }
+
                 invocation = invocation with { PromptForAcknowledgment = false };
             }
         }
@@ -142,6 +178,82 @@ public static class VcaHookProcessHost
             return result;
         }
 
+        return await RunValidationAsync(
+            invocation,
+            configureServices,
+            output,
+            error,
+            input,
+            enableSpinner,
+            style,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Whether this run is a commit's pre-commit or commit-msg check, which opens Git Guard's window
+    /// only when the check fails (VIBE-374). Only the installed hook scripts pass
+    /// <c>--enqueue-automations</c>; the Rules page's "open the Git Guard console" button does not,
+    /// so the window it asks for still opens on a pass.
+    /// </summary>
+    internal static bool OpensWindowOnlyWhenNeeded(VcaHookInvocation invocation) =>
+        invocation.Kind is VcaHookKind.PreCommit or VcaHookKind.CommitMessage
+        && invocation.EnqueueAutomatedJobs
+        && !invocation.DemoUi
+        && !invocation.WorkingTreeScope;
+
+    /// <summary>What a clean windowless pass hands Git instead of its transcript.</summary>
+    internal static string PassedLine(VcaHookKind kind) =>
+        $"VibeRails Git Guard: {(kind == VcaHookKind.CommitMessage ? "commit message" : "pre-commit")} checks passed.";
+
+    /// <summary>A windowless check: its exit code, its transcript and whether anything in it needs reading.</summary>
+    private sealed record WindowlessCheck(int ExitCode, string Transcript, bool HasFindings);
+
+    /// <summary>
+    /// The commit's check with no window and nobody to ask: nothing is prompted, and the transcript is
+    /// kept so a pass with something to read can hand it to Git (a terminal shows it, a Git GUI keeps it
+    /// in its log). A failure is checked again in the window, where a person reads it and can answer it,
+    /// so this transcript is dropped then: it would say no window could open.
+    ///
+    /// Running the check twice on a failure is safe. Rule responses are queued once per staged snapshot
+    /// (their occurrence ignores the hook run), before-commit Automations start only on a pass, and
+    /// message cleanup, stored approvals and STOP evidence change the message only when it lacks them.
+    /// The second run also reuses the first one's staged capture (StagedSnapshotShare).
+    /// </summary>
+    private static async Task<WindowlessCheck> RunWithoutWindowAsync(
+        VcaHookInvocation invocation,
+        Action<IServiceCollection>? configureServices,
+        CancellationToken cancellationToken)
+    {
+        await using var buffer = new StringWriter();
+        var transcript = TextWriter.Synchronized(buffer);
+        FindingsWatch? watch = null;
+        var exitCode = await RunValidationAsync(
+            invocation with { PromptForAcknowledgment = false, ShowConsoleWindow = false },
+            configureServices,
+            transcript,
+            transcript,
+            TextReader.Null,
+            enableSpinner: false,
+            VcaConsoleStyle.Plain,
+            cancellationToken,
+            services => services.AddSingleton<IVcaHookPresenter>(_ => watch = new FindingsWatch(
+                new VcaConsoleHookPresenter(new VcaHookConsoleOptions(
+                    transcript, transcript, TextReader.Null, EnableSpinner: false, VcaConsoleStyle.Plain)))));
+        await transcript.FlushAsync(cancellationToken);
+        return new WindowlessCheck(exitCode, buffer.ToString(), watch?.HasFindings ?? true);
+    }
+
+    private static async Task<int> RunValidationAsync(
+        VcaHookInvocation invocation,
+        Action<IServiceCollection>? configureServices,
+        TextWriter output,
+        TextWriter error,
+        TextReader input,
+        bool enableSpinner,
+        VcaConsoleStyle style,
+        CancellationToken cancellationToken,
+        Action<IServiceCollection>? configureHost = null)
+    {
         var services = new ServiceCollection();
         ConfigureServices(
             services,
@@ -151,6 +263,7 @@ public static class VcaHookProcessHost
             enableSpinner,
             style);
         configureServices?.Invoke(services);
+        configureHost?.Invoke(services);
 
         await using var provider = services.BuildServiceProvider();
         var runner = provider.GetRequiredService<IVcaHookRunner>();
@@ -415,5 +528,61 @@ public static class VcaHookProcessHost
         var installDirectory = PathConstants.GetInstallDirPath();
         Directory.CreateDirectory(installDirectory);
         return Path.Combine(installDirectory, PathConstants.STATE_FILENAME);
+    }
+
+    /// <summary>
+    /// Passes the transcript through and notes whether a one-line pass would hide something a person
+    /// should read: a warning, failure or error line (trailer cleanup, a missing popup), a step that
+    /// ended neither passed nor skipped (WARN findings, COMMIT acknowledgments, rule responses), or
+    /// before-commit Automations the check queued.
+    /// </summary>
+    private sealed class FindingsWatch(IVcaHookPresenter inner) : IVcaHookPresenter
+    {
+        private volatile bool _hasFindings;
+
+        public bool HasFindings => _hasFindings;
+
+        public Task WritePreflightEventAsync(GitPreflightEvent preflightEvent, CancellationToken cancellationToken)
+        {
+            if (preflightEvent.Type == GitPreflightEventType.StepFinished
+                && (preflightEvent.Status is not (GitPreflightStepStatus.Passed or GitPreflightStepStatus.Skipped)
+                    || (preflightEvent.StepId == AutomatedWorkflowsPreflightStep.Id
+                        && preflightEvent.Status == GitPreflightStepStatus.Passed)))
+            {
+                _hasFindings = true;
+            }
+
+            return inner.WritePreflightEventAsync(preflightEvent, cancellationToken);
+        }
+
+        public Task<T> RunWithProgressAsync<T>(
+            VcaHookDisplayInfo displayInfo,
+            Func<CancellationToken, Task<T>> operation,
+            CancellationToken cancellationToken) =>
+            inner.RunWithProgressAsync(displayInfo, operation, cancellationToken);
+
+        public Task WriteValidationOutputAsync(string validationOutput) => inner.WriteValidationOutputAsync(validationOutput);
+
+        public Task WriteSuccessAsync(string message) => inner.WriteSuccessAsync(message);
+
+        public Task WriteWarningAsync(string message)
+        {
+            _hasFindings = true;
+            return inner.WriteWarningAsync(message);
+        }
+
+        public Task WriteFailureAsync(string message)
+        {
+            _hasFindings = true;
+            return inner.WriteFailureAsync(message);
+        }
+
+        public Task WriteErrorAsync(string message)
+        {
+            _hasFindings = true;
+            return inner.WriteErrorAsync(message);
+        }
+
+        public Task<string?> ReadLineAsync(string prompt) => inner.ReadLineAsync(prompt);
     }
 }

@@ -251,9 +251,10 @@ agent's request. Enter alone, Esc, or `ConsolePauseTimeout` (30 s) without a key
 offer, and the window closes without a second pause, so an unattended agent commit waits no longer
 than before. Git gives hooks a null stdin and a redirected stdout (checked
 with Git 2.54 in a real console on 2026-11-16), so on Windows the scripts' `--console-window`
-branch runs for terminal commits as well as Git GUIs. Installed scripts from an older version
-lack the flag and show only the guidance until the next version reinstalls them. Tests:
-`StopBypassTests.FromTheCommit.cs`.
+branch runs for terminal commits as well as Git GUIs. Since VIBE-374 that window opens only when
+the check fails; see [the Git Guard window](#the-git-guard-window-opens-only-when-needed-vibe-374).
+Installed scripts from an older version lack the flag and show only the guidance until the next
+version reinstalls them. Tests: `StopBypassTests.FromTheCommit.cs`.
 
 Blocked guidance says what to do next for whoever reads it: the rule's file and line, that COMMIT
 accepts a reason in the message, that a person can sign an exception, and that an agent asks with
@@ -504,6 +505,42 @@ Without one, the script skips that launch and the validation launch cleans the m
 anything reads it (VIBE-327), one VibeRails start less on every commit. Either way a cleanup failure
 leaves the message unchanged with a warning and never blocks the commit. One validation strips
 each distinct message text with `git stripspace` once; it used to spawn it four times.
+
+## The Git Guard window opens only when needed (VIBE-374)
+
+A commit's pre-commit and commit-msg checks (the runs that pass `--enqueue-automations`) first run
+in the hook's own process, with no window and nobody asked anything
+(`VcaHookProcessHost.RunWithoutWindowAsync`). A clean pass prints one line, `VibeRails Git Guard:
+pre-commit checks passed.`; a pass with something to read (a WARN finding, a COMMIT acknowledgment,
+a queued rule response or Automation, a trailer cleanup) hands Git the whole transcript, which a
+terminal shows and a Git GUI keeps in its log. Only a failure opens the window, which checks again
+there so the person reads the result and can answer it: a STOP exception, a signature, an
+acknowledgment. Before this, every Windows commit outside CI opened two console windows that closed
+again at once. Running the check twice on a failure is safe: rule responses are queued once per
+staged snapshot, before-commit Automations start only on a pass, and cleanup, stored approvals and
+STOP evidence change the message only when it lacks them. The Rules page's Git Guard console button
+(`VcaHookConsoleLauncher`) passes no `--enqueue-automations`, so its window still opens on a pass.
+Tests: `GitGuardWindowTests`.
+
+## What a commit starts (VIBE-327, VIBE-374)
+
+Each git launch costs 35-45 ms on Windows and a `vb` start 70-90 ms, so the hooks keep both few:
+
+- The scripts start no git of their own and pass no `--workdir`: Git runs hooks from the top of the
+  work tree and `vb` resolves the repository from its working directory, which the console respawn
+  keeps. They read the platform from `OSTYPE`, set by Git for Windows' shell, instead of starting
+  `uname`. `HookScriptLaunchTests` and `CommitMsgHookScriptTests` run the real scripts with stub
+  `vb`, `git` and `uname` and count what starts.
+- Commit-msg reuses pre-commit's staged capture (`StagedSnapshotShare`,
+  `.git/viberails-staged-snapshot.json`). Both checks resolve HEAD and `git write-tree` themselves
+  and use a saved capture only when the base commit, base tree, staged tree, repository path and
+  VibeRails build all match and it is under 30 minutes old. Diff settings and `.gitattributes` are
+  not in the key; Git changes neither between its hooks. Commit-msg drops from 12 git launches to 5.
+  Tests: `StagedSnapshotShareTests`.
+- HEAD's commit and tree come from one `git rev-parse HEAD^{commit} HEAD^{tree} --`.
+- The post-commit script reads HEAD, then starts `vb --job-trigger post-commit` in the background
+  with no terminal streams, so Git returns without waiting for Automation queueing or card commit
+  links (VIBE-338).
 
 ## Hook removal
 

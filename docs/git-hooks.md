@@ -29,7 +29,8 @@ VibeRails includes a sophisticated git hook installation system that automatical
 **Hook Scripts**:
 1. **pre-commit-hook.sh** - Validates VCA rules before commit
    - Runs the standalone `vb --vca-hook pre-commit` host against the Git index snapshot (not unstaged working-tree edits)
-   - Shows a dedicated console when a Windows Git GUI captures hook output
+   - On Windows outside CI, opens a dedicated console only when the check fails; a clean pass prints
+     one line (VIBE-374, [VCA guide](../VibeRails/Services/VCA/AGENTS.md#the-git-guard-window-opens-only-when-needed-vibe-374))
    - Blocks STOP violations and validation errors; COMMIT violations continue to commit-msg
    - For a deliberate change blocked only by STOP, asks a person for a reason and a signed exception (VIBE-331, [STOP_BYPASS.md](../VibeRails/Services/VCA/STOP_BYPASS.md))
 
@@ -163,7 +164,7 @@ VibeRails/
 ├── scripts/                          # Hook script templates
 │   ├── pre-commit-hook.sh           # Pre-commit validation script
 │   ├── commit-msg-hook.sh           # Commit message validation script
-│   └── post-commit-hook.sh          # Post-commit (job trigger) script
+│   └── post-commit-hook.sh          # Post-commit (job trigger) script; runs vb in the background
 ├── Services/
 │   ├── HookInstallationService.cs   # Main service implementation
 │   └── HookInstallationResult.cs    # Result types
