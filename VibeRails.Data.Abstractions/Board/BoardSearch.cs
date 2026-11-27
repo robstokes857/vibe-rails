@@ -40,15 +40,26 @@ public sealed record BoardSearchDocument(string Id, string Key, string DisplayId
     public IReadOnlyList<BoardSessionRecord> Sessions { get; init; } = [];
     public IReadOnlyList<BoardCommitRecord> Commits { get; init; } = [];
     public IReadOnlyList<BoardFileReference> FileCandidates { get; init; } = [];
+    /// <summary>
+    /// Identifies what <see cref="FileCandidates"/> were read from: the card's linked commits that have a
+    /// saved snapshot, in candidate order (VIBE-327). Commit links and snapshots are insert-only, so an
+    /// equal key means equal candidates and the search sweep reuses its indexed ones instead of parsing
+    /// every snapshot again. Null when no linked commit has a snapshot, so there are no candidates.
+    /// </summary>
+    public string? CandidateKey { get; init; }
     public IReadOnlyList<string> KeyPrefixes { get; init; } = [];
     public BoardHandoff? PreviousWork { get; init; }
 }
 
 public partial interface IBoardStore
 {
-    /// <summary>Pages 100 live cards; an immutable ID cursor avoids offset shifts during concurrent writes.</summary>
+    /// <summary>
+    /// Pages 100 live cards; an immutable ID cursor avoids offset shifts during concurrent writes.
+    /// <paramref name="fileCandidates"/> false leaves <see cref="BoardSearchDocument.FileCandidates"/> empty
+    /// but still sets <see cref="BoardSearchDocument.CandidateKey"/>, for a caller that keeps candidates.
+    /// </summary>
     Task<IReadOnlyList<BoardSearchDocument>> GetSearchDocumentsAsync(int offset, CancellationToken cancellationToken = default,
-        bool includeContent = true, string? afterCardId = null, int pageSize = 100);
+        bool includeContent = true, string? afterCardId = null, int pageSize = 100, bool fileCandidates = true);
 
     /// <summary>Saves a derived vector for one live card passage; content hashes reject stale vectors.</summary>
     Task SaveSearchEmbeddingAsync(string projectPath, string cardId, string passageId, string version,

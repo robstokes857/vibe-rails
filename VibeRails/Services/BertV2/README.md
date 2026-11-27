@@ -76,6 +76,28 @@ these two tables in `search.db`, without backfilling or changing canonical stora
 detect older/concurrent writers without relying on timestamps or in-process notifications. Queries
 never advance these cursors, claim work, write vectors or consult canonical history metadata.
 
+A scheduled sweep skips a corpus whose sources have not changed (VIBE-327). Before reading a page,
+the claim reads a source fingerprint: the Board change stamp for cards; for history, the count and
+largest id of `UserInputs` and `InputFileChanges` (both AUTOINCREMENT, so any insert, delete or
+file-change replacement moves them) plus the `Sessions` count, restricted to ended sessions for the
+session corpus, so a prompt in a running session leaves ended-session documents alone. Every
+fingerprint includes the build's informational version. `SearchSourceFingerprints` (additive
+`shared-search/3`) keeps the fingerprint the sweep in progress started from and the one the last
+completed sweep started from, with that sweep's epoch. A due corpus is skipped when the current
+fingerprint equals the completed one, that sweep's epoch is still current (an older process's sweep
+records none and moves the epoch, so a full sweep follows it), and it finished within the 24-hour
+backstop. A skip is recorded as `CheckedUtc`, so the comparison waits out the interval again. Calls
+without an interval (tests, explicit rebuilds) always sweep. Measured on a real index, an unchanged
+corpus now costs a few index reads instead of 2.5 to 4 seconds of rereading, rehashing and presence
+writes every five to ten minutes.
+
+The Board sweep no longer reads file candidates for every card. Reading them parses each linked
+commit snapshot in full (679 MB on a real board, 1.7 s a sweep). `BoardSearchDocument.CandidateKey`
+hashes the card's linked commits that have a snapshot, from the commit rows and the snapshot primary
+key only; links and snapshots are insert-only, so an unchanged key reuses the indexed candidates and
+only a card whose commits changed is read again. History pages read their file changes, and session
+pages their inputs, in one query per page instead of one per document.
+
 Full titles, descriptions, visible Comments/retained notes and all retained handoffs are separate
 sources. History rows and deleted/hidden discussion are excluded. WordPiece chunks use the
 same uncased vocabulary/normalization as inference, a 192-token retrieval target inside the actual 512-token model

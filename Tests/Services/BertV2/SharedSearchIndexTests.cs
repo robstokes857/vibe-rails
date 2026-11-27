@@ -366,7 +366,15 @@ public sealed partial class SharedSearchIndexTests : IDisposable
         await Worker().RunBatchAsync(Ct, 1); // tokenization/inference continues without a sweep
         Assert.True(model.Calls > 0);
         Execute(SearchPath, "UPDATE SearchCheckpoints SET CompletedUtc='2000-01-01T00:00:00.0000000Z'");
-        Assert.Equal(30, (await index.ReconcileAsync(board, 25, Ct, minimumInterval: interval)).Documents);
+        // Once the interval passes, an unchanged corpus is still skipped (VIBE-327), even though two
+        // processes shared its last sweep; a new card makes it due.
+        Assert.Equal(0, (await index.ReconcileAsync(board, 25, Ct, minimumInterval: interval)).Documents);
+        await Card("Card 30");
+        Execute(SearchPath, """
+            UPDATE SearchCheckpoints SET CompletedUtc='2000-01-01T00:00:00.0000000Z';
+            UPDATE SearchSourceFingerprints SET CheckedUtc=NULL;
+            """);
+        Assert.Equal(31, (await index.ReconcileAsync(board, 25, Ct, minimumInterval: interval)).Documents);
     }
 
     [Fact]

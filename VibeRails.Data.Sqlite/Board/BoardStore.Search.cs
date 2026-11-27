@@ -1,4 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using VibeRails.Data.Sqlite;
 using VibeRails.DTOs;
 using VibeRails.Services.BertV2;
@@ -15,7 +18,7 @@ public sealed partial class BoardStore
         """;
 
     public async Task<IReadOnlyList<BoardSearchDocument>> GetSearchDocumentsAsync(int offset, CancellationToken cancellationToken = default,
-        bool includeContent = true, string? afterCardId = null, int pageSize = 100)
+        bool includeContent = true, string? afterCardId = null, int pageSize = 100, bool fileCandidates = true)
     {
         await using var connection = await OpenAsync(cancellationToken);
         // A deferred read snapshot keeps card text, discussion tombstones and cache versions
@@ -83,22 +86,62 @@ public sealed partial class BoardStore
                 ((List<SearchSource>)document.Sources).Add(new(reader.GetString(1), text, document.Title));
             }
         }
+        var candidateKeys = await ReadCandidateKeysAsync(connection, transaction, documents, cancellationToken);
         var prefixes = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
         for (var i = 0; i < documents.Count; i++)
         {
             var document = documents[i];
             if (!prefixes.TryGetValue(document.ProjectPath, out var keys))
                 prefixes[document.ProjectPath] = keys = await GetRecallKeyPrefixesAsync(document.ProjectPath, cancellationToken);
+            var candidateKey = candidateKeys.GetValueOrDefault(document.Id);
             documents[i] = document with
             {
                 Sessions = await ReadSessionsAsync(connection, document.Id, cancellationToken),
                 Commits = await ReadCommitsAsync(connection, document.Id, cancellationToken, transaction, limit: 3),
-                FileCandidates = await GetHandoffCandidatesAsync(document.ProjectPath, document.Id, cancellationToken),
+                // Candidates come only from snapshots; a card without one has none to read.
+                FileCandidates = fileCandidates && candidateKey is not null
+                    ? await GetHandoffCandidatesAsync(document.ProjectPath, document.Id, cancellationToken) : [],
+                CandidateKey = candidateKey,
                 PreviousWork = await ReadHandoffAsync(connection, document.Id, cancellationToken),
                 KeyPrefixes = keys.ToArray()
             };
         }
         return documents;
+    }
+
+    /// <summary>
+    /// Part of every <see cref="BoardSearchDocument.CandidateKey"/>. Change it whenever the candidate
+    /// query in <see cref="GetHandoffCandidatesAsync"/> changes, so the search sweep reads them again.
+    /// </summary>
+    private const string CandidateKeyFormat = "candidates/1";
+
+    /// <summary>
+    /// The candidate key of each card on a search page that has a linked commit with a snapshot (VIBE-327).
+    /// It reads commit links and the snapshot primary key only: no snapshot text, which the candidate
+    /// query parses in full and which made every search sweep read hundreds of megabytes.
+    /// </summary>
+    private static async Task<Dictionary<string, string>> ReadCandidateKeysAsync(SqliteConnection connection,
+        SqliteTransaction transaction, IReadOnlyList<BoardSearchDocument> documents, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"""
+            SELECT c.CardId, c.Sha, c.LinkedUTC FROM BoardCommits c
+            WHERE c.CardId IN ({string.Join(',', documents.Select((_, index) => "$id" + index))})
+                AND EXISTS (SELECT 1 FROM BoardCommitSnapshots s WHERE s.CardId=c.CardId AND s.Sha=c.Sha)
+            ORDER BY c.CardId, c.LinkedUTC DESC, c.Sha
+            """;
+        for (var index = 0; index < documents.Count; index++) command.Parameters.AddWithValue("$id" + index, documents[index].Id);
+        var commits = new Dictionary<string, StringBuilder>(StringComparer.Ordinal);
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (!commits.TryGetValue(reader.GetString(0), out var text))
+                    commits[reader.GetString(0)] = text = new StringBuilder(CandidateKeyFormat);
+                text.Append('\n').Append(reader.GetString(1)).Append('@').Append(reader.IsDBNull(2) ? "" : reader.GetString(2));
+            }
+        return commits.ToDictionary(pair => pair.Key, pair => Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(pair.Value.ToString())), 0, 8).ToLowerInvariant(), StringComparer.Ordinal);
     }
 
     public async Task SaveSearchEmbeddingAsync(string projectPath, string cardId, string passageId, string version,

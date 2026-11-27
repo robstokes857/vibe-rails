@@ -63,6 +63,19 @@ internal static class SearchDatabaseSchema
                 """;
             cmd.ExecuteNonQuery();
         });
+        // VIBE-327: the source fingerprint each corpus's last completed sweep started from, and the one
+        // its sweep in progress started from. One new table; older processes never read or write it.
+        SqliteMigrationRunner.Apply(db, "shared-search", 3, MigrationKind.Additive, (connection, transaction) =>
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.Transaction = transaction;
+            cmd.CommandText = """
+                CREATE TABLE SearchSourceFingerprints (
+                    Kind TEXT PRIMARY KEY, PendingSweep TEXT, PendingFingerprint TEXT,
+                    Fingerprint TEXT, Epoch INTEGER, FullSweepUtc TEXT, CheckedUtc TEXT) WITHOUT ROWID;
+                """;
+            cmd.ExecuteNonQuery();
+        });
         SqliteMigrationRunner.StampGeneration(db, 1);
     }
 

@@ -220,6 +220,12 @@ writers resume the private cursor under the shared lease; the legacy cursor stay
 writers restart safely before using their `SeenEpoch` deletion rule. A legacy page or completion
 invalidates private progress through the shared cursor/epoch. Canonical stores are unchanged.
 
+The additive `shared-search/3` migration creates `SearchSourceFingerprints` (VIBE-327): per corpus,
+the source fingerprint the sweep in progress started from and the one the last completed sweep
+started from, with its epoch and time. A scheduled sweep skips a corpus whose fingerprint has not
+moved since a current-epoch completion within 24 hours. Older processes never read or write it;
+their sweeps move the epoch, so a full sweep follows. No canonical table changes.
+
 ## Database Overview
 
 | Property | Value |

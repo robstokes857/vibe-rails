@@ -141,7 +141,7 @@ public sealed partial class SharedSearchIndexTests
         var cursor = Scalar("SELECT Cursor FROM SearchSweepProgress WHERE Kind='board'");
         var documents = await board.GetSearchDocumentsAsync(0, Ct);
         var source = new Mock<IBoardStore>();
-        source.Setup(b => b.GetSearchDocumentsAsync(0, It.IsAny<CancellationToken>(), true, It.IsAny<string?>(), 25))
+        source.Setup(b => b.GetSearchDocumentsAsync(0, It.IsAny<CancellationToken>(), true, It.IsAny<string?>(), 25, false))
             .Returns(() =>
             {
                 Execute(SearchPath, replaced

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Reflection;
 using Microsoft.Data.Sqlite;
 using VibeRails.DTOs;
 using VibeRails.Services.BertV2;
@@ -24,7 +25,7 @@ public sealed partial class SqliteSearchIndexStore
         foreach (var kind in Kinds)
         {
             ct.ThrowIfCancellationRequested();
-            var claim = ClaimReconciliation(kind, minimumInterval);
+            var claim = await ClaimReconciliationAsync(kind, board, minimumInterval, ct);
             if (claim is null) continue;
             try
             {
@@ -70,7 +71,100 @@ public sealed partial class SqliteSearchIndexStore
 
     private sealed record Reconciliation(string Kind, string Cursor, long Epoch, string Lease, string Sweep);
 
-    private Reconciliation? ClaimReconciliation(string kind, TimeSpan? minimumInterval)
+    /// <summary>
+    /// How long a scheduled sweep may pass over a corpus whose source fingerprint has not moved
+    /// before it sweeps anyway, for a change the fingerprint cannot see (VIBE-327).
+    /// </summary>
+    internal static readonly TimeSpan FullSweepBackstop = TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// Part of every fingerprint: a build that reads or shapes documents differently sweeps once
+    /// instead of trusting a fingerprint another build recorded.
+    /// </summary>
+    private static readonly string DocumentFormat = typeof(SqliteSearchIndexStore).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+
+    /// <summary>
+    /// Claims a due corpus. A scheduled call (<paramref name="minimumInterval"/> set) first compares the
+    /// sources' fingerprint with the one the last completed sweep started from, and skips a corpus that
+    /// has not changed since (VIBE-327): every sweep reread, rehashed and re-marked the whole history and
+    /// Board corpus every five to ten minutes on an idle machine. It skips only when that sweep is the
+    /// latest one (its epoch is current), so a sweep by an older process, which records no fingerprint,
+    /// is followed by a full one, and only within <see cref="FullSweepBackstop"/>.
+    /// </summary>
+    private async Task<Reconciliation?> ClaimReconciliationAsync(string kind, IBoardStore board, TimeSpan? minimumInterval, CancellationToken ct)
+    {
+        var cutoff = DateTime.UtcNow.Subtract(minimumInterval ?? TimeSpan.Zero).ToString("O");
+        string? recorded = null;
+        using (var db = Open(readOnly: true))
+        using (var due = Command(db, """
+            SELECT c.LeaseUntil<=$now AND c.RetryAt<=$now,
+                c.Cursor<>'' OR c.CompletedUtc IS NULL OR c.Error IS NOT NULL OR p.Epoch=c.Epoch,
+                c.CompletedUtc<=$cutoff AND (f.CheckedUtc IS NULL OR f.CheckedUtc<=$cutoff),
+                CASE WHEN f.Epoch=c.Epoch AND f.FullSweepUtc>$backstop THEN f.Fingerprint END
+            FROM SearchCheckpoints c LEFT JOIN SearchSweepProgress p ON p.Kind=c.Kind
+            LEFT JOIN SearchSourceFingerprints f ON f.Kind=c.Kind WHERE c.Kind=$kind
+            """, ("$now", Now), ("$cutoff", cutoff), ("$kind", kind),
+            ("$backstop", DateTime.UtcNow.Subtract(FullSweepBackstop).ToString("O"))))
+        using (var reader = due.ExecuteReader())
+            if (reader.Read())
+            {
+                // Leased or waiting to retry, or swept (or found unchanged) within the interval.
+                if (reader.GetInt64(0) == 0) return null;
+                var unfinished = !reader.IsDBNull(1) && reader.GetInt64(1) == 1;
+                if (!unfinished && (reader.IsDBNull(2) || reader.GetInt64(2) == 0)) return null;
+                if (!unfinished && minimumInterval is not null && !reader.IsDBNull(3)) recorded = reader.GetString(3);
+            }
+        // Read before the sweep reads any source, so a change during the sweep moves it past this value.
+        var fingerprint = await SourceFingerprintAsync(kind, board, ct);
+        if (recorded is not null && recorded == fingerprint)
+        {
+            using var db = Open();
+            Execute(db, "UPDATE SearchSourceFingerprints SET CheckedUtc=$utc WHERE Kind=$kind AND Fingerprint=$fingerprint",
+                ("$utc", DateTime.UtcNow.ToString("O")), ("$kind", kind), ("$fingerprint", fingerprint));
+            return null;
+        }
+        return ClaimReconciliation(kind, minimumInterval, fingerprint);
+    }
+
+    /// <summary>
+    /// What a corpus's documents are read from, in a few index reads (VIBE-327). Null when that cannot be
+    /// told, which never matches, so the corpus is swept. Board: the Board change stamp, which every
+    /// writer of a table a card's document reads moves. History: UserInputs and InputFileChanges are
+    /// AUTOINCREMENT, so any insert raises max(Id) and any delete lowers the count; replacing an input's
+    /// file changes does both. Neither table, nor a Sessions column a document reads, is updated in place.
+    /// Session documents exist only for ended sessions, so a prompt in a running session leaves theirs alone.
+    /// </summary>
+    private async Task<string?> SourceFingerprintAsync(string kind, IBoardStore board, CancellationToken ct)
+    {
+        string? source;
+        try { source = kind == "board" ? await board.GetChangeStampAsync(ct) : HistoryFingerprint(kind); }
+        catch (Exception ex) when (ex is SqliteException or IOException or InvalidOperationException) { return null; }
+        return source is null ? null : $"{kind}|{DocumentFormat}|{source}";
+    }
+
+    private string? HistoryFingerprint(string kind)
+    {
+        if (!File.Exists(statePath)) return null;
+        using var db = SqliteConnectionFactory.Open(new SqliteConnectionStringBuilder { DataSource = statePath }.ToString(), readOnly: true);
+        using var cmd = Command(db, kind == "input" ? """
+            SELECT (SELECT count(*) || ':' || coalesce(max(Id), 0) FROM UserInputs),
+                (SELECT count(*) || ':' || coalesce(max(Id), 0) FROM InputFileChanges),
+                (SELECT count(*) FROM Sessions)
+            """ : """
+            SELECT (SELECT count(*) || ':' || coalesce(max(EndedUTC), '') FROM Sessions WHERE EndedUTC IS NOT NULL),
+                (SELECT count(*) || ':' || coalesce(max(u.Id), 0) FROM UserInputs u
+                    JOIN Sessions s ON s.Id=u.SessionId WHERE s.EndedUTC IS NOT NULL),
+                (SELECT count(*) || ':' || coalesce(max(f.Id), 0) FROM InputFileChanges f JOIN UserInputs u ON u.Id=f.UserInputId
+                    JOIN Sessions s ON s.Id=u.SessionId WHERE s.EndedUTC IS NOT NULL)
+            """);
+        using var reader = cmd.ExecuteReader();
+        if (!reader.Read()) return null;
+        return string.Join('|', Enumerable.Range(0, reader.FieldCount)
+            .Select(i => Convert.ToString(reader.GetValue(i), CultureInfo.InvariantCulture)));
+    }
+
+    private Reconciliation? ClaimReconciliation(string kind, TimeSpan? minimumInterval, string? fingerprint)
     {
         using var db = Open();
         using var tx = db.BeginTransaction();
@@ -89,13 +183,14 @@ public sealed partial class SqliteSearchIndexStore
             LEFT JOIN SearchSweepProgress p ON p.Kind=c.Kind WHERE c.Kind=$kind
             """, ("$kind", kind));
         Reconciliation claim;
+        bool resume;
         using (var reader = cmd.ExecuteReader())
         {
             reader.Read();
             // The legacy cursor stays empty during a presence sweep: an older binary taking
             // over must scan from the beginning before applying its SeenEpoch deletion rule.
             // Legacy page commits advance Cursor or Epoch, invalidating our private progress.
-            var resume = reader.GetString(0).Length == 0 && !reader.IsDBNull(4) && reader.GetInt64(4) == reader.GetInt64(1);
+            resume = reader.GetString(0).Length == 0 && !reader.IsDBNull(4) && reader.GetInt64(4) == reader.GetInt64(1);
             claim = new(kind, resume ? reader.GetString(2) : "", reader.GetInt64(1), lease,
                 resume ? reader.GetString(3) : Guid.NewGuid().ToString("N"));
         }
@@ -104,16 +199,50 @@ public sealed partial class SqliteSearchIndexStore
             INSERT INTO SearchSweepProgress(Kind,Epoch,Cursor,Sweep) VALUES($kind,$epoch,$cursor,$sweep)
             ON CONFLICT(Kind) DO UPDATE SET Epoch=excluded.Epoch,Cursor=excluded.Cursor,Sweep=excluded.Sweep
             """, ("$kind", kind), ("$epoch", claim.Epoch), ("$cursor", claim.Cursor), ("$sweep", claim.Sweep));
+        // The fingerprint a completed sweep records is the one read before its first page. A resumed
+        // sweep keeps the one it started from; one whose start this process did not see records none.
+        Execute(db, """
+            INSERT INTO SearchSourceFingerprints(Kind,PendingSweep,PendingFingerprint) VALUES($kind,$sweep,$fingerprint)
+            ON CONFLICT(Kind) DO UPDATE SET PendingSweep=excluded.PendingSweep,
+                PendingFingerprint=CASE WHEN PendingSweep=excluded.PendingSweep THEN PendingFingerprint ELSE excluded.PendingFingerprint END
+            """, ("$kind", kind), ("$sweep", claim.Sweep), ("$fingerprint", resume ? null : fingerprint));
         tx.Commit();
         return claim;
     }
 
-    private static async Task<(IReadOnlyList<SearchDocument> Documents, string Cursor)> ReadBoardPage(IBoardStore board, string cursor, int size, CancellationToken ct)
+    private async Task<(IReadOnlyList<SearchDocument> Documents, string Cursor)> ReadBoardPage(IBoardStore board, string cursor, int size, CancellationToken ct)
     {
-        var cards = await board.GetSearchDocumentsAsync(0, ct, afterCardId: cursor.Length == 0 ? null : cursor, pageSize: size);
-        var documents = cards.Select(card => new SearchDocument(card.Id, "board", card.ProjectPath, card.Sources,
-            Board: card with { Sources = [], Passages = [], KeywordSources = [] })).ToArray();
+        var cards = await board.GetSearchDocumentsAsync(0, ct, afterCardId: cursor.Length == 0 ? null : cursor, pageSize: size,
+            fileCandidates: false);
+        var indexed = ReadIndexedCandidates(cards);
+        var documents = new SearchDocument[cards.Count];
+        for (var i = 0; i < cards.Count; i++)
+        {
+            var card = cards[i];
+            // Reading candidates parses every snapshot of the card in full (VIBE-327). The key says
+            // when the indexed ones still hold; a card without snapshots has none.
+            var candidates = card.CandidateKey is null ? []
+                : indexed.TryGetValue(card.Id, out var known) && known.Key == card.CandidateKey ? known.Files
+                : await board.GetHandoffCandidatesAsync(card.ProjectPath, card.Id, ct);
+            documents[i] = new(card.Id, "board", card.ProjectPath, card.Sources,
+                Board: card with { Sources = [], Passages = [], KeywordSources = [], FileCandidates = candidates });
+        }
         return (documents, cards.LastOrDefault()?.Id ?? cursor);
+    }
+
+    /// <summary>The file candidates already indexed for these cards, with the candidate key they were read under.</summary>
+    private Dictionary<string, (string Key, IReadOnlyList<BoardFileReference> Files)> ReadIndexedCandidates(IReadOnlyList<BoardSearchDocument> cards)
+    {
+        var indexed = new Dictionary<string, (string Key, IReadOnlyList<BoardFileReference> Files)>(StringComparer.Ordinal);
+        var keyed = cards.Where(card => card.CandidateKey is not null).ToList();
+        if (keyed.Count == 0) return indexed;
+        using var db = Open(readOnly: true);
+        using var cmd = Command(db, $"SELECT Metadata FROM SearchDocuments WHERE Kind='board' AND Id IN ({string.Join(',', keyed.Select((_, i) => "$id" + i))})",
+            keyed.Select((card, i) => ("$id" + i, (object?)card.Id)).ToArray());
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            if (Document(reader.GetString(0)).Board is { CandidateKey: { } key } card) indexed[card.Id] = (key, card.FileCandidates);
+        return indexed;
     }
 
     /// <summary>
@@ -146,6 +275,11 @@ public sealed partial class SqliteSearchIndexStore
                     SELECT 1 FROM SearchDocumentPresence p WHERE p.DocumentId=SearchDocuments.Id AND p.Sweep=$sweep)
                 """, ("$kind", claim.Kind), ("$sweep", claim.Sweep));
             Execute(db, "DELETE FROM SearchSweepProgress WHERE Kind=$kind", ("$kind", claim.Kind));
+            Execute(db, """
+                UPDATE SearchSourceFingerprints SET Fingerprint=PendingFingerprint,Epoch=$epoch,FullSweepUtc=$utc,CheckedUtc=NULL,
+                    PendingSweep=NULL,PendingFingerprint=NULL
+                WHERE Kind=$kind AND PendingSweep=$sweep
+                """, ("$epoch", claim.Epoch + 1), ("$utc", DateTime.UtcNow.ToString("O")), ("$kind", claim.Kind), ("$sweep", claim.Sweep));
         }
         else
             Execute(db, "UPDATE SearchSweepProgress SET Cursor=$cursor WHERE Kind=$kind",
@@ -227,80 +361,107 @@ public sealed partial class SqliteSearchIndexStore
         var documents = new List<SearchDocument>();
         if (kind == "input")
         {
-            using var cmd = Command(db, """
+            var inputs = new List<(long Id, string Session, int Sequence, string? Text, string? Commit, string Timestamp,
+                string? Cli, string? Environment, string? Directory)>();
+            using (var cmd = Command(db, """
                 SELECT u.Id,u.SessionId,u.Sequence,u.InputText,u.GitCommitHash,u.TimestampUTC,
                     s.Cli,s.EnvironmentName,s.WorkingDirectory
                 FROM UserInputs u LEFT JOIN Sessions s ON s.Id=u.SessionId WHERE u.Id>$after ORDER BY u.Id LIMIT $size
-                """, ("$after", long.TryParse(cursor, out var value) ? value : 0), ("$size", size));
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
+                """, ("$after", long.TryParse(cursor, out var value) ? value : 0), ("$size", size)))
+            using (var reader = cmd.ExecuteReader())
+                while (reader.Read())
+                {
+                    ct.ThrowIfCancellationRequested();
+                    inputs.Add((reader.GetInt64(0), reader.GetString(1), reader.GetInt32(2), InputEtlFilter.Process(reader.GetString(3)),
+                        Nullable(reader, 4), reader.GetString(5), Nullable(reader, 6), Nullable(reader, 7), Nullable(reader, 8)));
+                }
+            var changes = ReadFiles(db, "u.Id", inputs.Select(input => (object)input.Id).ToList());
+            foreach (var input in inputs)
             {
-                ct.ThrowIfCancellationRequested();
-                var id = reader.GetInt64(0);
-                cursor = id.ToString(CultureInfo.InvariantCulture);
-                var session = reader.GetString(1);
-                var text = InputEtlFilter.Process(reader.GetString(3));
-                var documentId = BertDocumentId.Create(session, id);
-                var files = ReadFiles(db, id, null);
-                var metadata = new BertInputMetadata(documentId, session, id, reader.GetInt32(2), text ?? "", Nullable(reader, 4),
-                    DateTime.Parse(reader.GetString(5), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
-                    Nullable(reader, 6), Nullable(reader, 7), Nullable(reader, 8), files.Count);
-                documents.Add(new(documentId, kind, metadata.WorkingDirectory ?? "", text is null ? [] : [new("input", text)],
+                cursor = input.Id.ToString(CultureInfo.InvariantCulture);
+                var documentId = BertDocumentId.Create(input.Session, input.Id);
+                var files = changes.GetValueOrDefault(cursor) ?? [];
+                var metadata = new BertInputMetadata(documentId, input.Session, input.Id, input.Sequence, input.Text ?? "", input.Commit,
+                    DateTime.Parse(input.Timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                    input.Cli, input.Environment, input.Directory, files.Count);
+                documents.Add(new(documentId, kind, metadata.WorkingDirectory ?? "", input.Text is null ? [] : [new("input", input.Text)],
                     Input: metadata, FileChanges: files));
             }
         }
         else
         {
-            using var cmd = Command(db, """
+            var sessions = new List<(string Id, string? Cli, string? Environment, string? Directory, string Started, string Ended)>();
+            using (var cmd = Command(db, """
                 SELECT Id,Cli,EnvironmentName,WorkingDirectory,StartedUTC,EndedUTC FROM Sessions
                 WHERE Id>$after AND EndedUTC IS NOT NULL ORDER BY Id LIMIT $size
-                """, ("$after", cursor), ("$size", size));
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
+                """, ("$after", cursor), ("$size", size)))
+            using (var reader = cmd.ExecuteReader())
+                while (reader.Read())
+                    sessions.Add((reader.GetString(0), Nullable(reader, 1), Nullable(reader, 2), Nullable(reader, 3),
+                        reader.GetString(4), reader.GetString(5)));
+            var ids = sessions.Select(session => (object)session.Id).ToList();
+            var texts = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            if (ids.Count > 0)
             {
-                ct.ThrowIfCancellationRequested();
-                var session = reader.GetString(0);
-                cursor = session;
-                using var inputs = Command(db, "SELECT Id,InputText FROM UserInputs WHERE SessionId=$id ORDER BY Sequence,Id", ("$id", session));
-                var texts = new List<string>();
-                using (var input = inputs.ExecuteReader())
-                    while (input.Read())
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        var safe = InputEtlFilter.Process(input.GetString(1));
-                        if (safe is not null) texts.Add(safe);
-                    }
-                var documentId = BertSessionDocumentId.Create(session, 0);
-                var files = ReadFiles(db, null, session);
-                var metadata = new BertSessionMetadata(documentId, session, 0, Nullable(reader, 1), Nullable(reader, 2), Nullable(reader, 3),
-                    DateTime.Parse(reader.GetString(4), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
-                    DateTime.Parse(reader.GetString(5), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), texts.Count, 0, files);
+                using var inputs = Command(db, $"SELECT SessionId,InputText FROM UserInputs WHERE SessionId IN ({Placeholders(ids.Count)}) ORDER BY SessionId,Sequence,Id",
+                    Parameters(ids));
+                using var input = inputs.ExecuteReader();
+                while (input.Read())
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var safe = InputEtlFilter.Process(input.GetString(1));
+                    if (safe is null) continue;
+                    if (!texts.TryGetValue(input.GetString(0), out var list)) texts[input.GetString(0)] = list = [];
+                    list.Add(safe);
+                }
+            }
+            var changes = ReadFiles(db, "u.SessionId", ids);
+            foreach (var session in sessions)
+            {
+                cursor = session.Id;
+                var text = texts.GetValueOrDefault(session.Id) ?? [];
+                var documentId = BertSessionDocumentId.Create(session.Id, 0);
+                var files = changes.GetValueOrDefault(session.Id) ?? [];
+                var metadata = new BertSessionMetadata(documentId, session.Id, 0, session.Cli, session.Environment, session.Directory,
+                    DateTime.Parse(session.Started, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                    DateTime.Parse(session.Ended, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), text.Count, 0, files);
                 documents.Add(new(documentId, kind, metadata.WorkingDirectory ?? "",
-                    texts.Count == 0 ? [] : [new("session", string.Join("\n\n", texts))], Session: metadata, FileChanges: files));
+                    text.Count == 0 ? [] : [new("session", string.Join("\n\n", text))], Session: metadata, FileChanges: files));
             }
         }
         return (documents, cursor);
     }
 
     private static string? Nullable(SqliteDataReader reader, int index) => reader.IsDBNull(index) ? null : reader.GetString(index);
+    private static string Placeholders(int count) => string.Join(',', Enumerable.Range(0, count).Select(i => "$id" + i));
+    private static (string Name, object? Value)[] Parameters(IReadOnlyList<object> ids) => ids.Select((id, i) => ("$id" + i, (object?)id)).ToArray();
 
-    private static IReadOnlyList<BertFileChangeResponse> ReadFiles(SqliteConnection db, long? input, string? session)
+    /// <summary>
+    /// The file changes of a page of inputs (<paramref name="owner"/> <c>u.Id</c>) or sessions (<c>u.SessionId</c>)
+    /// in one query, merged per path in input order. One query per document read the page N+1 times (VIBE-327).
+    /// </summary>
+    private static Dictionary<string, IReadOnlyList<BertFileChangeResponse>> ReadFiles(SqliteConnection db, string owner, IReadOnlyList<object> ids)
     {
-        using var cmd = Command(db, """
-            SELECT f.FilePath,f.ChangeType,f.LinesAdded,f.LinesDeleted FROM InputFileChanges f
+        var result = new Dictionary<string, IReadOnlyList<BertFileChangeResponse>>(StringComparer.Ordinal);
+        if (ids.Count == 0) return result;
+        using var cmd = Command(db, $"""
+            SELECT {owner},f.FilePath,f.ChangeType,f.LinesAdded,f.LinesDeleted FROM InputFileChanges f
             JOIN UserInputs u ON u.Id=f.UserInputId
-            WHERE ($input IS NOT NULL AND u.Id=$input) OR ($session IS NOT NULL AND u.SessionId=$session)
-            ORDER BY u.Sequence,f.Id
-            """, ("$input", input), ("$session", session));
-        var files = new Dictionary<string, BertFileChangeResponse>(StringComparer.Ordinal);
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            var path = reader.GetString(0);
-            files.TryGetValue(path, out var previous);
-            files[path] = new(path, reader.GetString(1), (previous?.LinesAdded ?? 0) + (reader.IsDBNull(2) ? 0 : reader.GetInt32(2)),
-                (previous?.LinesDeleted ?? 0) + (reader.IsDBNull(3) ? 0 : reader.GetInt32(3)));
-        }
-        return files.Values.ToArray();
+            WHERE {owner} IN ({Placeholders(ids.Count)})
+            ORDER BY {owner},u.Sequence,f.Id
+            """, Parameters(ids));
+        var groups = new Dictionary<string, Dictionary<string, BertFileChangeResponse>>(StringComparer.Ordinal);
+        using (var reader = cmd.ExecuteReader())
+            while (reader.Read())
+            {
+                var key = Convert.ToString(reader.GetValue(0), CultureInfo.InvariantCulture)!;
+                if (!groups.TryGetValue(key, out var files)) groups[key] = files = new(StringComparer.Ordinal);
+                var path = reader.GetString(1);
+                files.TryGetValue(path, out var previous);
+                files[path] = new(path, reader.GetString(2), (previous?.LinesAdded ?? 0) + (reader.IsDBNull(3) ? 0 : reader.GetInt32(3)),
+                    (previous?.LinesDeleted ?? 0) + (reader.IsDBNull(4) ? 0 : reader.GetInt32(4)));
+            }
+        foreach (var (key, files) in groups) result[key] = files.Values.ToArray();
+        return result;
     }
 }

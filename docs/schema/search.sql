@@ -35,6 +35,9 @@ CREATE TABLE SearchDocumentPresence ( DocumentId TEXT PRIMARY KEY REFERENCES Sea
 -- table SearchDocuments
 CREATE TABLE SearchDocuments ( Id TEXT PRIMARY KEY, Kind TEXT NOT NULL, ProjectPath TEXT NOT NULL, SessionId TEXT, Metadata TEXT NOT NULL, SeenEpoch INTEGER NOT NULL);
 
+-- table SearchSourceFingerprints
+CREATE TABLE SearchSourceFingerprints ( Kind TEXT PRIMARY KEY, PendingSweep TEXT, PendingFingerprint TEXT, Fingerprint TEXT, Epoch INTEGER, FullSweepUtc TEXT, CheckedUtc TEXT) WITHOUT ROWID;
+
 -- table SearchSources
 CREATE TABLE SearchSources ( Id TEXT PRIMARY KEY, DocumentId TEXT NOT NULL REFERENCES SearchDocuments(Id) ON DELETE CASCADE, SourceKey TEXT NOT NULL, Text TEXT NOT NULL, Title TEXT NOT NULL, Hash TEXT NOT NULL, ChunkVersion TEXT, Attempts INTEGER NOT NULL DEFAULT 0, RetryAt INTEGER NOT NULL DEFAULT 0, Lease TEXT, LeaseUntil INTEGER NOT NULL DEFAULT 0, Error TEXT);
 
