@@ -117,7 +117,10 @@ public sealed record GitPreflightRequest(
     // False only from the native git hook, which prints step output and keeps nothing else.
     // Skips MintLint's whole-file impact scan and report JSON; the printed lines and the
     // commit verdict do not depend on either.
-    bool IncludeReport = true);
+    bool IncludeReport = true,
+    // The commit hooks only: reuse the staged capture an earlier check of the same commit saved,
+    // and save this one for the next (IGitSharedStagedSnapshotProvider).
+    bool ShareStagedSnapshot = false);
 
 public sealed record GitPreflightEvent(
     string RunId,
@@ -165,6 +168,16 @@ public sealed record GitPreflightRunResult(
 public interface IGitStagedSnapshotProvider
 {
     Task<GitStagedSnapshot> CaptureAsync(string workingDirectory, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// The staged capture one commit's hooks share (VIBE-374). Pre-commit saves it in the git directory;
+/// commit-msg, and any later check of the same commit, reuses it while the base and staged trees match
+/// (<see cref="StagedSnapshotShare"/>). Only the commit hooks ask for it.
+/// </summary>
+public interface IGitSharedStagedSnapshotProvider
+{
+    Task<GitStagedSnapshot> CaptureSharedAsync(string workingDirectory, CancellationToken cancellationToken);
 }
 
 public interface IGitWorkingTreeSnapshotProvider

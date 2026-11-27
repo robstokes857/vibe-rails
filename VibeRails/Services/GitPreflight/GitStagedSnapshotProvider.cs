@@ -6,7 +6,8 @@ using VibeRails.Services.Git;
 
 namespace VibeRails.Services.GitPreflight;
 
-public sealed partial class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGitWorkingTreeSnapshotProvider
+public sealed partial class GitStagedSnapshotProvider
+    : IGitStagedSnapshotProvider, IGitSharedStagedSnapshotProvider, IGitWorkingTreeSnapshotProvider
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(15);
     private const int MaximumTextFileBytes = 5 * 1024 * 1024;
@@ -68,6 +69,8 @@ public sealed partial class GitStagedSnapshotProvider : IGitStagedSnapshotProvid
     /// <summary>Index mode of a submodule (gitlink) entry.</summary>
     private const string GitLinkMode = "160000";
 
+    private readonly StagedSnapshotShare _share;
+
     public GitStagedSnapshotProvider()
         : this(MaximumSnapshotBytes)
     {
@@ -75,11 +78,13 @@ public sealed partial class GitStagedSnapshotProvider : IGitStagedSnapshotProvid
 
     internal GitStagedSnapshotProvider(
         long maximumUnpushedSnapshotBytes,
-        Func<string, CancellationToken, Task<GitStagedSnapshot>>? workingTreeCaptureOverride = null)
+        Func<string, CancellationToken, Task<GitStagedSnapshot>>? workingTreeCaptureOverride = null,
+        StagedSnapshotShare? share = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maximumUnpushedSnapshotBytes);
         _maximumUnpushedSnapshotBytes = maximumUnpushedSnapshotBytes;
         _workingTreeCaptureOverride = workingTreeCaptureOverride;
+        _share = share ?? new StagedSnapshotShare();
     }
 
     internal int ActiveWorkingTreeFlightCount
@@ -91,20 +96,48 @@ public sealed partial class GitStagedSnapshotProvider : IGitStagedSnapshotProvid
         }
     }
 
-    public async Task<GitStagedSnapshot> CaptureAsync(
+    public Task<GitStagedSnapshot> CaptureAsync(
         string workingDirectory,
+        CancellationToken cancellationToken) =>
+        CaptureStagedAsync(workingDirectory, share: null, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<GitStagedSnapshot> CaptureSharedAsync(
+        string workingDirectory,
+        CancellationToken cancellationToken) =>
+        CaptureStagedAsync(workingDirectory, _share, cancellationToken);
+
+    private async Task<GitStagedSnapshot> CaptureStagedAsync(
+        string workingDirectory,
+        StagedSnapshotShare? share,
         CancellationToken cancellationToken)
     {
+        // A shared capture also needs the worktree's git directory, from the same git process.
         var rootResult = await RunTextGitAsync(
             workingDirectory,
-            ["rev-parse", "--show-toplevel"],
+            share is null ? ["rev-parse", "--show-toplevel"] : ["rev-parse", "--show-toplevel", "--absolute-git-dir"],
             cancellationToken);
         EnsureSucceeded(rootResult, "locate the Git repository", workingDirectory);
-        var repositoryPath = Path.GetFullPath(rootResult.StdOut.Trim());
+        var rootOutput = rootResult.StdOut.Trim();
+        string? gitDirectory = null;
+        if (share is not null)
+        {
+            var split = rootOutput.LastIndexOf('\n');
+            if (split < 0)
+                throw new InvalidOperationException("Git did not report the repository's git directory.");
+            gitDirectory = Path.GetFullPath(rootOutput[(split + 1)..].Trim());
+            rootOutput = rootOutput[..split].Trim();
+        }
+        var repositoryPath = Path.GetFullPath(rootOutput);
 
         // Freeze the moving index into a tree object once, then perform every subsequent read from
         // immutable objects. VCA, MintLint, and queued jobs therefore share exactly one identity.
         var identity = await CaptureStagedIdentityAsync(repositoryPath, cancellationToken);
+        if (gitDirectory is not null
+            && await share!.TryReadAsync(gitDirectory, repositoryPath, identity, cancellationToken) is { } shared)
+        {
+            return shared;
+        }
         var stagedTreeEntries = await ReadTreeEntriesAsync(
             repositoryPath,
             identity.StagedTree,
@@ -240,12 +273,15 @@ public sealed partial class GitStagedSnapshotProvider : IGitStagedSnapshotProvid
                 agentFiles.Add(new GitIndexTextFile(entry.RelativePath, agent.Content));
         }
 
-        return new GitStagedSnapshot(
+        var snapshot = new GitStagedSnapshot(
             repositoryPath,
             files,
             agentFiles,
             trackedFiles,
             StagedIdentity: identity);
+        if (gitDirectory is not null)
+            await share!.WriteAsync(gitDirectory, snapshot, cancellationToken);
+        return snapshot;
     }
 
     /// <summary>
@@ -1158,24 +1194,23 @@ public sealed partial class GitStagedSnapshotProvider : IGitStagedSnapshotProvid
         string repositoryPath,
         CancellationToken cancellationToken)
     {
+        // HEAD's commit and its tree from one git process (VIBE-374): every commit's pre-commit and
+        // commit-msg checks resolve both. The trailing "--" keeps a file named like a revision from
+        // making the arguments ambiguous; Git echoes it as a third line.
         var headResult = await RunTextGitAsync(
             repositoryPath,
-            ["rev-parse", "--verify", "HEAD^{commit}"],
+            ["rev-parse", "HEAD^{commit}", "HEAD^{tree}", "--"],
             cancellationToken);
 
         string? baseCommit = null;
         string baseTree;
         if (headResult.ExitCode == 0 && !headResult.TimedOut)
         {
-            baseCommit = headResult.StdOut.Trim();
+            var resolved = headResult.StdOut.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            baseCommit = resolved.Length > 0 ? resolved[0] : string.Empty;
             if (!IsObjectId(baseCommit))
                 throw new InvalidOperationException("Git returned an invalid staged snapshot base commit id.");
-            var baseTreeResult = await RunTextGitAsync(
-                repositoryPath,
-                ["rev-parse", "--verify", $"{baseCommit}^{{tree}}"],
-                cancellationToken);
-            EnsureSucceeded(baseTreeResult, "resolve the staged snapshot base tree", repositoryPath);
-            baseTree = baseTreeResult.StdOut.Trim();
+            baseTree = resolved.Length > 1 ? resolved[1] : string.Empty;
         }
         else
         {

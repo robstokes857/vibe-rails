@@ -87,8 +87,10 @@ public sealed class GitPreflightPipeline : IGitPreflightPipeline
                 : request.WorkingTreeChanges
                     ? await _workingTreeSnapshotProvider.CaptureWorkingTreeAsync(
                         request.WorkingDirectory, cancellationToken)
-                    : await _snapshotProvider.CaptureAsync(
-                        request.WorkingDirectory, cancellationToken);
+                    : request.ShareStagedSnapshot && _snapshotProvider is IGitSharedStagedSnapshotProvider shared
+                        ? await shared.CaptureSharedAsync(request.WorkingDirectory, cancellationToken)
+                        : await _snapshotProvider.CaptureAsync(
+                            request.WorkingDirectory, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

@@ -56,14 +56,18 @@ public sealed class VcaHookRunner : IVcaHookRunner
                 await CleanCommitMessageAsync(invocation, cancellationToken);
             }
 
+            // Only the installed commit hooks pass --enqueue-automations; they also share one staged
+            // capture between pre-commit, commit-msg and any recheck of the same commit (VIBE-374).
+            var commitHook = invocation.Kind is VcaHookKind.PreCommit or VcaHookKind.CommitMessage
+                && !invocation.DemoUi
+                && !invocation.WorkingTreeScope
+                && invocation.EnqueueAutomatedJobs;
             var preflightRequest = new GitPreflightRequest(
                 workingDirectory,
                 invocation,
-                EnqueueAutomatedJobs: invocation.Kind is VcaHookKind.PreCommit or VcaHookKind.CommitMessage
-                    && !invocation.DemoUi
-                    && !invocation.WorkingTreeScope
-                    && invocation.EnqueueAutomatedJobs,
-                IncludeReport: false);
+                EnqueueAutomatedJobs: commitHook,
+                IncludeReport: false,
+                ShareStagedSnapshot: commitHook);
             var preflightResult = await RunPreflightAsync(preflightRequest, cancellationToken);
             var summary = preflightResult.VcaSummary;
             if (summary == null)
