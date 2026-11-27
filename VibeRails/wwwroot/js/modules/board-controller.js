@@ -543,14 +543,8 @@ export class BoardController {
                 this.refreshCardRails(editor);
             } else if (detailSkipped && editor.isConnected && editor === document.querySelector('[data-board-card-editor]')
                 && editor.dataset.cardId === cardId) {
-                // The card is unchanged. Its run and review rails read stores the stamp does not cover
-                // (launches.db, lane events), so they refresh every round while a run is active or
-                // waiting on the card, and otherwise once a minute (VIBE-327). A lane or review run
-                // starting, finishing or queueing flips those flags, which moves the stamp, and a
-                // session event in this window rereads the card at once.
-                const fresh = byId.get(cardId);
-                if (fresh?.hasActiveAutomation || fresh?.hasWaitingAutomation
-                    || !(Date.now() - editor._boardRailsAt < BOARD_SNAPSHOT_MAX_AGE_MS)) this.refreshCardRails(editor);
+                // The card is unchanged; its rails may still be due (VIBE-327).
+                this.refreshCardRails(editor, byId.get(cardId));
             }
             return activity.changeToken;
         } catch (error) {
@@ -560,7 +554,14 @@ export class BoardController {
         }
     }
 
-    refreshCardRails(editor) {
+    // Refreshes the editor's run and review rails. With `unchanged`, the card's activity from a round
+    // whose stamp did not move, they read stores the stamp does not cover (launches.db, lane events),
+    // so they refresh while a run is active or waiting on the card, and otherwise once a minute
+    // (VIBE-327). A lane or review run starting, finishing or queueing flips those flags, which moves
+    // the stamp, and a session event in this window rereads the card at once.
+    refreshCardRails(editor, unchanged = null) {
+        if (unchanged && !unchanged.hasActiveAutomation && !unchanged.hasWaitingAutomation
+            && Date.now() - editor._boardRailsAt < BOARD_SNAPSHOT_MAX_AGE_MS) return;
         editor._boardRailsAt = Date.now();
         void this.cardAutomations?.refresh();
         void this.cardReviews?.refresh();

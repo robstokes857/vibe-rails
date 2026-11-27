@@ -33,4 +33,22 @@ internal static class VcaCommitMessageCleaner
         }
         return result.StdOut;
     }
+
+    /// <summary>
+    /// Strips each distinct text once for one validation (VIBE-327). git stripspace depends only on the
+    /// text and the repository's comment settings; the message, its pre-scissors evidence and their
+    /// re-reads after the STOP bypass are usually one text, which used to cost four git spawns.
+    /// </summary>
+    internal sealed class Memo(string workingDirectory, CancellationToken cancellationToken)
+    {
+        private readonly Dictionary<string, string> _stripped = new(StringComparer.Ordinal);
+
+        public async Task<string> StripCommentsAsync(string commitMessage)
+        {
+            if (!_stripped.TryGetValue(commitMessage, out var stripped))
+                _stripped[commitMessage] = stripped = await VcaCommitMessageCleaner.StripCommentsAsync(
+                    commitMessage, workingDirectory, cancellationToken);
+            return stripped;
+        }
+    }
 }

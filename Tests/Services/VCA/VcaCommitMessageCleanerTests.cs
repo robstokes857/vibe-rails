@@ -36,6 +36,17 @@ public sealed class VcaCommitMessageCleanerTests : IDisposable
         Assert.False(cleaned.StartsWith('﻿'), "a byte-order mark leaked into the commit message");
     }
 
+    [Fact]
+    public async Task Memo_SpawnsGitOncePerDistinctText()
+    {
+        var memo = new VcaCommitMessageCleaner.Memo(_root, Ct);
+        Assert.Equal("Subject\n", await memo.StripCommentsAsync("Subject\n# comment\n"));
+        // Git can no longer run here: only text the memo has already stripped can still be answered.
+        Directory.Delete(_root, recursive: true);
+        Assert.Equal("Subject\n", await memo.StripCommentsAsync("Subject\n# comment\n"));
+        await Assert.ThrowsAnyAsync<Exception>(() => memo.StripCommentsAsync("Another subject\n"));
+    }
+
     public void Dispose()
     {
         try { Directory.Delete(_root, recursive: true); } catch { /* best effort */ }

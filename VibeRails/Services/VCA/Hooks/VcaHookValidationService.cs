@@ -44,12 +44,8 @@ public sealed class VcaRulesHookValidationService(
             or VcaHookKind.AcknowledgeCommitMessage;
         string? commitMessage = null;
         string? rawMessage = null;
-        // git stripspace depends only on the text and the repository's comment settings, so one
-        // validation strips each distinct text once. The message, its pre-scissors evidence and
-        // their re-reads after the STOP bypass are usually one text: four git spawns became one (VIBE-327).
-        var stripped = new Dictionary<string, string>(StringComparer.Ordinal);
-        async Task<string> StripCommentsAsync(string text) => stripped.TryGetValue(text, out var known) ? known
-            : stripped[text] = await VcaCommitMessageCleaner.StripCommentsAsync(text, workingDirectory, cancellationToken);
+        // One git stripspace per distinct text in this validation (VIBE-327).
+        var stripper = new VcaCommitMessageCleaner.Memo(workingDirectory, cancellationToken);
 
         if (validateCommitMessage)
         {
@@ -66,7 +62,7 @@ public sealed class VcaRulesHookValidationService(
             }
 
             rawMessage = await File.ReadAllTextAsync(invocation.CommitMessagePath, cancellationToken);
-            commitMessage = await StripCommentsAsync(rawMessage);
+            commitMessage = await stripper.StripCommentsAsync(rawMessage);
         }
 
         VerifiedStopBypass? stopBypass = null;
@@ -78,7 +74,7 @@ public sealed class VcaRulesHookValidationService(
             {
                 // Evidence must survive even when Git truncates at scissors. General rule
                 // evaluation must still see the tail: non-editor commits can retain it.
-                var evidenceMessage = rawMessage is null ? null : await StripCommentsAsync(StopBypassFormat.BeforeScissors(rawMessage));
+                var evidenceMessage = rawMessage is null ? null : await stripper.StripCommentsAsync(StopBypassFormat.BeforeScissors(rawMessage));
                 var result = await new StopBypassService(snapshotProvider, verifier: stopBypassVerifier).ResolveAsync(
                     snapshot, validateCommitMessage ? invocation.CommitMessagePath : null, evidenceMessage, cancellationToken);
                 bypassError = result.Error;
@@ -88,8 +84,8 @@ public sealed class VcaRulesHookValidationService(
                 if (validateCommitMessage)
                 {
                     rawMessage = await File.ReadAllTextAsync(invocation.CommitMessagePath!, cancellationToken);
-                    commitMessage = await StripCommentsAsync(rawMessage);
-                    evidenceMessage = await StripCommentsAsync(StopBypassFormat.BeforeScissors(rawMessage));
+                    commitMessage = await stripper.StripCommentsAsync(rawMessage);
+                    evidenceMessage = await stripper.StripCommentsAsync(StopBypassFormat.BeforeScissors(rawMessage));
                     if (stopBypass is not null && (StopBypassFormat.Parse(evidenceMessage) is not { } evidence
                         || !StopBypassFormat.BuildPayload(evidence.Scope).SequenceEqual(StopBypassFormat.BuildPayload(stopBypass.Scope))))
                     {
