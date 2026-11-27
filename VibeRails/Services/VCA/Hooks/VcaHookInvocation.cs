@@ -38,9 +38,9 @@ public sealed record VcaHookInvocation(
     // preview) rather than the staged index (the real commit hooks). Only affects how
     // results are worded — the validation logic is identical.
     bool WorkingTreeScope = false,
-    // Set by the hook script once it has run the CleanCommitMessage pass itself. Hook scripts
-    // installed before that pass existed do not pass it, and those invocations still clean the
-    // message inline so an un-upgraded repository keeps the policy.
+    // Set by the hook script once it has run the CleanCommitMessage pass itself, which it does only
+    // when a chained hook has to see the cleaned message. Otherwise, and for hook scripts installed
+    // before that pass existed, the commit-msg invocation cleans the message inline first (VIBE-327).
     bool CoAuthorsAlreadyCleaned = false,
     // Only the installed pre-commit/commit-msg hooks pass this. Manual validation and the Git Guard
     // console reuse the pre-commit pipeline, but must remain previews that do not start agents.

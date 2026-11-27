@@ -52,13 +52,16 @@ if { [ -t 0 ] && [ -t 1 ]; } || [ -n "$viberails_console_arg" ]; then
     viberails_prompt_arg=--prompt-acknowledgment
 fi
 
-# Message cleanup runs first, before the chained hook and before validation. Cleanup rewrites the
-# message file, so a chained hook that validates, signs, or derives metadata from the message has to
-# see the text git will actually record. Cleanup never blocks a commit, so its exit code is ignored;
-# its stderr is dropped because the invocation below reports any "vb not found" problem already.
-viberails_run --vca-hook clean-commit-msg --commit-message "$1" --workdir "$viberails_repo_root" 2>/dev/null || true
-
+# Message cleanup runs before the chained hook and before validation. Cleanup rewrites the message
+# file, so a chained hook that validates, signs, or derives metadata from the message has to see the
+# text git will actually record: with a chained hook, cleanup is a pass of its own before it. Without
+# one, the validation below cleans the message before it reads it, which saves a VibeRails launch on
+# every commit (VIBE-327). Cleanup never blocks a commit, so its exit code is ignored; its stderr is
+# dropped because the invocation below reports any "vb not found" problem already.
+viberails_cleaned_arg=
 if [ -n "$VIBERAILS_CHAINED_HOOK" ] && [ -f "$VIBERAILS_CHAINED_HOOK" ]; then
+    viberails_run --vca-hook clean-commit-msg --commit-message "$1" --workdir "$viberails_repo_root" 2>/dev/null || true
+    viberails_cleaned_arg=--co-authors-cleaned
     "$VIBERAILS_CHAINED_HOOK" "$@"
     viberails_exit_code=$?
     if [ "$viberails_exit_code" -ne 0 ]; then
@@ -67,11 +70,11 @@ if [ -n "$VIBERAILS_CHAINED_HOOK" ] && [ -f "$VIBERAILS_CHAINED_HOOK" ]; then
 fi
 
 if [ -n "$viberails_console_arg" ]; then
-    viberails_run --vca-hook commit-msg --enqueue-automations --co-authors-cleaned --commit-message "$1" --workdir "$viberails_repo_root" "$viberails_prompt_arg" "$viberails_console_arg"
+    viberails_run --vca-hook commit-msg --enqueue-automations $viberails_cleaned_arg --commit-message "$1" --workdir "$viberails_repo_root" "$viberails_prompt_arg" "$viberails_console_arg"
 elif [ -n "$viberails_prompt_arg" ]; then
-    viberails_run --vca-hook commit-msg --enqueue-automations --co-authors-cleaned --commit-message "$1" --workdir "$viberails_repo_root" "$viberails_prompt_arg"
+    viberails_run --vca-hook commit-msg --enqueue-automations $viberails_cleaned_arg --commit-message "$1" --workdir "$viberails_repo_root" "$viberails_prompt_arg"
 else
-    viberails_run --vca-hook commit-msg --enqueue-automations --co-authors-cleaned --commit-message "$1" --workdir "$viberails_repo_root"
+    viberails_run --vca-hook commit-msg --enqueue-automations $viberails_cleaned_arg --commit-message "$1" --workdir "$viberails_repo_root"
 fi
 viberails_exit_code=$?
 

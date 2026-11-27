@@ -36,6 +36,41 @@ public sealed class VcaHookRunnerAutomationTests
         Assert.False(pipeline.Request?.IncludeReport);
     }
 
+    // VIBE-327: without a chained hook the script runs no separate cleanup pass, so the commit-msg
+    // launch cleans the message itself. Like that pass, a cleanup failure never blocks the commit.
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task RunAsync_CommitMessageCleansInlineUnlessTheScriptAlreadyDidAndNeverBlocksOnIt(bool alreadyCleaned, bool cleanupFails)
+    {
+        var pipeline = new CapturingPipeline();
+        var presenter = new Mock<IVcaHookPresenter>();
+        var cleaner = new Mock<ICommitMessageCoAuthorCleaner>();
+        var setup = cleaner.Setup(c => c.RemoveAsync("COMMIT_EDITMSG", It.IsAny<CancellationToken>()));
+        if (cleanupFails) setup.ThrowsAsync(new IOException("locked"));
+        else setup.ReturnsAsync(1);
+        var runner = new VcaHookRunner(pipeline, new VcaHookValidationAnalyzer(), presenter.Object, cleaner.Object);
+
+        var exitCode = await runner.RunAsync(
+            new VcaHookInvocation(
+                VcaHookKind.CommitMessage,
+                CommitMessagePath: "COMMIT_EDITMSG",
+                WorkingDirectory: Directory.GetCurrentDirectory(),
+                DemoUi: false,
+                DemoDuration: TimeSpan.Zero,
+                PromptForAcknowledgment: false,
+                CoAuthorsAlreadyCleaned: alreadyCleaned),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exitCode);
+        Assert.NotNull(pipeline.Request);
+        cleaner.Verify(c => c.RemoveAsync("COMMIT_EDITMSG", It.IsAny<CancellationToken>()), alreadyCleaned ? Times.Never() : Times.Once());
+        if (!alreadyCleaned)
+            presenter.Verify(p => p.WriteWarningAsync(It.Is<string>(text => text.Contains(cleanupFails
+                ? "could not apply commit-message cleanup" : "Removed 1 trailer"))), Times.Once());
+    }
+
     private sealed class CapturingPipeline : IGitPreflightPipeline
     {
         public GitPreflightRequest? Request { get; private set; }

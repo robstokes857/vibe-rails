@@ -498,6 +498,13 @@ Matching is case-insensitive and accepts `Co-authored-by`, `Coauthored-by`, `Co-
 terminal trailer block is cleaned; body prose, comments, unrelated trailers, scissors/diff content,
 and the existing byte-preservation protections remain in place.
 
+With a chained commit-msg hook, the script cleans the message in its own `--vca-hook
+clean-commit-msg` launch before that hook, then passes `--co-authors-cleaned` to validation.
+Without one, the script skips that launch and the validation launch cleans the message before
+anything reads it (VIBE-327), one VibeRails start less on every commit. Either way a cleanup failure
+leaves the message unchanged with a warning and never blocks the commit. One validation strips
+each distinct message text with `git stripspace` once; it used to spawn it four times.
+
 ## Hook removal
 
 Removing Git Guard strips only the VibeRails-managed sections from `pre-commit`, `commit-msg`, and

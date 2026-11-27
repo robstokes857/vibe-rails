@@ -46,21 +46,14 @@ public sealed class VcaHookRunner : IVcaHookRunner
 
         try
         {
-            // Hook scripts from this version onwards clean the message in a separate pass that runs
-            // before any chained commit-msg hook, and say so here. Cleaning again after that hook
-            // has already inspected the message is the ordering bug this flag exists to end; doing
-            // it inline is kept only for hook scripts installed before the separate pass existed.
+            // A chained commit-msg hook has to see the cleaned message, so with one the hook script
+            // cleans it in a separate pass before that hook and says so here: cleaning again after
+            // the chained hook inspected the message is the ordering bug this flag exists to end.
+            // Without a chained hook the script skips that launch and the message is cleaned here,
+            // before anything reads it (VIBE-327); so it is for hook scripts older than the pass.
             if (invocation.Kind == VcaHookKind.CommitMessage && !invocation.CoAuthorsAlreadyCleaned)
             {
-                var removedCount = await _coAuthorCleaner.RemoveAsync(
-                    invocation.CommitMessagePath,
-                    cancellationToken);
-                if (removedCount > 0)
-                {
-                    var suffix = removedCount == 1 ? "trailer" : "trailers";
-                    await _presenter.WriteWarningAsync(
-                        $"Removed {removedCount} {suffix} from the commit message (Co-authored-by / Claude-Session cleanup).");
-                }
+                await CleanCommitMessageAsync(invocation, cancellationToken);
             }
 
             var preflightRequest = new GitPreflightRequest(
@@ -128,6 +121,31 @@ public sealed class VcaHookRunner : IVcaHookRunner
             Log.Error(ex, "VCA git hook validation failed");
             await _presenter.WriteErrorAsync($"VCA git hook validation failed: {ex.Message}");
             return 1;
+        }
+    }
+
+    /// <summary>
+    /// Removes co-author and session trailers, as the separate clean-commit-msg pass does. Like that
+    /// pass it never blocks a commit: a failure leaves the message as it was and says so.
+    /// </summary>
+    private async Task CleanCommitMessageAsync(VcaHookInvocation invocation, CancellationToken cancellationToken)
+    {
+        int removedCount;
+        try
+        {
+            removedCount = await _coAuthorCleaner.RemoveAsync(invocation.CommitMessagePath, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.Warning(ex, "Commit-message trailer cleanup failed");
+            await _presenter.WriteWarningAsync("VibeRails could not apply commit-message cleanup; the message was left unchanged.");
+            return;
+        }
+        if (removedCount > 0)
+        {
+            var suffix = removedCount == 1 ? "trailer" : "trailers";
+            await _presenter.WriteWarningAsync(
+                $"Removed {removedCount} {suffix} from the commit message (Co-authored-by / Claude-Session cleanup).");
         }
     }
 
