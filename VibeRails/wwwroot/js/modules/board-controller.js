@@ -540,13 +540,17 @@ export class BoardController {
                     this.renderCardDiscussion(editor, card);
                 }
                 editor._boardDetailSeen = { cardId, stamp: detailStamp, at: Date.now() };
-                void this.cardAutomations?.refresh();
-                void this.cardReviews?.refresh();
+                this.refreshCardRails(editor);
             } else if (detailSkipped && editor.isConnected && editor === document.querySelector('[data-board-card-editor]')
                 && editor.dataset.cardId === cardId) {
-                // The card is unchanged; its run and review rails still refresh, as they read other stores.
-                void this.cardAutomations?.refresh();
-                void this.cardReviews?.refresh();
+                // The card is unchanged. Its run and review rails read stores the stamp does not cover
+                // (launches.db, lane events), so they refresh every round while a run is active or
+                // waiting on the card, and otherwise once a minute (VIBE-327). A lane or review run
+                // starting, finishing or queueing flips those flags, which moves the stamp, and a
+                // session event in this window rereads the card at once.
+                const fresh = byId.get(cardId);
+                if (fresh?.hasActiveAutomation || fresh?.hasWaitingAutomation
+                    || !(Date.now() - editor._boardRailsAt < BOARD_SNAPSHOT_MAX_AGE_MS)) this.refreshCardRails(editor);
             }
             return activity.changeToken;
         } catch (error) {
@@ -554,6 +558,12 @@ export class BoardController {
         } finally {
             this._activityPending = false;
         }
+    }
+
+    refreshCardRails(editor) {
+        editor._boardRailsAt = Date.now();
+        void this.cardAutomations?.refresh();
+        void this.cardReviews?.refresh();
     }
 
     automationIndicator() {

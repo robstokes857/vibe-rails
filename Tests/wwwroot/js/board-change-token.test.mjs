@@ -126,11 +126,11 @@ const isDetail = request => request.url === '/api/v1/board/cards/card';
 
 // One activity refresh with the editor open: answer the activity read with the card's stamp, then
 // the card read if one is requested. Returns whether the card was read and whether it was in parallel.
-async function editorRound(h, stamp, options) {
+async function editorRound(h, stamp, options, activity = {}) {
     const before = h.requests.length;
     const done = h.controller.refreshSessionActivity(options);
     const parallel = h.requests.slice(before).some(isDetail);
-    h.requests[before].resolve({ cards: [{ id: 'card', stamp }], changeToken: 't' });
+    h.requests[before].resolve({ cards: [{ id: 'card', stamp, ...activity }], changeToken: 't' });
     await tick();
     const detail = h.requests.slice(before).find(isDetail);
     detail?.resolve(structuredClone(h.editor._boardCard));
@@ -144,13 +144,36 @@ test('the open card is reread only when its stamp moves', async t => {
     assert.deepEqual(await editorRound(h, 's1'), { read: true, parallel: false }, 'the next round records the stamp');
     assert.deepEqual(await editorRound(h, 's1'), { read: false, parallel: false });
     assert.deepEqual(await editorRound(h, 's1'), { read: false, parallel: false });
-    assert.equal(h.counts.automations, 4, 'run and review rails refresh in every round');
-    assert.equal(h.counts.reviews, 4);
+    assert.equal(h.counts.automations, 2, 'an unchanged card with nothing running leaves its rails alone');
+    assert.equal(h.counts.reviews, 2);
     assert.deepEqual(await editorRound(h, 's2'), { read: true, parallel: false });
     assert.deepEqual(await editorRound(h, 's2'), { read: false, parallel: false });
     h.editor._boardDetailSeen.at -= 60000;
     assert.deepEqual(await editorRound(h, 's2'), { read: true, parallel: false }, 'a minute-old card is reread');
     assert.deepEqual(await editorRound(h, null), { read: true, parallel: false }, 'no stamp, no skip');
+});
+
+// VIBE-327: the rails read launches.db and lane events, which the stamp does not cover.
+test('an unchanged card refreshes its run and review rails while a run is live, and otherwise once a minute', async t => {
+    const h = editorHarness(t);
+    await editorRound(h, 's1');
+    await editorRound(h, 's1');
+    const rails = () => [h.counts.automations, h.counts.reviews];
+    assert.deepEqual(rails(), [2, 2]);
+    await editorRound(h, 's1');
+    assert.deepEqual(rails(), [2, 2]);
+    await editorRound(h, 's1', undefined, { hasActiveAutomation: true });
+    await editorRound(h, 's1', undefined, { hasActiveAutomation: true });
+    assert.deepEqual(rails(), [4, 4], 'a running Automation refreshes them every round');
+    await editorRound(h, 's1', undefined, { hasWaitingAutomation: true });
+    assert.deepEqual(rails(), [5, 5], 'so does a lane step waiting for its run');
+    await editorRound(h, 's1');
+    assert.deepEqual(rails(), [5, 5]);
+    h.editor._boardRailsAt -= 60000;
+    await editorRound(h, 's1');
+    assert.deepEqual(rails(), [6, 6], 'minute-old rails are read again');
+    await editorRound(h, 's1');
+    assert.deepEqual(rails(), [6, 6]);
 });
 
 test('a session event rereads the open card at once', async t => {
